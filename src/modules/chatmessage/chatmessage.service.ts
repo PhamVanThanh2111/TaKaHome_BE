@@ -15,8 +15,13 @@ export class ChatMessageService {
   async create(
     createChatMessageDto: CreateChatMessageDto,
   ): Promise<ChatMessage> {
-    const msg = this.chatMessageRepository.create(createChatMessageDto as any);
-    return this.chatMessageRepository.save(msg);
+    const { chatroomId, senderId, content } = createChatMessageDto;
+    const chatMessage = this.chatMessageRepository.create({
+      chatroom: { id: chatroomId },
+      sender: { id: senderId },
+      content,
+    });
+    return this.chatMessageRepository.save(chatMessage);
   }
 
   async findAll(): Promise<ChatMessage[]> {
@@ -25,9 +30,9 @@ export class ChatMessageService {
     });
   }
 
-  async findOne(id: number): Promise<ChatMessage> {
+  async findOne(id: number): Promise<ChatMessage | null> {
     return this.chatMessageRepository.findOne({
-      where: { id },
+      where: { id: id.toString() },
       relations: ['chatroom', 'sender'],
     });
   }
@@ -36,8 +41,12 @@ export class ChatMessageService {
     id: number,
     updateChatMessageDto: UpdateChatMessageDto,
   ): Promise<ChatMessage> {
-    await this.chatMessageRepository.update(id, updateChatMessageDto as any);
-    return this.findOne(id);
+    await this.chatMessageRepository.update(id, updateChatMessageDto);
+    const updatedMessage = await this.findOne(id);
+    if (!updatedMessage) {
+      throw new Error(`ChatMessage with id ${id} not found`);
+    }
+    return updatedMessage;
   }
 
   async remove(id: number): Promise<void> {

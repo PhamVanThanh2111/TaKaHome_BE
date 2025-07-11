@@ -2,13 +2,13 @@ import { IsNotEmpty, IsString } from 'class-validator';
 
 export class CreateMessageDto {
   @IsNotEmpty()
-  senderId: number;
+  senderId: string;
 
   @IsNotEmpty()
-  receiverId: number;
+  receiverId: string;
 
   @IsNotEmpty()
-  propertyId: number;
+  propertyId: string;
 
   @IsString()
   content: string;

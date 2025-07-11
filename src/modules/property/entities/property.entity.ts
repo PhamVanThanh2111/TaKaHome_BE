@@ -21,8 +21,8 @@ import { Message } from '../../message/entities/message.entity';
 
 @Entity()
 export class Property {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column()
   title: string;

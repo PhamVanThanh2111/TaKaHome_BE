@@ -3,7 +3,7 @@ import { VerificationTypeEnum } from '../../common/enums/verification-type.enum'
 
 export class CreateVerificationDto {
   @IsNotEmpty()
-  userId: number;
+  userId: string;
 
   @IsEnum(VerificationTypeEnum)
   type: VerificationTypeEnum;
@@ -12,5 +12,5 @@ export class CreateVerificationDto {
   documentUrl: string;
 
   @IsOptional()
-  verifiedById?: number;
+  verifiedById?: string;
 }

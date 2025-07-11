@@ -10,8 +10,8 @@ import { Property } from '../../property/entities/property.entity';
 
 @Entity()
 export class Report {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @ManyToOne(() => User, (user) => user.reports)
   reporter: User;

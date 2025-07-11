@@ -9,8 +9,8 @@ import { User } from '../../user/entities/user.entity';
 
 @Entity()
 export class AdminAction {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @ManyToOne(() => User)
   admin: User;

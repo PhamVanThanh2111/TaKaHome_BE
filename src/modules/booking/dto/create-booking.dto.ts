@@ -3,10 +3,10 @@ import { StatusEnum } from '../../common/enums/status.enum';
 
 export class CreateBookingDto {
   @IsNotEmpty()
-  tenantId: number;
+  tenantId: string;
 
   @IsNotEmpty()
-  propertyId: number;
+  propertyId: string;
 
   @IsDateString()
   bookingDate: Date;

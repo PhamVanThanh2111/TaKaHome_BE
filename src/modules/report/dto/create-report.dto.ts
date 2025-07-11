@@ -2,10 +2,10 @@ import { IsNotEmpty, IsString } from 'class-validator';
 
 export class CreateReportDto {
   @IsNotEmpty()
-  reporterId: number;
+  reporterId: string;
 
   @IsNotEmpty()
-  propertyId: number;
+  propertyId: string;
 
   @IsString()
   content: string;

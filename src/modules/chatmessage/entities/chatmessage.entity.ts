@@ -10,8 +10,8 @@ import { ChatRoom } from '../../chatroom/entities/chatroom.entity';
 
 @Entity()
 export class ChatMessage {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @ManyToOne(() => ChatRoom, (room) => room.messages)
   chatroom: ChatRoom;

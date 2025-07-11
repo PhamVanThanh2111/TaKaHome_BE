@@ -13,8 +13,12 @@ export class ChatRoomService {
   ) {}
 
   async create(createChatRoomDto: CreateChatRoomDto): Promise<ChatRoom> {
-    const room = this.chatRoomRepository.create(createChatRoomDto as any);
-    return this.chatRoomRepository.save(room);
+    const { user1Id, user2Id } = createChatRoomDto;
+    const chatRoom = this.chatRoomRepository.create({
+      user1: { id: user1Id },
+      user2: { id: user2Id },
+    });
+    return this.chatRoomRepository.save(chatRoom);
   }
 
   async findAll(): Promise<ChatRoom[]> {
@@ -24,17 +28,24 @@ export class ChatRoomService {
   }
 
   async findOne(id: number): Promise<ChatRoom> {
-    return this.chatRoomRepository.findOne({
-      where: { id },
+    const chatRoom = await this.chatRoomRepository.findOne({
+      where: { id: id.toString() },
       relations: ['user1', 'user2', 'messages'],
     });
+    if (!chatRoom) {
+      throw new Error(`ChatRoom with id ${id} not found`);
+    }
+    return chatRoom;
   }
 
   async update(
     id: number,
     updateChatRoomDto: UpdateChatRoomDto,
   ): Promise<ChatRoom> {
-    await this.chatRoomRepository.update(id, updateChatRoomDto as any);
+    await this.chatRoomRepository.update(
+      id,
+      updateChatRoomDto as Partial<ChatRoom>,
+    );
     return this.findOne(id);
   }
 

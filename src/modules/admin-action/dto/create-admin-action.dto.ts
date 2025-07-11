@@ -2,10 +2,10 @@ import { IsNotEmpty, IsString, IsOptional } from 'class-validator';
 
 export class CreateAdminActionDto {
   @IsNotEmpty()
-  adminId: number;
+  adminId: string;
 
   @IsNotEmpty()
-  targetId: number;
+  targetId: string;
 
   @IsString()
   actionType: string;

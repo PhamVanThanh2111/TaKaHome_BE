@@ -15,9 +15,7 @@ export class AdminActionService {
   async create(
     createAdminActionDto: CreateAdminActionDto,
   ): Promise<AdminAction> {
-    const action = this.adminActionRepository.create(
-      createAdminActionDto as any,
-    );
+    const action = this.adminActionRepository.create(createAdminActionDto);
     return this.adminActionRepository.save(action);
   }
 
@@ -25,19 +23,24 @@ export class AdminActionService {
     return this.adminActionRepository.find({ relations: ['admin', 'target'] });
   }
 
-  async findOne(id: number): Promise<AdminAction> {
-    return this.adminActionRepository.findOne({
-      where: { id },
+  async findOne(id: number): Promise<AdminAction | null> {
+    const action = await this.adminActionRepository.findOne({
+      where: { id: id.toString() },
       relations: ['admin', 'target'],
     });
+    return action;
   }
 
   async update(
     id: number,
     updateAdminActionDto: UpdateAdminActionDto,
   ): Promise<AdminAction> {
-    await this.adminActionRepository.update(id, updateAdminActionDto as any);
-    return this.findOne(id);
+    await this.adminActionRepository.update(id, updateAdminActionDto);
+    const updatedAction = await this.findOne(id);
+    if (!updatedAction) {
+      throw new Error(`AdminAction with id ${id} not found`);
+    }
+    return updatedAction;
   }
 
   async remove(id: number): Promise<void> {

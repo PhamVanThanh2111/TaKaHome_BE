@@ -2,7 +2,7 @@ import { IsNotEmpty, IsString } from 'class-validator';
 
 export class CreatePropertyImageDto {
   @IsNotEmpty()
-  propertyId: number;
+  propertyId: string;
 
   @IsString()
   imageUrl: string;

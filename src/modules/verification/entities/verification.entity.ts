@@ -11,8 +11,8 @@ import { StatusEnum } from '../../common/enums/status.enum';
 
 @Entity()
 export class Verification {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @ManyToOne(() => User)
   user: User;

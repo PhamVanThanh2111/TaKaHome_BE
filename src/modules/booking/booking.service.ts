@@ -13,7 +13,7 @@ export class BookingService {
   ) {}
 
   async create(createBookingDto: CreateBookingDto): Promise<Booking> {
-    const booking = this.bookingRepository.create(createBookingDto as any);
+    const booking = this.bookingRepository.create(createBookingDto);
     return this.bookingRepository.save(booking);
   }
 
@@ -22,17 +22,21 @@ export class BookingService {
   }
 
   async findOne(id: number): Promise<Booking> {
-    return this.bookingRepository.findOne({
-      where: { id },
+    const booking = await this.bookingRepository.findOne({
+      where: { id: id.toString() },
       relations: ['tenant', 'property'],
     });
+    if (!booking) {
+      throw new Error(`Booking with id ${id} not found`);
+    }
+    return booking;
   }
 
   async update(
     id: number,
     updateBookingDto: UpdateBookingDto,
   ): Promise<Booking> {
-    await this.bookingRepository.update(id, updateBookingDto as any);
+    await this.bookingRepository.update(id, updateBookingDto);
     return this.findOne(id);
   }
 

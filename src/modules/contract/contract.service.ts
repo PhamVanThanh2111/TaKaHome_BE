@@ -13,7 +13,7 @@ export class ContractService {
   ) {}
 
   async create(createContractDto: CreateContractDto): Promise<Contract> {
-    const contract = this.contractRepository.create(createContractDto as any);
+    const contract = this.contractRepository.create(createContractDto);
     return this.contractRepository.save(contract);
   }
 
@@ -23,9 +23,9 @@ export class ContractService {
     });
   }
 
-  async findOne(id: number): Promise<Contract> {
+  async findOne(id: number): Promise<Contract | null> {
     return this.contractRepository.findOne({
-      where: { id },
+      where: { id: id.toString() },
       relations: ['tenant', 'landlord', 'property'],
     });
   }
@@ -34,8 +34,12 @@ export class ContractService {
     id: number,
     updateContractDto: UpdateContractDto,
   ): Promise<Contract> {
-    await this.contractRepository.update(id, updateContractDto as any);
-    return this.findOne(id);
+    await this.contractRepository.update(id, updateContractDto);
+    const updatedContract = await this.findOne(id);
+    if (!updatedContract) {
+      throw new Error(`Contract with id ${id} not found`);
+    }
+    return updatedContract;
   }
 
   async remove(id: number): Promise<void> {

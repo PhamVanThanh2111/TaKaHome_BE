@@ -10,8 +10,8 @@ import { Property } from '../../property/entities/property.entity';
 
 @Entity()
 export class Review {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @ManyToOne(() => User, (user) => user.reviews)
   reviewer: User;

@@ -3,8 +3,8 @@ import { Property } from '../../property/entities/property.entity';
 
 @Entity()
 export class PropertyImage {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @ManyToOne(() => Property, (property) => property.images)
   property: Property;

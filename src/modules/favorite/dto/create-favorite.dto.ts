@@ -2,8 +2,8 @@ import { IsNotEmpty } from 'class-validator';
 
 export class CreateFavoriteDto {
   @IsNotEmpty()
-  userId: number;
+  userId: string;
 
   @IsNotEmpty()
-  propertyId: number;
+  propertyId: string;
 }

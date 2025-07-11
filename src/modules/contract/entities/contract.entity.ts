@@ -12,8 +12,8 @@ import { ContractStatusEnum } from '../../common/enums/contract-status.enum';
 
 @Entity()
 export class Contract {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column()
   contractCode: string;

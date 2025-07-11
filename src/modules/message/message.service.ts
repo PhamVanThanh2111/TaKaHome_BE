@@ -33,7 +33,7 @@ export class MessageService {
 
   async findOne(id: number): Promise<Message | null> {
     return this.messageRepository.findOne({
-      where: { id },
+      where: { id: id.toString() },
       relations: ['sender', 'receiver', 'property'],
     });
   }
@@ -42,7 +42,7 @@ export class MessageService {
     id: number,
     updateMessageDto: UpdateMessageDto,
   ): Promise<Message | null> {
-    await this.messageRepository.update(id, updateMessageDto as any);
+    await this.messageRepository.update(id, updateMessageDto);
     return this.findOne(id);
   }
 

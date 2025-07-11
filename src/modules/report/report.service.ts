@@ -28,7 +28,7 @@ export class ReportService {
 
   async findOne(id: number): Promise<Report> {
     const report = await this.reportRepository.findOne({
-      where: { id },
+      where: { id: id.toString() },
       relations: ['reporter', 'property'],
     });
     if (!report) {
@@ -38,7 +38,7 @@ export class ReportService {
   }
 
   async update(id: number, updateReportDto: UpdateReportDto): Promise<Report> {
-    await this.reportRepository.update(id, updateReportDto as any);
+    await this.reportRepository.update(id, updateReportDto);
     return this.findOne(id);
   }
 

@@ -33,7 +33,7 @@ export class NotificationService {
 
   async findOne(id: number): Promise<Notification> {
     const notification = await this.notificationRepository.findOne({
-      where: { id },
+      where: { id: id.toString() },
       relations: ['user'],
     });
     if (!notification) {
@@ -46,7 +46,7 @@ export class NotificationService {
     id: number,
     updateNotificationDto: UpdateNotificationDto,
   ): Promise<Notification> {
-    await this.notificationRepository.update(id, updateNotificationDto as any);
+    await this.notificationRepository.update(id, updateNotificationDto);
     return this.findOne(id);
   }
 

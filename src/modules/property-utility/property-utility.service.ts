@@ -30,7 +30,7 @@ export class PropertyUtilityService {
 
   async findOne(id: number): Promise<PropertyUtility | null> {
     return this.propertyUtilityRepository.findOne({
-      where: { id },
+      where: { id: id.toString() },
       relations: ['property'],
     });
   }
@@ -39,10 +39,7 @@ export class PropertyUtilityService {
     id: number,
     updatePropertyUtilityDto: UpdatePropertyUtilityDto,
   ): Promise<PropertyUtility> {
-    await this.propertyUtilityRepository.update(
-      id,
-      updatePropertyUtilityDto as any,
-    );
+    await this.propertyUtilityRepository.update(id, updatePropertyUtilityDto);
     const updated = await this.findOne(id);
     if (!updated) {
       throw new Error(`PropertyUtility with id ${id} not found`);

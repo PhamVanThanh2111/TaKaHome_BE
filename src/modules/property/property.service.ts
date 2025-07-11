@@ -22,7 +22,7 @@ export class PropertyService {
   }
 
   async findOne(id: number): Promise<Property | null> {
-    return this.propertyRepository.findOne({ where: { id } });
+    return this.propertyRepository.findOne({ where: { id: id.toString() } });
   }
 
   async update(

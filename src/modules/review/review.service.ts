@@ -29,7 +29,7 @@ export class ReviewService {
 
   async findOne(id: number): Promise<Review> {
     const review = await this.reviewRepository.findOne({
-      where: { id },
+      where: { id: id.toString() },
       relations: ['reviewer', 'property'],
     });
     if (!review) {
@@ -39,7 +39,7 @@ export class ReviewService {
   }
 
   async update(id: number, updateReviewDto: UpdateReviewDto): Promise<Review> {
-    await this.reviewRepository.update(id, updateReviewDto as any);
+    await this.reviewRepository.update(id, updateReviewDto);
     return this.findOne(id);
   }
 

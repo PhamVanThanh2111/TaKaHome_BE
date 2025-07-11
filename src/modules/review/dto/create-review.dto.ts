@@ -2,10 +2,10 @@ import { IsNotEmpty, IsString, IsNumber } from 'class-validator';
 
 export class CreateReviewDto {
   @IsNotEmpty()
-  reviewerId: number;
+  reviewerId: string;
 
   @IsNotEmpty()
-  propertyId: number;
+  propertyId: string;
 
   @IsString()
   comment: string;

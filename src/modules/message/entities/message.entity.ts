@@ -10,8 +10,8 @@ import { Property } from '../../property/entities/property.entity';
 
 @Entity()
 export class Message {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @ManyToOne(() => User, { nullable: false })
   sender: User;

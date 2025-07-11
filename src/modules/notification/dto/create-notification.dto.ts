@@ -4,7 +4,7 @@ import { StatusEnum } from '../../common/enums/status.enum';
 
 export class CreateNotificationDto {
   @IsNotEmpty()
-  userId: number;
+  userId: string;
 
   @IsEnum(NotificationTypeEnum)
   type: NotificationTypeEnum;

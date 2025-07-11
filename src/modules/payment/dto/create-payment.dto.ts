@@ -4,7 +4,7 @@ import { StatusEnum } from '../../common/enums/status.enum';
 
 export class CreatePaymentDto {
   @IsNotEmpty()
-  contractId: number;
+  contractId: string;
 
   @IsNumber()
   amount: number;

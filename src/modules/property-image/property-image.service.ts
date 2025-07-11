@@ -29,7 +29,7 @@ export class PropertyImageService {
 
   async findOne(id: number): Promise<PropertyImage | null> {
     return this.propertyImageRepository.findOne({
-      where: { id },
+      where: { id: id.toString() },
       relations: ['property'],
     });
   }
@@ -38,10 +38,7 @@ export class PropertyImageService {
     id: number,
     updatePropertyImageDto: UpdatePropertyImageDto,
   ): Promise<PropertyImage> {
-    await this.propertyImageRepository.update(
-      id,
-      updatePropertyImageDto as any,
-    );
+    await this.propertyImageRepository.update(id, updatePropertyImageDto);
     const updated = await this.findOne(id);
     if (!updated) {
       throw new Error(`PropertyImage with id ${id} not found`);

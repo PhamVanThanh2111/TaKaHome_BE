@@ -13,13 +13,13 @@ export class CreateContractDto {
   contractCode: string;
 
   @IsNotEmpty()
-  tenantId: number;
+  tenantId: string;
 
   @IsNotEmpty()
-  landlordId: number;
+  landlordId: string;
 
   @IsNotEmpty()
-  propertyId: number;
+  propertyId: string;
 
   @IsDateString()
   startDate: Date;

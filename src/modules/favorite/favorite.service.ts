@@ -13,7 +13,9 @@ export class FavoriteService {
   ) {}
 
   async create(createFavoriteDto: CreateFavoriteDto): Promise<Favorite> {
-    const favorite = this.favoriteRepository.create(createFavoriteDto as any);
+    const favorite = this.favoriteRepository.create(
+      createFavoriteDto as Partial<Favorite>,
+    );
     return this.favoriteRepository.save(favorite);
   }
 
@@ -21,9 +23,9 @@ export class FavoriteService {
     return this.favoriteRepository.find({ relations: ['user', 'property'] });
   }
 
-  async findOne(id: number): Promise<Favorite> {
+  async findOne(id: number): Promise<Favorite | null> {
     return this.favoriteRepository.findOne({
-      where: { id },
+      where: { id: id.toString() },
       relations: ['user', 'property'],
     });
   }
@@ -32,8 +34,15 @@ export class FavoriteService {
     id: number,
     updateFavoriteDto: UpdateFavoriteDto,
   ): Promise<Favorite> {
-    await this.favoriteRepository.update(id, updateFavoriteDto as any);
-    return this.findOne(id);
+    await this.favoriteRepository.update(
+      id,
+      updateFavoriteDto as Partial<Favorite>,
+    );
+    const updatedFavorite = await this.findOne(id);
+    if (!updatedFavorite) {
+      throw new Error(`Favorite with id ${id} not found`);
+    }
+    return updatedFavorite;
   }
 
   async remove(id: number): Promise<void> {

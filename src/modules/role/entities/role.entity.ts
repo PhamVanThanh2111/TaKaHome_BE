@@ -4,8 +4,8 @@ import { RoleEnum } from '../../common/enums/role.enum';
 
 @Entity()
 export class Role {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column({
     type: 'enum',

@@ -2,10 +2,10 @@ import { IsNotEmpty, IsString } from 'class-validator';
 
 export class CreateChatMessageDto {
   @IsNotEmpty()
-  chatroomId: number;
+  chatroomId: string;
 
   @IsNotEmpty()
-  senderId: number;
+  senderId: string;
 
   @IsString()
   content: string;

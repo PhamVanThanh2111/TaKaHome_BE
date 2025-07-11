@@ -12,8 +12,8 @@ import { StatusEnum } from '../../common/enums/status.enum';
 
 @Entity()
 export class Payment {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @ManyToOne(() => Contract, (contract) => contract.id)
   contract: Contract;
