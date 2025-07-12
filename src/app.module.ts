@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 // Import all module classes
@@ -20,15 +20,16 @@ import { PropertyUtilityModule } from './modules/property-utility/property-utili
 import { ChatRoomModule } from './modules/chatroom/chatroom.module';
 import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
 
+import { LoggerMiddleware } from './common/middleware/logger.middleware';
 @Module({
   imports: [
     TypeOrmModule.forRoot({
       type: 'postgres', // or mysql, etc.
       host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT) || 5432,
+      port: parseInt(process.env.DB_PORT ?? '5432'),
       username: process.env.DB_USER || 'postgres',
-      password: process.env.DB_PASS || 'password',
-      database: process.env.DB_NAME || 'realestate',
+      password: process.env.DB_PASS || 'root',
+      database: process.env.DB_NAME || 'rent_home',
       autoLoadEntities: true,
       synchronize: true, // OFF on production!
     }),
@@ -51,4 +52,8 @@ import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
     ChatMessageModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(LoggerMiddleware).forRoutes('*');
+  }
+}
