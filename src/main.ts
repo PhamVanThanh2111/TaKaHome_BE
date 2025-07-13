@@ -21,6 +21,8 @@ async function bootstrap() {
   // Nếu muốn tăng payload (cho upload ảnh lớn):
   // app.useBodyParser('json', { limit: '10mb' });
 
+  const port = process.env.PORT || 3000;
+
   // ----- Swagger Setup -----
   const config = new DocumentBuilder()
     .setTitle('Real Estate Rental API')
@@ -31,12 +33,10 @@ async function bootstrap() {
 
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api-docs', app, document);
-  // Đường dẫn truy cập: http://localhost:3000/api-docs
   // -------------------------
 
-  const port = process.env.PORT || 3000;
   await app.listen(port);
-  console.log(`Server is running on http://localhost:${port}`);
+  console.log(`Swagger is running on http://localhost:${port}/api-docs`);
 }
 
 bootstrap().catch((err) => {
