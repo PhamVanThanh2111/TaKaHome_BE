@@ -3,7 +3,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 // Import all module classes
 import { UserModule } from './modules/user/user.module';
-import { RoleModule } from './modules/role/role.module';
 import { PropertyModule } from './modules/property/property.module';
 import { ContractModule } from './modules/contract/contract.module';
 import { BookingModule } from './modules/booking/booking.module';
@@ -19,6 +18,7 @@ import { PropertyImageModule } from './modules/property-image/property-image.mod
 import { PropertyUtilityModule } from './modules/property-utility/property-utility.module';
 import { ChatRoomModule } from './modules/chatroom/chatroom.module';
 import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
+import { AuthModule } from './modules/core/auth/auth.module';
 
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
 @Module({
@@ -33,8 +33,8 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
       autoLoadEntities: true,
       synchronize: true, // OFF on production!
     }),
+    AuthModule,
     UserModule,
-    RoleModule,
     PropertyModule,
     ContractModule,
     BookingModule,

@@ -41,8 +41,4 @@ export class ContractService {
     }
     return updatedContract;
   }
-
-  async remove(id: number): Promise<void> {
-    await this.contractRepository.delete(id);
-  }
 }

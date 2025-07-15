@@ -5,7 +5,6 @@ import {
   Body,
   Patch,
   Param,
-  Delete,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -61,16 +60,5 @@ export class ContractController {
     @Body() updateContractDto: UpdateContractDto,
   ) {
     return this.contractService.update(+id, updateContractDto);
-  }
-
-  @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Xoá hợp đồng' })
-  @ApiResponse({
-    status: HttpStatus.NO_CONTENT,
-    description: 'Xoá hợp đồng thành công',
-  })
-  remove(@Param('id') id: string) {
-    return this.contractService.remove(+id);
   }
 }

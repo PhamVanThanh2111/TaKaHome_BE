@@ -23,7 +23,7 @@ export class AuthController {
     description: 'Email đã tồn tại hoặc dữ liệu không hợp lệ',
   })
   async register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+    return await this.authService.register(dto);
   }
 
   @Post('login')

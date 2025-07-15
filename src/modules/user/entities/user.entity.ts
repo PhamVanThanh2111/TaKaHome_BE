@@ -4,17 +4,16 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
-  ManyToMany,
-  JoinTable,
   OneToMany,
+  OneToOne,
 } from 'typeorm';
-import { Role } from '../../role/entities/role.entity';
 import { StatusEnum } from '../../common/enums/status.enum';
 import { Booking } from '../../booking/entities/booking.entity';
 import { Contract } from '../../contract/entities/contract.entity';
 import { Review } from '../../review/entities/review.entity';
 import { Favorite } from '../../favorite/entities/favorite.entity';
 import { Report } from '../../report/entities/report.entity';
+import { Account } from 'src/modules/account/entities/account.entity';
 
 @Entity()
 export class User {
@@ -26,9 +25,6 @@ export class User {
 
   @Column({ length: 20, nullable: true })
   phone: string;
-
-  @Column()
-  password: string;
 
   @Column({ name: 'full_name', length: 100, nullable: true })
   fullName: string;
@@ -52,14 +48,6 @@ export class User {
   @UpdateDateColumn()
   updateAt: Date;
 
-  @ManyToMany(() => Role, (role) => role.users, { cascade: true })
-  @JoinTable({
-    name: 'user_role',
-    joinColumn: { name: 'userId', referencedColumnName: 'id' },
-    inverseJoinColumn: { name: 'roleId', referencedColumnName: 'id' },
-  })
-  roles: Role[];
-
   // Relations
   @OneToMany(() => Booking, (booking) => booking.tenant)
   bookings: Booking[];
@@ -78,4 +66,7 @@ export class User {
 
   @OneToMany(() => Report, (report) => report.reporter)
   reports: Report[];
+
+  @OneToOne(() => Account, (account) => account.user)
+  account: Account;
 }

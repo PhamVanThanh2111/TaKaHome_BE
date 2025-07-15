@@ -6,14 +6,14 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { User } from '../../user/entities/user.entity';
-import { Role } from '../..//role/entities/role.entity';
+import { Account } from '../../account/entities/account.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Role]),
+    TypeOrmModule.forFeature([User, Account]),
     PassportModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'my_secret_key',
+      secret: process.env.JWT_SECRET || 'rent_home_khoa_luan_secret',
       signOptions: { expiresIn: '7d' },
     }),
   ],

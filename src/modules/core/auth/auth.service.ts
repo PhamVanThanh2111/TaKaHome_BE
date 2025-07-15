@@ -3,76 +3,89 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
+import { Account } from '../../account/entities/account.entity';
 import { User } from '../../user/entities/user.entity';
-import { Role } from '../..//role/entities/role.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { RoleEnum } from 'src/modules/common/enums/role.enum';
+import { RoleEnum } from '../../common/enums/role.enum';
 
 @Injectable()
 export class AuthService {
   constructor(
+    @InjectRepository(Account)
+    private readonly accountRepo: Repository<Account>,
     @InjectRepository(User)
-    private userRepository: Repository<User>,
-    @InjectRepository(Role)
-    private roleRepository: Repository<Role>,
-    private jwtService: JwtService,
+    private readonly userRepo: Repository<User>,
+    private readonly jwtService: JwtService,
   ) {}
 
   async register(dto: RegisterDto) {
-    const { email, password, fullName } = dto;
-    const exist = await this.userRepository.findOne({ where: { email } });
+    // Check email đã tồn tại
+    const exist = await this.accountRepo.findOne({
+      where: { email: dto.email },
+    });
     if (exist) throw new UnauthorizedException('Email already registered');
 
-    const hash = await bcrypt.hash(password, 10);
-    const user = this.userRepository.create({
-      email,
+    const hash = await bcrypt.hash(dto.password, 10);
+
+    // Khởi tạo user
+    const user = this.userRepo.create({
+      email: dto.email,
+      phone: dto.phone,
+      fullName: dto.fullName,
+    });
+    await this.userRepo.save(user);
+
+    // role mặc định cho account mới (TENANT)
+    const defaultRoles = [RoleEnum.TENANT];
+
+    const account = this.accountRepo.create({
+      email: dto.email,
       password: hash,
-      fullName,
+      isVerified: false,
+      roles: defaultRoles,
+      user: user,
     });
-
-    // Gán vai trò mặc định (tenant)
-    const tenantRole = await this.roleRepository.findOne({
-      where: { name: RoleEnum.TENANT },
-    });
-    if (tenantRole) user.roles = [tenantRole];
-
-    await this.userRepository.save(user);
+    await this.accountRepo.save(account);
 
     return { message: 'Register successful!' };
   }
 
-  async validateUser(email: string, pass: string): Promise<User | null> {
-    const user = await this.userRepository.findOne({
+  async validateAccount(
+    email: string,
+    password: string,
+  ): Promise<Account | null> {
+    const acc = await this.accountRepo.findOne({
       where: { email },
-      relations: ['roles'],
+      relations: ['user'],
     });
-    if (!user) return null;
-    const isMatch = await bcrypt.compare(pass, user.password);
-    if (!isMatch) return null;
-    return user;
+    if (!acc) return null;
+    const match = await bcrypt.compare(password, acc.password);
+    if (!match) return null;
+    return acc;
   }
 
   async login(dto: LoginDto) {
-    const user = await this.userRepository.findOne({
+    const acc = await this.accountRepo.findOne({
       where: { email: dto.email },
-      relations: ['roles'],
+      relations: ['user'],
     });
-    if (!user || !(await bcrypt.compare(dto.password, user.password))) {
+    if (!acc || !(await bcrypt.compare(dto.password, acc.password))) {
       throw new UnauthorizedException('Invalid credentials');
     }
     const payload = {
-      sub: user.id,
-      email: user.email,
-      roles: user.roles.map((r) => r.name),
+      sub: acc.id,
+      email: acc.email,
+      roles: acc.roles, // RoleEnum[]
     };
     return {
       accessToken: this.jwtService.sign(payload),
-      user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-        roles: user.roles,
+      account: {
+        id: acc.id,
+        email: acc.email,
+        roles: acc.roles,
+        isVerified: acc.isVerified,
+        user: acc.user, // Có thể custom chỉ trả về một số field
       },
     };
   }
