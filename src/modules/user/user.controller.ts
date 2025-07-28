@@ -1,7 +1,6 @@
 import {
   Controller,
   Get,
-  Post,
   Body,
   Patch,
   Param,
@@ -16,6 +15,7 @@ import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { UserResponseDto } from './dto/user-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
 
 @Controller('users')
 @ApiBearerAuth()
@@ -26,6 +26,7 @@ export class UserController {
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách user' })
   @ApiResponse({ status: HttpStatus.OK, type: [UserResponseDto] })
+  @Roles('ADMIN')
   findAll() {
     return this.userService.findAll();
   }
@@ -55,6 +56,7 @@ export class UserController {
     status: HttpStatus.NO_CONTENT,
     description: 'Xóa user thành công',
   })
+  @Roles('ADMIN')
   remove(@Param('id') id: string) {
     return this.userService.remove(+id);
   }
