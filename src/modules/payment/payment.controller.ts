@@ -5,17 +5,22 @@ import {
   Body,
   Patch,
   Param,
-  Delete,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
-import { ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { PaymentResponseDto } from './dto/payment-response.dto';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../core/auth/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
 
 @Controller('payments')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
 
@@ -38,6 +43,7 @@ export class PaymentController {
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách payment' })
   @ApiResponse({ status: HttpStatus.OK, type: [PaymentResponseDto] })
+  @Roles('ADMIN')
   findAll() {
     return this.paymentService.findAll();
   }
@@ -58,16 +64,5 @@ export class PaymentController {
   @ApiResponse({ status: HttpStatus.OK, type: PaymentResponseDto })
   update(@Param('id') id: string, @Body() updatePaymentDto: UpdatePaymentDto) {
     return this.paymentService.update(+id, updatePaymentDto);
-  }
-
-  @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Xoá payment' })
-  @ApiResponse({
-    status: HttpStatus.NO_CONTENT,
-    description: 'Xoá payment thành công',
-  })
-  remove(@Param('id') id: string) {
-    return this.paymentService.remove(+id);
   }
 }
