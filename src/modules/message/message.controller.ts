@@ -3,19 +3,21 @@ import {
   Get,
   Post,
   Body,
-  Patch,
   Param,
   Delete,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { MessageService } from './message.service';
 import { CreateMessageDto } from './dto/create-message.dto';
-import { UpdateMessageDto } from './dto/update-message.dto';
-import { ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { MessageResponseDto } from './dto/message-response.dto';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 
 @Controller('messages')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 export class MessageController {
   constructor(private readonly messageService: MessageService) {}
 
@@ -51,13 +53,6 @@ export class MessageController {
   })
   findOne(@Param('id') id: string) {
     return this.messageService.findOne(+id);
-  }
-
-  @Patch(':id')
-  @ApiOperation({ summary: 'Cập nhật tin nhắn' })
-  @ApiResponse({ status: HttpStatus.OK, type: MessageResponseDto })
-  update(@Param('id') id: string, @Body() updateMessageDto: UpdateMessageDto) {
-    return this.messageService.update(+id, updateMessageDto);
   }
 
   @Delete(':id')

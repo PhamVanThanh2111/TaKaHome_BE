@@ -1,43 +1,32 @@
 import {
   Controller,
   Get,
-  Post,
   Body,
   Patch,
   Param,
   Delete,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ChatRoomService } from './chatroom.service';
-import { CreateChatRoomDto } from './dto/create-chatroom.dto';
 import { UpdateChatRoomDto } from './dto/update-chatroom.dto';
-import { ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ChatRoomResponseDto } from './dto/chatroom-response.dto';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../core/auth/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
 
 @Controller('chatrooms')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class ChatRoomController {
   constructor(private readonly chatRoomService: ChatRoomService) {}
-
-  @Post()
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Tạo chatroom mới' })
-  @ApiResponse({
-    status: HttpStatus.CREATED,
-    type: ChatRoomResponseDto,
-    description: 'Tạo chatroom thành công',
-  })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description: 'Request không hợp lệ',
-  })
-  create(@Body() createChatRoomDto: CreateChatRoomDto) {
-    return this.chatRoomService.create(createChatRoomDto);
-  }
 
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách chatroom' })
   @ApiResponse({ status: HttpStatus.OK, type: [ChatRoomResponseDto] })
+  @Roles('ADMIN')
   findAll() {
     return this.chatRoomService.findAll();
   }
