@@ -74,7 +74,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
     const payload = {
-      sub: acc.id,
+      sub: acc.user.id,
       email: acc.email,
       roles: acc.roles, // RoleEnum[]
     };
