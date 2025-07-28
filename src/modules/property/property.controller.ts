@@ -8,13 +8,23 @@ import {
   Delete,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { PropertyService } from './property.service';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
-import { ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { PropertyResponseDto } from './dto/property-response.dto';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../core/auth/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
 
+@ApiTags('properties')
 @Controller('properties')
 export class PropertyController {
   constructor(private readonly propertyService: PropertyService) {}
@@ -31,6 +41,9 @@ export class PropertyController {
     status: HttpStatus.BAD_REQUEST,
     description: 'Request không hợp lệ',
   })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'LANDLORD')
   create(@Body() createPropertyDto: CreatePropertyDto) {
     return this.propertyService.create(createPropertyDto);
   }
@@ -56,6 +69,9 @@ export class PropertyController {
   @Patch(':id')
   @ApiOperation({ summary: 'Cập nhật thông tin bất động sản' })
   @ApiResponse({ status: HttpStatus.OK, type: PropertyResponseDto })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'LANDLORD')
   update(
     @Param('id') id: string,
     @Body() updatePropertyDto: UpdatePropertyDto,
@@ -70,6 +86,9 @@ export class PropertyController {
     status: HttpStatus.NO_CONTENT,
     description: 'Xóa bất động sản thành công',
   })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'LANDLORD')
   remove(@Param('id') id: string) {
     return this.propertyService.remove(+id);
   }
