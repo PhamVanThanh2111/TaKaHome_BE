@@ -3,19 +3,21 @@ import {
   Get,
   Post,
   Body,
-  Patch,
   Param,
   Delete,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { NotificationService } from './notification.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
-import { UpdateNotificationDto } from './dto/update-notification.dto';
-import { ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { NotificationResponseDto } from './dto/notification-response.dto';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 
 @Controller('notifications')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
 
@@ -51,16 +53,6 @@ export class NotificationController {
   })
   findOne(@Param('id') id: string) {
     return this.notificationService.findOne(+id);
-  }
-
-  @Patch(':id')
-  @ApiOperation({ summary: 'Cập nhật notification' })
-  @ApiResponse({ status: HttpStatus.OK, type: NotificationResponseDto })
-  update(
-    @Param('id') id: string,
-    @Body() updateNotificationDto: UpdateNotificationDto,
-  ) {
-    return this.notificationService.update(+id, updateNotificationDto);
   }
 
   @Delete(':id')
