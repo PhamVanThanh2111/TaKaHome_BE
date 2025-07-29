@@ -59,7 +59,7 @@ export class NotificationController {
     description: 'Không tìm thấy notification',
   })
   findOne(@Param('id') id: string) {
-    return this.notificationService.findOne(+id);
+    return this.notificationService.findOne(id);
   }
 
   @Delete(':id')
@@ -70,6 +70,6 @@ export class NotificationController {
     description: 'Xoá notification thành công',
   })
   remove(@Param('id') id: string) {
-    return this.notificationService.remove(+id);
+    return this.notificationService.remove(id);
   }
 }
