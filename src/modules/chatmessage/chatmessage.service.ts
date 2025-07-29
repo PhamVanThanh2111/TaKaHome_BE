@@ -30,15 +30,23 @@ export class ChatMessageService {
     });
   }
 
-  async findOne(id: number): Promise<ChatMessage | null> {
+  // findAllByChatRoomId
+  async findAllByChatRoomId(chatroomId: string): Promise<ChatMessage[]> {
+    return this.chatMessageRepository.find({
+      where: { chatroom: { id: chatroomId } },
+      relations: ['sender'],
+    });
+  }
+
+  async findOne(id: string): Promise<ChatMessage | null> {
     return this.chatMessageRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['chatroom', 'sender'],
     });
   }
 
   async update(
-    id: number,
+    id: string,
     updateChatMessageDto: UpdateChatMessageDto,
   ): Promise<ChatMessage> {
     await this.chatMessageRepository.update(id, updateChatMessageDto);
@@ -49,7 +57,7 @@ export class ChatMessageService {
     return updatedMessage;
   }
 
-  async remove(id: number): Promise<void> {
+  async remove(id: string): Promise<void> {
     await this.chatMessageRepository.delete(id);
   }
 }

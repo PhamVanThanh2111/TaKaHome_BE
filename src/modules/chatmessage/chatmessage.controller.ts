@@ -46,6 +46,13 @@ export class ChatMessageController {
     return this.chatMessageService.findAll();
   }
 
+  @Get('chatroom/:chatroomId')
+  @ApiOperation({ summary: 'Lấy danh sách message theo chatroomId' })
+  @ApiResponse({ status: HttpStatus.OK, type: [ChatMessageResponseDto] })
+  findAllByChatRoomId(@Param('chatroomId') chatroomId: string) {
+    return this.chatMessageService.findAllByChatRoomId(chatroomId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Lấy message theo id' })
   @ApiResponse({ status: HttpStatus.OK, type: ChatMessageResponseDto })
@@ -54,7 +61,7 @@ export class ChatMessageController {
     description: 'Không tìm thấy message',
   })
   findOne(@Param('id') id: string) {
-    return this.chatMessageService.findOne(+id);
+    return this.chatMessageService.findOne(id);
   }
 
   @Patch(':id')
@@ -64,7 +71,7 @@ export class ChatMessageController {
     @Param('id') id: string,
     @Body() updateChatMessageDto: UpdateChatMessageDto,
   ) {
-    return this.chatMessageService.update(+id, updateChatMessageDto);
+    return this.chatMessageService.update(id, updateChatMessageDto);
   }
 
   @Delete(':id')
@@ -75,6 +82,6 @@ export class ChatMessageController {
     description: 'Xoá message thành công',
   })
   remove(@Param('id') id: string) {
-    return this.chatMessageService.remove(+id);
+    return this.chatMessageService.remove(id);
   }
 }
