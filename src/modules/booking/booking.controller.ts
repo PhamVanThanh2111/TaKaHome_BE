@@ -8,14 +8,20 @@ import {
   Delete,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { BookingService } from './booking.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
-import { ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { BookingResponseDto } from './dto/booking-response.dto';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../core/auth/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
 
 @Controller('bookings')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class BookingController {
   constructor(private readonly bookingService: BookingService) {}
 
@@ -67,6 +73,7 @@ export class BookingController {
     status: HttpStatus.NO_CONTENT,
     description: 'Xoá booking thành công',
   })
+  @Roles('ADMIN')
   remove(@Param('id') id: string) {
     return this.bookingService.remove(+id);
   }

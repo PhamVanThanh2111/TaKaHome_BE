@@ -5,17 +5,22 @@ import {
   Body,
   Patch,
   Param,
-  Delete,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ReportService } from './report.service';
 import { CreateReportDto } from './dto/create-report.dto';
 import { UpdateReportDto } from './dto/update-report.dto';
-import { ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ReportResponseDto } from './dto/report-response.dto';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../core/auth/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
 
 @Controller('reports')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class ReportController {
   constructor(private readonly reportService: ReportService) {}
 
@@ -38,6 +43,7 @@ export class ReportController {
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách báo cáo' })
   @ApiResponse({ status: HttpStatus.OK, type: [ReportResponseDto] })
+  @Roles('ADMIN')
   findAll() {
     return this.reportService.findAll();
   }
@@ -58,16 +64,5 @@ export class ReportController {
   @ApiResponse({ status: HttpStatus.OK, type: ReportResponseDto })
   update(@Param('id') id: string, @Body() updateReportDto: UpdateReportDto) {
     return this.reportService.update(+id, updateReportDto);
-  }
-
-  @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Xoá báo cáo' })
-  @ApiResponse({
-    status: HttpStatus.NO_CONTENT,
-    description: 'Xoá báo cáo thành công',
-  })
-  remove(@Param('id') id: string) {
-    return this.reportService.remove(+id);
   }
 }

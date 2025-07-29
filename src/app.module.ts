@@ -10,7 +10,6 @@ import { PaymentModule } from './modules/payment/payment.module';
 import { ReviewModule } from './modules/review/review.module';
 import { ReportModule } from './modules/report/report.module';
 import { FavoriteModule } from './modules/favorite/favorite.module';
-import { MessageModule } from './modules/message/message.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { AdminActionModule } from './modules/admin-action/admin-action.module';
 import { VerificationModule } from './modules/verification/verification.module';
@@ -42,7 +41,6 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
     ReviewModule,
     ReportModule,
     FavoriteModule,
-    MessageModule,
     NotificationModule,
     AdminActionModule,
     VerificationModule,

@@ -8,14 +8,18 @@ import {
   Delete,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ChatMessageService } from './chatmessage.service';
 import { CreateChatMessageDto } from './dto/create-chatmessage.dto';
 import { UpdateChatMessageDto } from './dto/update-chatmessage.dto';
-import { ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ChatMessageResponseDto } from './dto/chatmessage-response.dto';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 
 @Controller('chatmessages')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 export class ChatMessageController {
   constructor(private readonly chatMessageService: ChatMessageService) {}
 

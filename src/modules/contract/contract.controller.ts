@@ -7,14 +7,20 @@ import {
   Param,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ContractService } from './contract.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
-import { ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ContractResponseDto } from './dto/contract-response.dto';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../core/auth/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
 
 @Controller('contracts')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class ContractController {
   constructor(private readonly contractService: ContractService) {}
 
@@ -37,6 +43,7 @@ export class ContractController {
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách hợp đồng' })
   @ApiResponse({ status: HttpStatus.OK, type: [ContractResponseDto] })
+  @Roles('ADMIN')
   findAll() {
     return this.contractService.findAll();
   }
@@ -55,6 +62,7 @@ export class ContractController {
   @Patch(':id')
   @ApiOperation({ summary: 'Cập nhật hợp đồng' })
   @ApiResponse({ status: HttpStatus.OK, type: ContractResponseDto })
+  @Roles('ADMIN')
   update(
     @Param('id') id: string,
     @Body() updateContractDto: UpdateContractDto,
