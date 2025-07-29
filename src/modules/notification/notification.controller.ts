@@ -44,6 +44,13 @@ export class NotificationController {
     return this.notificationService.findAll();
   }
 
+  @Get('user/:userId')
+  @ApiOperation({ summary: 'Lấy danh sách notification theo userId' })
+  @ApiResponse({ status: HttpStatus.OK, type: [NotificationResponseDto] })
+  findAllByUserId(@Param('userId') userId: string) {
+    return this.notificationService.findAllByUserId(userId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Lấy notification theo id' })
   @ApiResponse({ status: HttpStatus.OK, type: NotificationResponseDto })

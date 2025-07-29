@@ -31,6 +31,14 @@ export class NotificationService {
     return this.notificationRepository.find({ relations: ['user'] });
   }
 
+  // findAllByUserId
+  async findAllByUserId(userId: string): Promise<Notification[]> {
+    return this.notificationRepository.find({
+      where: { user: { id: userId } },
+      relations: ['user'],
+    });
+  }
+
   async findOne(id: number): Promise<Notification> {
     const notification = await this.notificationRepository.findOne({
       where: { id: id.toString() },
