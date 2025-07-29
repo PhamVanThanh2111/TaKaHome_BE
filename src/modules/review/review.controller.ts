@@ -46,6 +46,17 @@ export class ReviewController {
     return this.reviewService.findAll();
   }
 
+  @Get('property/:propertyId')
+  @ApiOperation({ summary: 'Lấy danh sách review theo propertyId' })
+  @ApiResponse({ status: HttpStatus.OK, type: [ReviewResponseDto] })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Không tìm thấy review cho propertyId',
+  })
+  findAllByPropertyId(@Param('propertyId') propertyId: string) {
+    return this.reviewService.findAllByPropertyId(propertyId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Lấy review theo id' })
   @ApiResponse({ status: HttpStatus.OK, type: ReviewResponseDto })
@@ -54,14 +65,14 @@ export class ReviewController {
     description: 'Không tìm thấy review',
   })
   findOne(@Param('id') id: string) {
-    return this.reviewService.findOne(+id);
+    return this.reviewService.findOne(id);
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Cập nhật review' })
   @ApiResponse({ status: HttpStatus.OK, type: ReviewResponseDto })
   update(@Param('id') id: string, @Body() updateReviewDto: UpdateReviewDto) {
-    return this.reviewService.update(+id, updateReviewDto);
+    return this.reviewService.update(id, updateReviewDto);
   }
 
   @Delete(':id')
@@ -72,6 +83,6 @@ export class ReviewController {
     description: 'Xoá review thành công',
   })
   remove(@Param('id') id: string) {
-    return this.reviewService.remove(+id);
+    return this.reviewService.remove(id);
   }
 }

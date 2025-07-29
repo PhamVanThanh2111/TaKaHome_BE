@@ -27,9 +27,17 @@ export class ReviewService {
     return this.reviewRepository.find({ relations: ['reviewer', 'property'] });
   }
 
-  async findOne(id: number): Promise<Review> {
+  // findAllByPropertyId
+  async findAllByPropertyId(propertyId: string): Promise<Review[]> {
+    return this.reviewRepository.find({
+      where: { property: { id: propertyId } },
+      relations: ['reviewer'],
+    });
+  }
+
+  async findOne(id: string): Promise<Review> {
     const review = await this.reviewRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['reviewer', 'property'],
     });
     if (!review) {
@@ -38,12 +46,12 @@ export class ReviewService {
     return review;
   }
 
-  async update(id: number, updateReviewDto: UpdateReviewDto): Promise<Review> {
+  async update(id: string, updateReviewDto: UpdateReviewDto): Promise<Review> {
     await this.reviewRepository.update(id, updateReviewDto);
     return this.findOne(id);
   }
 
-  async remove(id: number): Promise<void> {
+  async remove(id: string): Promise<void> {
     await this.reviewRepository.delete(id);
   }
 }
