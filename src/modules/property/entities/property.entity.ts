@@ -17,7 +17,6 @@ import { Booking } from '../../booking/entities/booking.entity';
 import { Review } from '../../review/entities/review.entity';
 import { Favorite } from '../../favorite/entities/favorite.entity';
 import { Report } from '../../report/entities/report.entity';
-import { Message } from '../../message/entities/message.entity';
 
 @Entity()
 export class Property {
@@ -90,7 +89,4 @@ export class Property {
 
   @OneToMany(() => Report, (report) => report.property)
   reports: Report[];
-
-  @OneToMany(() => Message, (message) => message.property)
-  messages: Message[];
 }
