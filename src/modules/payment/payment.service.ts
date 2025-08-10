@@ -1,15 +1,21 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Payment } from './entities/payment.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
+import { ConfigType } from '@nestjs/config';
+import * as crypto from 'crypto';
+import * as qs from 'querystring';
+import vnpayConfig from 'src/config/vnpay.config';
 
 @Injectable()
 export class PaymentService {
   constructor(
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
+    @Inject(vnpayConfig.KEY)
+    private readonly vnpay: ConfigType<typeof vnpayConfig>,
   ) {}
 
   async create(createPaymentDto: CreatePaymentDto): Promise<Payment> {
@@ -48,7 +54,135 @@ export class PaymentService {
     return this.findOne(id);
   }
 
-  async remove(id: number): Promise<void> {
-    await this.paymentRepository.delete(id);
+  /**
+   * Tạo URL thanh toán VNPay (sandbox/prod tùy ENV).
+   * - Chỉ sinh link, KHÔNG ghi DB tại đây (để mỗi hàm làm đúng 1 việc).
+   * - Trả về: { paymentUrl, txnRef }
+   */
+  createVnpayPaymentLink(input: {
+    contractId: string;
+    amount: number; // VND
+    ipAddr: string; // IP thực của client
+    orderInfo?: string;
+    locale?: 'vn' | 'en'; // default 'vn'
+    expireIn?: number; // minutes, default 15
+  }): Promise<{ paymentUrl: string; txnRef: string }> {
+    const {
+      contractId,
+      amount,
+      ipAddr,
+      orderInfo = `Thanh toan hop dong ${contractId}`,
+      locale = 'vn',
+      expireIn = 15,
+    } = input;
+
+    // Lấy config (ưu tiên typed config "vnpay", fallback ENV thuần)
+    const tmnCode = this.vnpay.tmnCode;
+    const hashSecret = this.vnpay.hashSecret;
+    const vnpUrl = this.vnpay.url;
+    const returnUrl = this.vnpay.returnUrl;
+
+    if (!tmnCode || !hashSecret || !vnpUrl || !returnUrl) {
+      throw new Error(
+        'VNPay config is missing (tmnCode/hashSecret/url/returnUrl).',
+      );
+    }
+
+    // Chuẩn hoá orderInfo: ASCII + bỏ ký tự gây rủi ro khi ký
+    const safeOrderInfo = orderInfo
+      .normalize('NFKD') // bỏ dấu nếu có
+      .replace(/[^\x20-\x7E]/g, '') // ASCII visible
+      .replace(/[#&=?]/g, ' ') // tránh ký tự đặc biệt
+      .trim();
+
+    const createDate = this.formatDateYYYYMMDDHHmmss(new Date());
+    const expireDate = this.formatDateYYYYMMDDHHmmss(
+      new Date(Date.now() + (expireIn || 15) * 60 * 1000),
+    );
+
+    // vnp_TxnRef phải duy nhất
+    const txnRef = this.generateVnpTxnRef();
+
+    let vnp_Params: Record<string, string> = {
+      vnp_Version: '2.1.0',
+      vnp_Command: 'pay',
+      vnp_TmnCode: tmnCode,
+      vnp_Amount: String(Math.round(amount) * 100),
+      vnp_CurrCode: 'VND',
+      vnp_TxnRef: txnRef,
+      vnp_OrderInfo: safeOrderInfo,
+      vnp_OrderType: 'other',
+      vnp_Locale: locale,
+      vnp_ReturnUrl: returnUrl,
+      vnp_IpAddr: ipAddr,
+      vnp_CreateDate: createDate,
+      vnp_ExpireDate: expireDate,
+    };
+
+    // 1) sort keys A→Z
+    vnp_Params = this.sortObjectByKey(vnp_Params);
+
+    // 2) tạo signData THEO MẪU NODEJS VNPAY: stringify với { encode: false }
+    const signData = qs.stringify(vnp_Params, '&', '=');
+
+    // 3) HMAC-SHA512 (hex thường như sample)
+    const vnp_SecureHash = crypto
+      .createHmac('sha512', hashSecret.trim())
+      .update(Buffer.from(signData, 'utf-8'))
+      .digest('hex');
+
+    // 4) gắn hash và build URL BẰNG CÙNG CÁCH stringify (encode: false)
+    vnp_Params['vnp_SecureHash'] = vnp_SecureHash;
+
+    const query = qs.stringify(vnp_Params, '&', '=');
+    const paymentUrl = `${vnpUrl}?${query}`;
+
+    // Debug:
+    // console.log('signData =', signData);
+    // console.log('vnp_SecureHash =', vnp_SecureHash);
+    // console.log('paymentUrl =', paymentUrl);
+
+    return Promise.resolve({ paymentUrl, txnRef });
+  }
+
+  /** ===== Helpers (đặt trong class PaymentService) ===== */
+
+  private formatDateYYYYMMDDHHmmss(d: Date) {
+    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+    const yyyy = d.getFullYear();
+    const MM = pad(d.getMonth() + 1);
+    const dd = pad(d.getDate());
+    const HH = pad(d.getHours());
+    const mm = pad(d.getMinutes());
+    const ss = pad(d.getSeconds());
+    return `${yyyy}${MM}${dd}${HH}${mm}${ss}`;
+  }
+
+  private generateVnpTxnRef() {
+    // YYMMDDHHmmss + 6 số ngẫu nhiên — đủ uniqueness cho TEST/DEV
+    const now = new Date();
+    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+    const y = `${now.getFullYear()}`.slice(-2);
+    const MM = pad(now.getMonth() + 1);
+    const dd = pad(now.getDate());
+    const HH = pad(now.getHours());
+    const mm = pad(now.getMinutes());
+    const ss = pad(now.getSeconds());
+    const rnd = Math.floor(Math.random() * 1_000_000)
+      .toString()
+      .padStart(6, '0');
+    return `${y}${MM}${dd}${HH}${mm}${ss}${rnd}`;
+  }
+
+  private sortObjectByKey(obj: Record<string, string>) {
+    return Object.keys(obj)
+      .sort()
+      .reduce(
+        (acc, k) => {
+          acc[k] = obj[k];
+          return acc;
+        },
+        {} as Record<string, string>,
+      );
   }
 }

@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
@@ -20,10 +21,13 @@ import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
 import { AuthModule } from './modules/core/auth/auth.module';
 
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
+import { ConfigModule } from '@nestjs/config';
+import * as Joi from 'joi';
+import vnpayConfig from './config/vnpay.config';
 @Module({
   imports: [
     TypeOrmModule.forRoot({
-      type: 'postgres', // or mysql, etc.
+      type: 'postgres',
       host: process.env.DB_HOST || 'localhost',
       port: parseInt(process.env.DB_PORT ?? '5432'),
       username: process.env.DB_USER || 'postgres',
@@ -31,6 +35,17 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
       database: process.env.DB_NAME || 'rent_home',
       autoLoadEntities: true,
       synchronize: true, // OFF on production!
+    }),
+    ConfigModule.forRoot({
+      isGlobal: true,             // <— để dùng ở mọi nơi mà không cần import lại
+      load: [vnpayConfig],        // <— nạp file config/vnpay.config.ts
+      validationSchema: Joi.object({
+        VNP_TMN_CODE: Joi.string().required(),
+        VNP_HASH_SECRET: Joi.string().required(),
+        VNP_URL: Joi.string().uri().required(),
+        VNP_RETURN_URL: Joi.string().uri().required(),
+        VNP_IPN_URL: Joi.string().uri().optional(),
+      }),
     }),
     AuthModule,
     UserModule,

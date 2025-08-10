@@ -17,7 +17,7 @@ export class CreatePaymentDto {
 
   @IsEnum(PaymentMethodEnum)
   @ApiProperty({
-    example: PaymentMethodEnum.BANK_TRANSFER,
+    example: PaymentMethodEnum.CASH,
     enum: PaymentMethodEnum,
     description: 'Phương thức thanh toán',
   })

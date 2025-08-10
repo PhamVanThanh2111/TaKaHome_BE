@@ -32,4 +32,10 @@ export class Payment {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @Column({ nullable: true })
+  gatewayTxnRef?: string;
+
+  @Column({ nullable: true })
+  transactionNo?: string;
 }
