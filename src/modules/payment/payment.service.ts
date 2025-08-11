@@ -185,4 +185,58 @@ export class PaymentService {
         {} as Record<string, string>,
       );
   }
+
+  async verifyVnpayReturn(query: Record<string, string>) {
+    // 1) Lấy secret từ config
+    const secret = this.vnpay.hashSecret;
+    if (!secret) {
+      throw new Error('VNPay hashSecret is missing.');
+    }
+
+    // 2) Lấy hash và loại nó khỏi tập tham số
+    const receivedHash = (query.vnp_SecureHash || '').toLowerCase();
+    const { vnp_SecureHash, vnp_SecureHashType, ...raw } = query;
+
+    // 3) Chỉ giữ các key bắt đầu bằng vnp_ rồi sort
+    const vnpParams: Record<string, string> = {};
+    Object.keys(raw)
+      .filter((k) => k.startsWith('vnp_'))
+      .sort()
+      .forEach((k) => (vnpParams[k] = raw[k]));
+
+    // 4) Tạo chuỗi ký THEO ĐÚNG SAMPLE NODEJS của VNPAY
+    const signData = qs.stringify(vnpParams, '&', '=');
+
+    // 5) Tính HMAC và so sánh
+    const signed = crypto
+      .createHmac('sha512', secret)
+      .update(Buffer.from(signData, 'utf-8'))
+      .digest('hex')
+      .toLowerCase();
+
+    const okSignature = signed === receivedHash;
+
+    // 6) Kết quả
+    const txnRef = vnpParams['vnp_TxnRef'];
+    const amount = Number(vnpParams['vnp_Amount'] || 0) / 100; // đổi về VND
+    const code = vnpParams['vnp_ResponseCode']; // '00' = success
+    const status = vnpParams['vnp_TransactionStatus']; // '00' = success
+
+    return Promise.resolve({
+      ok: okSignature && code === '00' && status === '00',
+      reason: !okSignature
+        ? 'INVALID_SIGNATURE'
+        : code === '00'
+          ? 'OK'
+          : 'GATEWAY_FAILED',
+      code, // 00/.. từ VNPay
+      status, // 00/.. từ VNPay
+      txnRef, // để FE/BE tra cứu payment
+      amount,
+      // có thể trả thêm bankCode, payDate...
+      bankCode: vnpParams['vnp_BankCode'],
+      payDate: vnpParams['vnp_PayDate'],
+      orderInfo: vnpParams['vnp_OrderInfo'],
+    });
+  }
 }

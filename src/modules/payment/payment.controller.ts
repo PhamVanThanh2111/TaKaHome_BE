@@ -22,6 +22,7 @@ import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { Request, Response } from 'express';
+import { Public } from '../core/auth/public.decorator';
 
 @Controller('payments')
 @ApiBearerAuth()
@@ -108,6 +109,16 @@ export class PaymentController {
 
     // mặc định trả JSON để FE tự xử lý
     return res.json({ url: paymentUrl, txnRef });
+  }
+
+  @Public()
+  @Get('vnpay/return')
+  async vnpReturn(@Query() q: Record<string, string>, @Res() res: Response) {
+    const result = await this.paymentService.verifyVnpayReturn(q);
+    // Tuỳ bạn: trả JSON, hoặc redirect về FE kèm trạng thái
+    return res.json(result);
+    // ví dụ redirect:
+    // return res.redirect(`${FE_URL}/payment-result?ok=${result.ok}&code=${result.code}&txnRef=${result.txnRef}`);
   }
 
   /** Helper: lấy IP thật của client (hữu ích khi chạy sau reverse proxy) */
