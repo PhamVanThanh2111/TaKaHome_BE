@@ -6,4 +6,6 @@ export enum StatusEnum {
   REJECTED = 'REJECTED',
   COMPLETED = 'COMPLETED',
   CANCELLED = 'CANCELLED',
+  PAID = 'PAID',
+  FAILED = 'FAILED',
 }

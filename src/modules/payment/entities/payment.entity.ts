@@ -38,4 +38,8 @@ export class Payment {
 
   @Column({ nullable: true })
   transactionNo?: string;
+
+  // ########### VNPAY ###########
+  bankCode: string;
+  paidAt: Date;
 }

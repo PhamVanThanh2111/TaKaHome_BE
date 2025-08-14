@@ -121,6 +121,13 @@ export class PaymentController {
     // return res.redirect(`${FE_URL}/payment-result?ok=${result.ok}&code=${result.code}&txnRef=${result.txnRef}`);
   }
 
+  @Public()
+  @Get('vnpay/ipn')
+  @HttpCode(HttpStatus.OK)
+  vnpIpn(@Query() q: Record<string, string>) {
+    this.paymentService.handleVnpayIpn(q);
+  }
+
   /** Helper: lấy IP thật của client (hữu ích khi chạy sau reverse proxy) */
   private getClientIpIPv4(req: Request) {
     let ip =
