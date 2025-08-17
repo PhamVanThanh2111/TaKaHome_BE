@@ -13,7 +13,7 @@ export class PaymentResponseDto {
   amount: number;
 
   @ApiProperty({
-    example: PaymentMethodEnum.BANK_TRANSFER,
+    example: PaymentMethodEnum.CASH,
     enum: PaymentMethodEnum,
   })
   method: PaymentMethodEnum;
