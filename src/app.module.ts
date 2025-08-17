@@ -18,7 +18,7 @@ import { PropertyUtilityModule } from './modules/property-utility/property-utili
 import { ChatRoomModule } from './modules/chatroom/chatroom.module';
 import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
 import { AuthModule } from './modules/core/auth/auth.module';
-import { AppDataSource } from './modules/core/database/data-source';
+import AppDataSourcePromise from './modules/core/database/data-source';
 
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { ConfigModule } from '@nestjs/config';
@@ -28,7 +28,7 @@ import vnpayConfig from './config/vnpay.config';
 @Module({
   imports: [
     TypeOrmModule.forRootAsync({
-      useFactory: async () => (await AppDataSource).options,
+      useFactory: async () => (await AppDataSourcePromise).options,
     }),
     ConfigModule.forRoot({
       isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại

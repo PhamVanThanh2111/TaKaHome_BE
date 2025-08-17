@@ -20,5 +20,3 @@ const getAppDataSource = async () => {
 
 const AppDataSourcePromise = getAppDataSource();
 export default AppDataSourcePromise;
-
-export { AppDataSourcePromise as AppDataSource };

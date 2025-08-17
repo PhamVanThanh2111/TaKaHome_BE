@@ -38,7 +38,7 @@ export function toTypeOrmOptions(cfg: DatabaseConfig): DataSourceOptions {
   const common: Partial<DataSourceOptions> = {
     type: cfg.type,
     entities: ['dist/**/*.entity{.ts,.js}'], // khi chạy app đã build
-    migrations: ['dist/modules/**/migrations/*.js'], // khi chạy app đã build
+    migrations: ['dist/migrations/*.js'], // khi chạy app đã build
     synchronize: false, // OFF for production
     ssl: cfg.ssl ? { rejectUnauthorized: false } : undefined,
   };
