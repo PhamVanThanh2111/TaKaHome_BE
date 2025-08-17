@@ -24,17 +24,32 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { ConfigModule } from '@nestjs/config';
 import * as Joi from 'joi';
 import vnpayConfig from './config/vnpay.config';
+
 @Module({
   imports: [
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT ?? '5432'),
-      username: process.env.DB_USER || 'postgres',
-      password: process.env.DB_PASS || 'root',
-      database: process.env.DB_NAME || 'rent_home',
-      autoLoadEntities: true,
-      synchronize: true, // OFF on production!
+    TypeOrmModule.forRootAsync({
+      useFactory: () => ({
+        type: process.env.DB_TYPE as 'postgres',
+        host: process.env.DB_HOST,
+        port: parseInt(process.env.DB_PORT ?? '5432'),
+        username: process.env.DB_USER || 'neondb_owner',
+        password: process.env.DB_PASS,
+        database: process.env.DB_NAME || 'rent_home',
+        autoLoadEntities: true,
+        synchronize: false, // OFF on production!
+        ssl: { require: true, rejectUnauthorized: false },
+      }),
+    }),
+    ConfigModule.forRoot({
+      isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
+      load: [vnpayConfig], // <— nạp file config/vnpay.config.ts
+      validationSchema: Joi.object({
+        VNP_TMN_CODE: Joi.string().required(),
+        VNP_HASH_SECRET: Joi.string().required(),
+        VNP_URL: Joi.string().uri().required(),
+        VNP_RETURN_URL: Joi.string().uri().required(),
+        VNP_IPN_URL: Joi.string().uri().optional(),
+      }),
     }),
     ConfigModule.forRoot({
       isGlobal: true,             // <— để dùng ở mọi nơi mà không cần import lại
