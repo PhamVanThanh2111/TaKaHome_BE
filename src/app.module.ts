@@ -18,6 +18,7 @@ import { PropertyUtilityModule } from './modules/property-utility/property-utili
 import { ChatRoomModule } from './modules/chatroom/chatroom.module';
 import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
 import { AuthModule } from './modules/core/auth/auth.module';
+import { AppDataSource } from './modules/core/database/data-source';
 
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { ConfigModule } from '@nestjs/config';
@@ -27,17 +28,7 @@ import vnpayConfig from './config/vnpay.config';
 @Module({
   imports: [
     TypeOrmModule.forRootAsync({
-      useFactory: () => ({
-        type: process.env.DB_TYPE as 'postgres',
-        host: process.env.DB_HOST,
-        port: parseInt(process.env.DB_PORT ?? '5432'),
-        username: process.env.DB_USER || 'neondb_owner',
-        password: process.env.DB_PASS,
-        database: process.env.DB_NAME || 'rent_home',
-        autoLoadEntities: true,
-        synchronize: false, // OFF on production!
-        ssl: { require: true, rejectUnauthorized: false },
-      }),
+      useFactory: async () => (await AppDataSource).options,
     }),
     ConfigModule.forRoot({
       isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại

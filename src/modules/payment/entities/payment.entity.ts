@@ -33,6 +33,7 @@ export class Payment {
   @UpdateDateColumn()
   updatedAt: Date;
 
+  // ########### BLOCKCHAIN ###########
   @Column({ nullable: true })
   gatewayTxnRef?: string;
 
@@ -40,6 +41,9 @@ export class Payment {
   transactionNo?: string;
 
   // ########### VNPAY ###########
+  @Column({ nullable: true })
   bankCode: string;
+
+  @Column({ nullable: true })
   paidAt: Date;
 }
