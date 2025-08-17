@@ -1,4 +1,3 @@
-/* eslint-disable prettier/prettier */
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
@@ -52,8 +51,8 @@ import vnpayConfig from './config/vnpay.config';
       }),
     }),
     ConfigModule.forRoot({
-      isGlobal: true,             // <— để dùng ở mọi nơi mà không cần import lại
-      load: [vnpayConfig],        // <— nạp file config/vnpay.config.ts
+      isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
+      load: [vnpayConfig], // <— nạp file config/vnpay.config.ts
       validationSchema: Joi.object({
         VNP_TMN_CODE: Joi.string().required(),
         VNP_HASH_SECRET: Joi.string().required(),

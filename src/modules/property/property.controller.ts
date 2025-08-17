@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Controller,
   Get,
@@ -48,7 +47,7 @@ export class PropertyController {
     try {
       return this.propertyService.create(createPropertyDto, currentUser.id);
     } catch (error) {
-      throw new Error(`Error creating property: ${error.message}`);
+      throw new Error(`Error creating property: ${error}`);
     }
   }
 
