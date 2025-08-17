@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Controller,
   Get,
@@ -18,6 +19,8 @@ import { PropertyResponseDto } from './dto/property-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
+import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 
 @Controller('properties')
 export class PropertyController {
@@ -38,8 +41,15 @@ export class PropertyController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'LANDLORD')
-  create(@Body() createPropertyDto: CreatePropertyDto) {
-    return this.propertyService.create(createPropertyDto);
+  create(
+    @Body() createPropertyDto: CreatePropertyDto,
+    @CurrentUser() currentUser: JwtUser,
+  ) {
+    try {
+      return this.propertyService.create(createPropertyDto, currentUser.id);
+    } catch (error) {
+      throw new Error(`Error creating property: ${error.message}`);
+    }
   }
 
   @Get()
