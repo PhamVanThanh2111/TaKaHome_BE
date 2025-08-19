@@ -1,7 +1,7 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreatePaymentDto } from './create-payment.dto';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { StatusEnum } from 'src/modules/common/enums/status.enum';
+import { PaymentStatusEnum } from 'src/modules/common/enums/payment-status.enum';
 
 export class UpdatePaymentDto extends PartialType(CreatePaymentDto) {
   @ApiPropertyOptional({
@@ -10,6 +10,9 @@ export class UpdatePaymentDto extends PartialType(CreatePaymentDto) {
   })
   id?: string;
 
-  @ApiPropertyOptional({ example: StatusEnum.COMPLETED, enum: StatusEnum })
-  status?: StatusEnum;
+  @ApiPropertyOptional({
+    example: PaymentStatusEnum.PAID,
+    enum: PaymentStatusEnum,
+  })
+  status?: PaymentStatusEnum;
 }

@@ -41,17 +41,6 @@ import vnpayConfig from './config/vnpay.config';
         VNP_IPN_URL: Joi.string().uri().optional(),
       }),
     }),
-    ConfigModule.forRoot({
-      isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
-      load: [vnpayConfig], // <— nạp file config/vnpay.config.ts
-      validationSchema: Joi.object({
-        VNP_TMN_CODE: Joi.string().required(),
-        VNP_HASH_SECRET: Joi.string().required(),
-        VNP_URL: Joi.string().uri().required(),
-        VNP_RETURN_URL: Joi.string().uri().required(),
-        VNP_IPN_URL: Joi.string().uri().optional(),
-      }),
-    }),
     AuthModule,
     UserModule,
     PropertyModule,

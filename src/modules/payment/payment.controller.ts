@@ -115,9 +115,9 @@ export class PaymentController {
   @Get('vnpay/return')
   async vnpReturn(@Query() q: Record<string, string>, @Res() res: Response) {
     const result = await this.paymentService.verifyVnpayReturn(q);
-    // Tuỳ bạn: trả JSON, hoặc redirect về FE kèm trạng thái
+    // trả JSON
     return res.json(result);
-    // ví dụ redirect:
+    // hoặc redirect FE:
     // return res.redirect(`${FE_URL}/payment-result?ok=${result.ok}&code=${result.code}&txnRef=${result.txnRef}`);
   }
 

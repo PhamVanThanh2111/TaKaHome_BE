@@ -1,7 +1,7 @@
 import { IsNotEmpty, IsNumber, IsEnum } from 'class-validator';
 import { PaymentMethodEnum } from '../../common/enums/payment-method.enum';
-import { StatusEnum } from '../../common/enums/status.enum';
 import { ApiProperty } from '@nestjs/swagger';
+import { PaymentStatusEnum } from 'src/modules/common/enums/payment-status.enum';
 
 export class CreatePaymentDto {
   @IsNotEmpty()
@@ -23,12 +23,12 @@ export class CreatePaymentDto {
   })
   method: PaymentMethodEnum;
 
-  @IsEnum(StatusEnum)
+  @IsEnum(PaymentStatusEnum)
   @ApiProperty({
-    example: StatusEnum.PENDING,
-    enum: StatusEnum,
+    example: PaymentStatusEnum.PENDING,
+    enum: PaymentStatusEnum,
     required: false,
     description: 'Trạng thái thanh toán',
   })
-  status?: StatusEnum;
+  status?: PaymentStatusEnum;
 }

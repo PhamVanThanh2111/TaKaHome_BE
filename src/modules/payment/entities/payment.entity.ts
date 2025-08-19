@@ -8,7 +8,7 @@ import {
 } from 'typeorm';
 import { Contract } from '../../contract/entities/contract.entity';
 import { PaymentMethodEnum } from '../../common/enums/payment-method.enum';
-import { StatusEnum } from '../../common/enums/status.enum';
+import { PaymentStatusEnum } from 'src/modules/common/enums/payment-status.enum';
 
 @Entity()
 export class Payment {
@@ -24,8 +24,12 @@ export class Payment {
   @Column({ type: 'enum', enum: PaymentMethodEnum })
   method: PaymentMethodEnum;
 
-  @Column({ type: 'enum', enum: StatusEnum, default: StatusEnum.PENDING })
-  status: StatusEnum;
+  @Column({
+    type: 'enum',
+    enum: PaymentStatusEnum,
+    default: PaymentStatusEnum.PENDING,
+  })
+  status: PaymentStatusEnum;
 
   @CreateDateColumn()
   createdAt: Date;
