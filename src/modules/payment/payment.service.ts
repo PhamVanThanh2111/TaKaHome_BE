@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Payment } from './entities/payment.entity';
@@ -9,6 +9,9 @@ import { ConfigType } from '@nestjs/config';
 import * as crypto from 'crypto';
 import * as qs from 'querystring';
 import vnpayConfig from 'src/config/vnpay.config';
+import { PaymentStatusEnum } from '../common/enums/payment-status.enum';
+import { PaymentMethodEnum } from '../common/enums/payment-method.enum';
+import { WalletService } from '../wallet/wallet.service';
 
 @Injectable()
 export class PaymentService {
@@ -18,17 +21,75 @@ export class PaymentService {
     private paymentRepository: Repository<Payment>,
     @Inject(vnpayConfig.KEY)
     private readonly vnpay: ConfigType<typeof vnpayConfig>,
+    private readonly walletService: WalletService,
   ) {}
 
-  async create(createPaymentDto: CreatePaymentDto): Promise<Payment> {
-    const { contractId, amount, method, status } = createPaymentDto;
-    const payment = this.paymentRepository.create({
+  /** API chính để khởi tạo thanh toán */
+  async createPayment(
+    dto: CreatePaymentDto,
+    ctx: { userId: string; ipAddr: string },
+  ) {
+    const { contractId, amount, method } = dto;
+
+    // 1) Tạo bản ghi Payment PENDING (mặc định)
+    let payment = this.paymentRepository.create({
       contract: { id: contractId },
       amount,
-      method,
-      status,
+      method, // 'WALLET' | 'VNPAY'
+      status: PaymentStatusEnum.PENDING, // PENDING khi tạo mới
     });
-    return this.paymentRepository.save(payment);
+    payment = await this.paymentRepository.save(payment);
+
+    if (method === PaymentMethodEnum.WALLET) {
+      // 2A) Thanh toán bằng ví: trừ ví và chuyển sang PAID
+      await this.walletService.debit(ctx.userId, {
+        amount,
+        type: 'CONTRACT_PAYMENT',
+        refType: 'PAYMENT',
+        refId: payment.id,
+        note: `Pay contract ${contractId} by wallet`,
+      });
+
+      payment.status = PaymentStatusEnum.PAID;
+      payment.paidAt = new Date();
+      await this.paymentRepository.save(payment);
+
+      return {
+        id: payment.id,
+        contractId,
+        amount,
+        method,
+        status: payment.status,
+      };
+    }
+
+    if (method === PaymentMethodEnum.VNPAY) {
+      // 2B) Thanh toán VNPAY: tạo URL và giữ PENDING chờ IPN
+      const { paymentUrl, txnRef } = await this.createVnpayPaymentLink({
+        contractId,
+        amount,
+        ipAddr: ctx.ipAddr,
+        orderInfo: dto.orderInfo ?? `Thanh_toan_hop_dong_${contractId}`,
+        locale: dto.locale ?? 'vn',
+        expireIn: dto.expireIn ?? 15,
+      });
+
+      // lưu txnRef để IPN map về
+      payment.gatewayTxnRef = txnRef;
+      await this.paymentRepository.save(payment);
+
+      return {
+        id: payment.id,
+        contractId,
+        amount,
+        method,
+        status: payment.status, // PENDING
+        paymentUrl,
+        txnRef,
+      };
+    }
+
+    throw new BadRequestException('Unsupported payment method');
   }
 
   async findAll(): Promise<Payment[]> {
@@ -66,7 +127,7 @@ export class PaymentService {
     amount: number; // VND
     ipAddr: string; // IP thực của client
     orderInfo?: string;
-    locale?: 'vn' | 'en'; // default 'vn'
+    locale?: 'vn'; // default 'vn'
     expireIn?: number; // minutes, default 15
   }): Promise<{ paymentUrl: string; txnRef: string }> {
     const {

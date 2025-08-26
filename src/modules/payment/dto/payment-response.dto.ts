@@ -13,11 +13,14 @@ export class PaymentResponseDto {
   amount: number;
 
   @ApiProperty({
-    example: PaymentMethodEnum.CASH,
+    example: PaymentMethodEnum.VNPAY,
     enum: PaymentMethodEnum,
   })
   method: PaymentMethodEnum;
 
   @ApiProperty({ example: StatusEnum.PENDING, enum: StatusEnum })
   status: StatusEnum;
+
+  paymentUrl?: string; // chỉ có khi method=VNPAY
+  txnRef?: string; // vnp_TxnRef để FE biết theo dõi
 }
