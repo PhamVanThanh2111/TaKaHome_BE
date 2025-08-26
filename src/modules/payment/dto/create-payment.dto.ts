@@ -1,7 +1,17 @@
-import { IsNotEmpty, IsNumber, IsEnum } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsNumber,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MaxLength,
+  IsIn,
+  IsInt,
+  Min,
+} from 'class-validator';
 import { PaymentMethodEnum } from '../../common/enums/payment-method.enum';
 import { ApiProperty } from '@nestjs/swagger';
-import { PaymentStatusEnum } from 'src/modules/common/enums/payment-status.enum';
+import { Transform } from 'class-transformer';
 
 export class CreatePaymentDto {
   @IsNotEmpty()
@@ -17,18 +27,25 @@ export class CreatePaymentDto {
 
   @IsEnum(PaymentMethodEnum)
   @ApiProperty({
-    example: PaymentMethodEnum.CASH,
+    example: PaymentMethodEnum.VNPAY,
     enum: PaymentMethodEnum,
     description: 'Phương thức thanh toán',
   })
   method: PaymentMethodEnum;
 
-  @IsEnum(PaymentStatusEnum)
-  @ApiProperty({
-    example: PaymentStatusEnum.PENDING,
-    enum: PaymentStatusEnum,
-    required: false,
-    description: 'Trạng thái thanh toán',
-  })
-  status?: PaymentStatusEnum;
+  // VNPAY
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  orderInfo?: string;
+
+  @IsOptional()
+  @IsIn(['vn', 'en'])
+  locale?: 'vn';
+
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  @Min(5)
+  expireIn?: number; // minutes
 }
