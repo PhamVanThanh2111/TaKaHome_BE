@@ -85,7 +85,12 @@ export class AuthService {
         email: acc.email,
         roles: acc.roles,
         isVerified: acc.isVerified,
-        user: acc.user, // Có thể custom chỉ trả về một số field
+        user: {
+          id: acc.user.id,
+          fullName: acc.user.fullName,
+          avatarUrl: acc.user.avatarUrl,
+          status: acc.user.status,
+        },
       },
     };
   }
