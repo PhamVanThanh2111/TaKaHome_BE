@@ -24,6 +24,7 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { ConfigModule } from '@nestjs/config';
 import * as Joi from 'joi';
 import vnpayConfig from './config/vnpay.config';
+import { WalletModule } from './modules/wallet/wallet.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import vnpayConfig from './config/vnpay.config';
     PropertyUtilityModule,
     ChatRoomModule,
     ChatMessageModule,
+    WalletModule,
   ],
 })
 export class AppModule implements NestModule {
