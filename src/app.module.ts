@@ -18,6 +18,7 @@ import { PropertyUtilityModule } from './modules/property-utility/property-utili
 import { ChatRoomModule } from './modules/chatroom/chatroom.module';
 import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
 import { AuthModule } from './modules/core/auth/auth.module';
+import { BlockchainModule } from './modules/blockchain/blockchain.module';
 
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { ConfigModule } from '@nestjs/config';
@@ -50,18 +51,8 @@ import vnpayConfig from './config/vnpay.config';
         VNP_IPN_URL: Joi.string().uri().optional(),
       }),
     }),
-    ConfigModule.forRoot({
-      isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
-      load: [vnpayConfig], // <— nạp file config/vnpay.config.ts
-      validationSchema: Joi.object({
-        VNP_TMN_CODE: Joi.string().required(),
-        VNP_HASH_SECRET: Joi.string().required(),
-        VNP_URL: Joi.string().uri().required(),
-        VNP_RETURN_URL: Joi.string().uri().required(),
-        VNP_IPN_URL: Joi.string().uri().optional(),
-      }),
-    }),
     AuthModule,
+    BlockchainModule,
     UserModule,
     PropertyModule,
     ContractModule,

@@ -1,0 +1,146 @@
+{
+  "name": "real-estate-network",
+  "version": "1.0.0",
+  "client": {
+    "organization": "OrgProp",
+    "connection": {
+      "timeout": {
+        "peer": {
+          "endorser": "300"
+        }
+      }
+    }
+  },
+  "organizations": {
+    "OrgProp": {
+      "mspid": "OrgPropMSP",
+      "peers": [
+        "peer0.orgprop.example.com"
+      ],
+      "certificateAuthorities": [
+        "ca-orgprop"
+      ]
+    },
+    "OrgTenant": {
+      "mspid": "OrgTenantMSP",
+      "peers": [
+        "peer0.orgtenant.example.com"
+      ],
+      "certificateAuthorities": [
+        "ca-orgtenant"
+      ]
+    },
+    "OrgAgent": {
+      "mspid": "OrgAgentMSP",
+      "peers": [
+        "peer0.orgagent.example.com"
+      ],
+      "certificateAuthorities": [
+        "ca-orgagent"
+      ]
+    }
+  },
+  "peers": {
+    "peer0.orgprop.example.com": {
+      "url": "grpcs://localhost:7051",
+      "tlsCACerts": {
+        "path": "./assets/blockchain/tls/peer0-orgprop-ca.crt"
+      },
+      "grpcOptions": {
+        "ssl-target-name-override": "peer0.orgprop.example.com",
+        "hostnameOverride": "peer0.orgprop.example.com"
+      }
+    },
+    "peer0.orgtenant.example.com": {
+      "url": "grpcs://localhost:8051",
+      "tlsCACerts": {
+        "path": "./assets/blockchain/tls/peer0-orgtenant-ca.crt"
+      },
+      "grpcOptions": {
+        "ssl-target-name-override": "peer0.orgtenant.example.com",
+        "hostnameOverride": "peer0.orgtenant.example.com"
+      }
+    },
+    "peer0.orgagent.example.com": {
+      "url": "grpcs://localhost:9051",
+      "tlsCACerts": {
+        "path": "./assets/blockchain/tls/peer0-orgagent-ca.crt"
+      },
+      "grpcOptions": {
+        "ssl-target-name-override": "peer0.orgagent.example.com",
+        "hostnameOverride": "peer0.orgagent.example.com"
+      }
+    }
+  },
+  "certificateAuthorities": {
+    "ca-orgprop": {
+      "url": "https://localhost:7054",
+      "caName": "ca-orgprop",
+      "tlsCACerts": {
+        "path": "./assets/blockchain/tls/ca-orgprop.crt"
+      },
+      "httpOptions": {
+        "verify": false
+      }
+    },
+    "ca-orgtenant": {
+      "url": "https://localhost:8054",
+      "caName": "ca-orgtenant",
+      "tlsCACerts": {
+        "path": "./assets/blockchain/tls/ca-orgtenant.crt"
+      },
+      "httpOptions": {
+        "verify": false
+      }
+    },
+    "ca-orgagent": {
+      "url": "https://localhost:9054",
+      "caName": "ca-orgagent",
+      "tlsCACerts": {
+        "path": "./assets/blockchain/tls/ca-orgagent.crt"
+      },
+      "httpOptions": {
+        "verify": false
+      }
+    }
+  },
+  "channels": {
+    "rentalchannel": {
+      "orderers": [
+        "orderer1.ordererorg.example.com"
+      ],
+      "peers": {
+        "peer0.orgprop.example.com": {
+          "endorsingPeer": true,
+          "chaincodeQuery": true,
+          "ledgerQuery": true,
+          "eventSource": true
+        },
+        "peer0.orgtenant.example.com": {
+          "endorsingPeer": true,
+          "chaincodeQuery": true,
+          "ledgerQuery": true,
+          "eventSource": true
+        },
+        "peer0.orgagent.example.com": {
+          "endorsingPeer": true,
+          "chaincodeQuery": true,
+          "ledgerQuery": true,
+          "eventSource": true
+        }
+      }
+    }
+  },
+  "orderers": {
+    "orderer1.ordererorg.example.com": {
+      "url": "grpcs://localhost:7050",
+      "tlsCACerts": {
+        "path": "./assets/blockchain/tls/ca-orderer.crt"
+      },
+      "grpcOptions": {
+        "ssl-target-name-override": "orderer1.ordererorg.example.com",
+        "hostnameOverride": "orderer1.ordererorg.example.com"
+      }
+    }
+  }
+}
