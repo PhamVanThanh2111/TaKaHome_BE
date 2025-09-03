@@ -8,7 +8,7 @@ import {
 } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { Property } from '../../property/entities/property.entity';
-import { StatusEnum } from '../../common/enums/status.enum';
+import { BookingStatus } from 'src/modules/common/enums/booking-status.enum';
 
 @Entity()
 export class Booking {
@@ -24,8 +24,12 @@ export class Booking {
   @Column({ type: 'date' })
   bookingDate: Date;
 
-  @Column({ type: 'enum', enum: StatusEnum, default: StatusEnum.PENDING })
-  status: StatusEnum;
+  @Column({
+    type: 'enum',
+    enum: BookingStatus,
+    default: BookingStatus.PENDING_LANDLORD,
+  })
+  status: BookingStatus;
 
   @CreateDateColumn()
   createdAt: Date;

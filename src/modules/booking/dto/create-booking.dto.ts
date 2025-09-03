@@ -1,6 +1,6 @@
 import { IsNotEmpty, IsDateString, IsEnum } from 'class-validator';
-import { StatusEnum } from '../../common/enums/status.enum';
 import { ApiProperty } from '@nestjs/swagger';
+import { BookingStatus } from 'src/modules/common/enums/booking-status.enum';
 
 export class CreateBookingDto {
   @IsNotEmpty()
@@ -21,12 +21,12 @@ export class CreateBookingDto {
   @ApiProperty({ example: '2024-07-15', description: 'Ngày đặt (YYYY-MM-DD)' })
   bookingDate: Date;
 
-  @IsEnum(StatusEnum)
+  @IsEnum(BookingStatus)
   @ApiProperty({
-    example: StatusEnum.PENDING,
-    enum: StatusEnum,
+    example: BookingStatus.PENDING_LANDLORD,
+    enum: BookingStatus,
     required: false,
     description: 'Trạng thái booking',
   })
-  status?: StatusEnum;
+  status?: BookingStatus;
 }

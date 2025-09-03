@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { StatusEnum } from '../../common/enums/status.enum';
+import { BookingStatus } from 'src/modules/common/enums/booking-status.enum';
 
 export class BookingResponseDto {
   @ApiProperty({ example: 'cc7ee48b-dfb6-4890-9612-198dddfac3e1' })
@@ -14,6 +14,6 @@ export class BookingResponseDto {
   @ApiProperty({ example: '2024-07-15' })
   bookingDate: string;
 
-  @ApiProperty({ example: StatusEnum.PENDING, enum: StatusEnum })
-  status: StatusEnum;
+  @ApiProperty({ example: BookingStatus.PENDING_LANDLORD, enum: BookingStatus })
+  status: BookingStatus;
 }
