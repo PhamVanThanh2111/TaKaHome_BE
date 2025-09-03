@@ -50,14 +50,14 @@ export class BlockchainConfigService {
         },
         caUrl: this.configService.get<string>('CA_TENANT_URL', 'https://localhost:8054')
       },
-      OrgAgent: {
-        name: 'OrgAgent',
-        mspId: 'OrgAgentMSP',
+      OrgLandlord: {
+        name: 'OrgLandlord',
+        mspId: 'OrgLandlordMSP',
         users: {
-          admin: 'admin-OrgAgent',
-          user: 'appUserAgent'
+          admin: 'admin-OrgLandlord',
+          user: 'appUserLandlord'
         },
-        caUrl: this.configService.get<string>('CA_AGENT_URL', 'https://localhost:9054')
+        caUrl: this.configService.get<string>('CA_LANDLORD_URL', 'https://localhost:9054')
       }
     };
   }
@@ -112,7 +112,7 @@ export class BlockchainConfigService {
       ca: {
         orgProp: this.configService.get<string>('CA_PROP_URL', 'https://localhost:7054'),
         orgTenant: this.configService.get<string>('CA_TENANT_URL', 'https://localhost:8054'),
-        orgAgent: this.configService.get<string>('CA_AGENT_URL', 'https://localhost:9054')
+        orgLandlord: this.configService.get<string>('CA_LANDLORD_URL', 'https://localhost:9054')
       }
     };
   }

@@ -30,13 +30,13 @@
         "ca-orgtenant"
       ]
     },
-    "OrgAgent": {
-      "mspid": "OrgAgentMSP",
+    "OrgLandlord": {
+      "mspid": "OrgLandlordMSP",
       "peers": [
-        "peer0.orgagent.example.com"
+        "peer0.orglandlord.example.com"
       ],
       "certificateAuthorities": [
-        "ca-orgagent"
+        "ca-orglandlord"
       ]
     }
   },
@@ -61,14 +61,14 @@
         "hostnameOverride": "peer0.orgtenant.example.com"
       }
     },
-    "peer0.orgagent.example.com": {
+    "peer0.orglandlord.example.com": {
       "url": "grpcs://localhost:9051",
       "tlsCACerts": {
-        "path": "./assets/blockchain/tls/peer0-orgagent-ca.crt"
+        "path": "./assets/blockchain/tls/peer0-orglandlord-ca.crt"
       },
       "grpcOptions": {
-        "ssl-target-name-override": "peer0.orgagent.example.com",
-        "hostnameOverride": "peer0.orgagent.example.com"
+        "ssl-target-name-override": "peer0.orglandlord.example.com",
+        "hostnameOverride": "peer0.orglandlord.example.com"
       }
     }
   },
@@ -93,11 +93,11 @@
         "verify": false
       }
     },
-    "ca-orgagent": {
+    "ca-orglandlord": {
       "url": "https://localhost:9054",
-      "caName": "ca-orgagent",
+      "caName": "ca-orglandlord",
       "tlsCACerts": {
-        "path": "./assets/blockchain/tls/ca-orgagent.crt"
+        "path": "./assets/blockchain/tls/ca-orglandlord.crt"
       },
       "httpOptions": {
         "verify": false
@@ -122,7 +122,7 @@
           "ledgerQuery": true,
           "eventSource": true
         },
-        "peer0.orgagent.example.com": {
+        "peer0.orglandlord.example.com": {
           "endorsingPeer": true,
           "chaincodeQuery": true,
           "ledgerQuery": true,
