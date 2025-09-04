@@ -9,7 +9,8 @@ import {
   UseGuards,
   Logger,
   HttpStatus,
-  HttpCode
+  HttpCode,
+  UnauthorizedException
 } from '@nestjs/common';
 import { 
   ApiTags, 
@@ -22,7 +23,7 @@ import {
 } from '@nestjs/swagger';
 
 import { BlockchainService } from './blockchain.service';
-import { BlockchainAuthGuard, BlockchainUser } from './guards/blockchain-auth.guard';
+import { JwtBlockchainAuthGuard, BlockchainUser } from './guards/jwt-blockchain-auth.guard';
 import { 
   CreateBlockchainContractDto, 
   AddSignatureDto, 
@@ -30,6 +31,7 @@ import {
   TerminateContractDto 
 } from './dto/contract.dto';
 import { FabricUser } from './interfaces/fabric.interface';
+import { CurrentUser } from '../../common/decorators/user.decorator';
 
 /**
  * Contracts Controller
@@ -37,10 +39,11 @@ import { FabricUser } from './interfaces/fabric.interface';
  */
 @Controller('api/blockchain/contracts')
 @ApiTags('Blockchain Contracts')
-@UseGuards(BlockchainAuthGuard)
+@UseGuards(JwtBlockchainAuthGuard)
+@ApiBearerAuth()
 @ApiHeader({
   name: 'orgName',
-  description: 'Organization name (OrgProp, OrgTenant, OrgAgent)',
+  description: 'Organization name (OrgProp, OrgTenant, OrgLandlord)',
   required: true,
   example: 'OrgProp'
 })
@@ -62,7 +65,7 @@ export class ContractsController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ 
     summary: 'Create a new rental contract',
-    description: 'Creates a new rental contract on the blockchain with the specified details'
+    description: 'Creates a new rental contract on the blockchain with the specified details. Must be called by landlord/property owner using OrgProp or OrgLandlord organization.'
   })
   @ApiResponse({ 
     status: 201, 
@@ -93,17 +96,78 @@ export class ContractsController {
   @ApiResponse({ status: 500, description: 'Blockchain network error' })
   async createContract(
     @Body() createContractDto: CreateBlockchainContractDto,
-    @BlockchainUser() user: FabricUser
+    @BlockchainUser() blockchainUser: FabricUser,
+    @CurrentUser() jwtUser: any
   ) {
-    this.logger.log(`Creating contract: ${createContractDto.contractId} for org: ${user.orgName}`);
+    this.logger.log(
+      `Creating contract: ${createContractDto.contractId} for org: ${blockchainUser.orgName} by user: ${jwtUser.email || jwtUser.id}`
+    );
     
-    const result = await this.blockchainService.createContract(createContractDto, user);
+    // Verify user authorization (additional business logic)
+    this.verifyContractCreationPermission(createContractDto, jwtUser, blockchainUser);
+    
+    const result = await this.blockchainService.createContract(createContractDto, blockchainUser);
     
     if (!result.success) {
       this.logger.error(`Failed to create contract: ${result.error}`);
+    } else {
+      this.logger.log(`Contract created successfully by ${jwtUser.email || jwtUser.id}`);
     }
     
     return result;
+  }
+
+  /**
+   * Verify if user has permission to create contract
+   */
+  private verifyContractCreationPermission(
+    contractDto: CreateBlockchainContractDto, 
+    jwtUser: any, 
+    blockchainUser: FabricUser
+  ) {
+    // Get user roles
+    const userRoles = this.getUserRoles(jwtUser);
+    
+    // Only landlords/property owners can create contracts
+    if (!userRoles.includes('LANDLORD') && !userRoles.includes('PROPERTY_OWNER') && !userRoles.includes('ADMIN')) {
+      throw new UnauthorizedException(
+        `Only landlords or property owners can create contracts. User roles: ${userRoles.join(', ')}`
+      );
+    }
+
+    // Must use OrgProp or OrgLandlord organization for contract creation
+    const allowedOrgs = ['OrgProp', 'OrgLandlord'];
+    if (!allowedOrgs.includes(blockchainUser.orgName)) {
+      throw new UnauthorizedException(
+        `Contracts can only be created in ${allowedOrgs.join(' or ')} organizations, not ${blockchainUser.orgName}`
+      );
+    }
+    
+    // Verify user is the lessor in the contract
+    if (contractDto.lessorId !== jwtUser.id.toString() && contractDto.lessorId !== jwtUser.sub) {
+      throw new UnauthorizedException(
+        `User ${jwtUser.id || jwtUser.sub} cannot create contract for lessor ${contractDto.lessorId}`
+      );
+    }
+  }
+
+  /**
+   * Extract user roles from JWT user object (handle different formats)
+   */
+  private getUserRoles(user: any): string[] {
+    if (!user) return [];
+    
+    // Handle roles array (new format)
+    if (user.roles && Array.isArray(user.roles)) {
+      return user.roles.map(role => role.toString().toUpperCase());
+    }
+    
+    // Handle single role field (legacy format)
+    if (user.role) {
+      return [user.role.toString().toUpperCase()];
+    }
+    
+    return [];
   }
 
   /**

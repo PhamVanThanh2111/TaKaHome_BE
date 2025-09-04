@@ -4,7 +4,7 @@ import { BlockchainConfigService } from '../blockchain-config.service';
 /**
  * Blockchain Auth Guard
  * Validates required headers for blockchain operations:
- * - orgName: Organization name (OrgProp, OrgTenant, OrgAgent)
+ * - orgName: Organization name (OrgProp, OrgTenant, OrgLandlord)
  * - userId: User identity (optional, will use default if not provided)
  */
 @Injectable()

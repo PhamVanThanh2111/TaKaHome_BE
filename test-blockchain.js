@@ -66,9 +66,9 @@ const HEADERS = {
     'userId': 'admin-OrgTenant',
     'Content-Type': 'application/json'
   },
-  OrgAgent: {
-    'orgName': 'OrgAgent',
-    'userId': 'admin-OrgAgent',
+  OrgLandlord: {
+    'orgName': 'OrgLandlord',
+    'userId': 'admin-OrgLandlord',
     'Content-Type': 'application/json'
   }
 };
@@ -264,12 +264,26 @@ async function testOrganizationPermissions() {
     );
     console.log('✅ OrgTenant access:', tenantResponse.data);
     
-    console.log('2. Testing OrgAgent accessing contract...');
+    console.log('2. Testing OrgLandlord accessing contract...');
     const agentResponse = await axios.get(
       `${API_BASE}/contracts/${TEST_CONTRACT.contractId}`,
-      { headers: HEADERS.OrgAgent }
+      { headers: HEADERS.OrgLandlord }
     );
-    console.log('✅ OrgAgent access:', agentResponse.data);
+    console.log('✅ OrgLandlord access:', agentResponse.data);
+    
+    // Test contract creation by OrgLandlord (new functionality)
+    console.log('3. Testing OrgLandlord creating contract...');
+    const landlordContract = {
+      ...TEST_CONTRACT,
+      contractId: 'DEMO_LANDLORD_20250829', // Different contract ID
+    };
+    
+    const createByLandlordResponse = await axios.post(
+      `${API_BASE}/contracts`, 
+      landlordContract,
+      { headers: HEADERS.OrgLandlord }
+    );
+    console.log('✅ OrgLandlord contract creation:', createByLandlordResponse.data);
     
   } catch (error) {
     console.error('❌ Organization Permissions Error:', error.response?.data || error.message);

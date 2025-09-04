@@ -35,6 +35,7 @@ export class BlockchainService implements OnModuleInit {
   private contract: Contract;
   private network: Network;
   private isInitialized = false;
+  private currentOrgName: string | null = null;
 
   constructor(
     private blockchainConfig: BlockchainConfigService
@@ -85,6 +86,10 @@ export class BlockchainService implements OnModuleInit {
       const ccpPath = path.resolve(process.cwd(), './assets/blockchain/connection-profile.json');
       const ccp = JSON.parse(fs.readFileSync(ccpPath, 'utf8'));
       
+      // Override client organization in connection profile dynamically
+      const modifiedCcp = { ...ccp };
+      modifiedCcp.client.organization = orgName;
+      
       // Create gateway connection
       this.gateway = new Gateway();
       const connectionOptions = {
@@ -93,14 +98,14 @@ export class BlockchainService implements OnModuleInit {
         discovery: { enabled: true, asLocalhost: true }
       };
 
-      await this.gateway.connect(ccp, connectionOptions);
+      await this.gateway.connect(modifiedCcp, connectionOptions);
       
       // Get network and contract
       this.network = await this.gateway.getNetwork(config.channelName);
       this.contract = this.network.getContract(config.chaincodeName);
       
       this.isInitialized = true;
-      this.logger.log(`Connected to Fabric gateway as ${defaultUser}`);
+      this.logger.log(`Connected to Fabric gateway as ${defaultUser} for organization ${orgName}`);
       this.logger.log(`Blockchain service initialized successfully for ${orgName}`);
     } catch (error) {
       this.logger.error('Failed to initialize Fabric connection:', error);
@@ -113,8 +118,17 @@ export class BlockchainService implements OnModuleInit {
    * Ensure connection is ready
    */
   private async ensureConnection(orgName: string = 'OrgProp'): Promise<void> {
-    if (!this.isInitialized) {
+    // If not initialized or organization changed, reinitialize connection
+    if (!this.isInitialized || this.currentOrgName !== orgName) {
+      // Disconnect existing connection if exists
+      if (this.gateway) {
+        this.gateway.disconnect();
+        this.isInitialized = false;
+        this.currentOrgName = null;
+      }
+      
       await this.initializeFabricConnection(orgName);
+      this.currentOrgName = orgName;
     }
   }
 
@@ -126,6 +140,7 @@ export class BlockchainService implements OnModuleInit {
       this.gateway.disconnect();
       this.logger.log('Disconnected from Fabric gateway');
       this.isInitialized = false;
+      this.currentOrgName = null;
     }
   }
 
@@ -173,6 +188,7 @@ export class BlockchainService implements OnModuleInit {
         message: `Operation ${operationName} completed successfully`
       };
     } catch (error) {
+      this.logger.error(`Blockchain operation [${operationName}] failed:`, error);
       return {
         success: false,
         error: error.message || 'Unknown error occurred',
@@ -200,6 +216,7 @@ export class BlockchainService implements OnModuleInit {
     },
     user: FabricUser
   ): Promise<BlockchainResponse<BlockchainContract>> {
+    
     return this.executeBlockchainOperation(
       async () => {
         const result = await this.contract.submitTransaction(
@@ -214,6 +231,7 @@ export class BlockchainService implements OnModuleInit {
           contractData.startDate,
           contractData.endDate
         );
+        
         return JSON.parse(result.toString());
       },
       'createContract',

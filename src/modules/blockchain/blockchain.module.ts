@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { PassportModule } from '@nestjs/passport';
 
 // Services
 import { BlockchainService } from './blockchain.service';
@@ -12,6 +13,10 @@ import { BlockchainUtilityController } from './blockchain-utility.controller';
 
 // Guards
 import { BlockchainAuthGuard } from './guards/blockchain-auth.guard';
+import { JwtBlockchainAuthGuard } from './guards/jwt-blockchain-auth.guard';
+
+// Import Auth Module for JWT
+import { AuthModule } from '../core/auth/auth.module';
 
 /**
  * Blockchain Module
@@ -19,12 +24,15 @@ import { BlockchainAuthGuard } from './guards/blockchain-auth.guard';
  */
 @Module({
   imports: [
-    ConfigModule // For environment variable access
+    ConfigModule, // For environment variable access
+    PassportModule, // For JWT AuthGuard  
+    AuthModule // For JWT authentication
   ],
   providers: [
     BlockchainService,
     BlockchainConfigService,
-    BlockchainAuthGuard
+    BlockchainAuthGuard,
+    JwtBlockchainAuthGuard
   ],
   controllers: [
     ContractsController,

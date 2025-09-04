@@ -1,16 +1,20 @@
 import { 
   Controller, 
   Get,
-  Logger
+  Logger,
+  UseGuards
 } from '@nestjs/common';
 import { 
   ApiTags, 
   ApiOperation, 
-  ApiResponse
+  ApiResponse,
+  ApiBearerAuth
 } from '@nestjs/swagger';
 
 import { BlockchainService } from './blockchain.service';
 import { BlockchainConfigService } from './blockchain-config.service';
+import { JwtBlockchainAuthGuard } from './guards/jwt-blockchain-auth.guard';
+import { Public } from '../core/auth/public.decorator';
 
 /**
  * Blockchain Utility Controller
@@ -18,6 +22,8 @@ import { BlockchainConfigService } from './blockchain-config.service';
  */
 @Controller('api/blockchain')
 @ApiTags('Blockchain Utilities')
+@UseGuards(JwtBlockchainAuthGuard)
+@ApiBearerAuth()
 export class BlockchainUtilityController {
   private readonly logger = new Logger(BlockchainUtilityController.name);
 
@@ -30,6 +36,7 @@ export class BlockchainUtilityController {
    * Health check endpoint
    */
   @Get('health')
+  @Public() // Make health check public
   @ApiOperation({ 
     summary: 'Blockchain health check',
     description: 'Checks the status and connectivity of the blockchain network'
@@ -43,7 +50,7 @@ export class BlockchainUtilityController {
         network: "rentalchannel/real-estate-cc",
         isConnected: true,
         timestamp: "2025-08-28T07:00:00.000Z",
-        organizations: ["OrgProp", "OrgTenant", "OrgAgent"]
+        organizations: ["OrgProp", "OrgTenant", "OrgLandlord"]
       }
     }
   })
@@ -89,11 +96,11 @@ export class BlockchainUtilityController {
             }
           },
           {
-            name: "OrgAgent",
-            mspId: "OrgAgentMSP", 
+            name: "OrgLandlord",
+            mspId: "OrgLandlordMSP",
             users: {
-              admin: "admin-OrgAgent",
-              user: "appUserAgent"
+              admin: "admin-OrgLandlord",
+              user: "appUserLandlord"
             }
           }
         ]
@@ -125,7 +132,7 @@ export class BlockchainUtilityController {
         chaincodeName: "real-estate-cc",
         defaultOrg: "OrgProp",
         discoveryAsLocalhost: true,
-        supportedOrganizations: ["OrgProp", "OrgTenant", "OrgAgent"]
+        supportedOrganizations: ["OrgProp", "OrgTenant", "OrgLandlord"]
       }
     }
   })

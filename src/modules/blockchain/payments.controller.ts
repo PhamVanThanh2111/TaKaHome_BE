@@ -17,11 +17,12 @@ import {
   ApiResponse, 
   ApiParam, 
   ApiQuery,
-  ApiHeader
+  ApiHeader,
+  ApiBearerAuth
 } from '@nestjs/swagger';
 
 import { BlockchainService } from './blockchain.service';
-import { BlockchainAuthGuard, BlockchainUser } from './guards/blockchain-auth.guard';
+import { JwtBlockchainAuthGuard, BlockchainUser } from './guards/jwt-blockchain-auth.guard';
 import { 
   CreatePaymentScheduleDto,
   RecordPaymentDto, 
@@ -37,10 +38,11 @@ import { FabricUser } from './interfaces/fabric.interface';
  */
 @Controller('api/blockchain/payments')
 @ApiTags('Blockchain Payments')
-@UseGuards(BlockchainAuthGuard)
+@UseGuards(JwtBlockchainAuthGuard)
+@ApiBearerAuth()
 @ApiHeader({
   name: 'orgName',
-  description: 'Organization name (OrgProp, OrgTenant, OrgAgent)',
+  description: 'Organization name (OrgProp, OrgTenant, OrgLandlord)',
   required: true,
   example: 'OrgProp'
 })
