@@ -115,4 +115,12 @@ export class BookingController {
   startSettlement(@Param('id') id: string) {
     return this.bookingService.startSettlement(id);
   }
+
+  @Post(':id/settlement/close')
+  @Roles(RoleEnum.ADMIN)
+  @ApiOperation({ summary: 'Kết thúc tranh chấp (Dispute) - Admin quyết định' })
+  @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
+  closeSettled(@Param('id') id: string) {
+    return this.bookingService.closeSettled(id);
+  }
 }

@@ -96,6 +96,14 @@ export class BookingService {
     return this.bookingRepository.save(b);
   }
 
+  async closeSettled(id: string) {
+    const b = await this.findOne(id);
+    this.ensureStatus(b, [BookingStatus.SETTLEMENT_PENDING]);
+    b.status = BookingStatus.SETTLED;
+    b.closedAt = new Date();
+    return this.bookingRepository.save(b);
+  }
+
   // --- Helpers ---
   private ensureStatus(b: Booking, expected: BookingStatus[]) {
     if (!expected.includes(b.status)) {
