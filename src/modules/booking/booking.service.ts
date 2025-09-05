@@ -89,6 +89,13 @@ export class BookingService {
     return this.bookingRepository.save(b);
   }
 
+  async startSettlement(id: string) {
+    const b = await this.findOne(id);
+    this.ensureStatus(b, [BookingStatus.ACTIVE]);
+    b.status = BookingStatus.SETTLEMENT_PENDING;
+    return this.bookingRepository.save(b);
+  }
+
   // --- Helpers ---
   private ensureStatus(b: Booking, expected: BookingStatus[]) {
     if (!expected.includes(b.status)) {

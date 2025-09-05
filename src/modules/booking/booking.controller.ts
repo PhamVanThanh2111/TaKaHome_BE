@@ -104,4 +104,15 @@ export class BookingController {
   handover(@Param('id') id: string) {
     return this.bookingService.handover(id);
   }
+
+  @Post(':id/settlement/start')
+  @ApiOperation({
+    summary:
+      'Bắt đầu tranh chấp (Dispute) - Người thuê không đồng ý với Báo cáo hư hại',
+  })
+  @Roles(RoleEnum.TENANT, RoleEnum.ADMIN)
+  @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
+  startSettlement(@Param('id') id: string) {
+    return this.bookingService.startSettlement(id);
+  }
 }
