@@ -15,7 +15,7 @@ export class Contract {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ unique: true })
   contractCode: string;
 
   @ManyToOne(() => User, (user) => user.tenantContracts)

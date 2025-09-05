@@ -5,7 +5,6 @@ import {
   Body,
   Patch,
   Param,
-  Delete,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -61,16 +60,5 @@ export class VerificationController {
     @Body() updateVerificationDto: UpdateVerificationDto,
   ) {
     return this.verificationService.update(+id, updateVerificationDto);
-  }
-
-  @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Xoá verification' })
-  @ApiResponse({
-    status: HttpStatus.NO_CONTENT,
-    description: 'Xoá verification thành công',
-  })
-  remove(@Param('id') id: string) {
-    return this.verificationService.remove(+id);
   }
 }

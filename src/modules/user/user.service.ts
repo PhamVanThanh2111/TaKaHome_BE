@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class UserService {
@@ -11,11 +12,12 @@ export class UserService {
     private userRepository: Repository<User>,
   ) {}
 
-  async findAll(): Promise<User[]> {
-    return this.userRepository.find({ relations: ['account'] });
+  async findAll(): Promise<ResponseCommon> {
+    const users = await this.userRepository.find({ relations: ['account'] });
+    return new ResponseCommon(200, 'SUCCESS', users);
   }
 
-  async findOne(id: number): Promise<User> {
+  async findOne(id: number): Promise<ResponseCommon> {
     const user = await this.userRepository.findOne({
       where: { id: id.toString() },
       relations: ['account'],
@@ -23,15 +25,19 @@ export class UserService {
     if (!user) {
       throw new Error(`User with id ${id} not found`);
     }
-    return user;
+    return new ResponseCommon(200, 'SUCCESS', user);
   }
 
-  async update(id: number, updateUserDto: UpdateUserDto): Promise<User> {
+  async update(
+    id: number,
+    updateUserDto: UpdateUserDto,
+  ): Promise<ResponseCommon> {
     await this.userRepository.update(id, updateUserDto);
-    return this.findOne(id);
+    return new ResponseCommon(200, 'SUCCESS', await this.findOne(id));
   }
 
-  async remove(id: number): Promise<void> {
+  async remove(id: number): Promise<ResponseCommon> {
     await this.userRepository.delete(id);
+    return new ResponseCommon(200, 'SUCCESS');
   }
 }

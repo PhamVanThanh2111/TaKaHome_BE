@@ -8,7 +8,8 @@ import {
 } from 'typeorm';
 import { Contract } from '../../contract/entities/contract.entity';
 import { PaymentMethodEnum } from '../../common/enums/payment-method.enum';
-import { StatusEnum } from '../../common/enums/status.enum';
+import { PaymentStatusEnum } from 'src/modules/common/enums/payment-status.enum';
+import { PaymentPurpose } from 'src/modules/common/enums/payment-purpose.enum';
 
 @Entity()
 export class Payment {
@@ -21,11 +22,18 @@ export class Payment {
   @Column()
   amount: number;
 
+  @Column({ type: 'enum', enum: PaymentPurpose })
+  purpose: PaymentPurpose;
+
   @Column({ type: 'enum', enum: PaymentMethodEnum })
   method: PaymentMethodEnum;
 
-  @Column({ type: 'enum', enum: StatusEnum, default: StatusEnum.PENDING })
-  status: StatusEnum;
+  @Column({
+    type: 'enum',
+    enum: PaymentStatusEnum,
+    default: PaymentStatusEnum.PENDING,
+  })
+  status: PaymentStatusEnum;
 
   @CreateDateColumn()
   createdAt: Date;
@@ -33,6 +41,7 @@ export class Payment {
   @UpdateDateColumn()
   updatedAt: Date;
 
+  // ########### BLOCKCHAIN ###########
   @Column({ nullable: true })
   gatewayTxnRef?: string;
 
@@ -40,6 +49,9 @@ export class Payment {
   transactionNo?: string;
 
   // ########### VNPAY ###########
+  @Column({ nullable: true })
   bankCode: string;
+
+  @Column({ nullable: true })
   paidAt: Date;
 }
