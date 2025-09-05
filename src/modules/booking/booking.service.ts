@@ -80,6 +80,15 @@ export class BookingService {
     return this.bookingRepository.save(b);
   }
 
+  async handover(id: string) {
+    const b = await this.findOne(id);
+    this.ensureStatus(b, [BookingStatus.READY_FOR_HANDOVER]);
+    b.status = BookingStatus.ACTIVE;
+    b.handoverAt = new Date();
+    b.activatedAt = new Date();
+    return this.bookingRepository.save(b);
+  }
+
   // --- Helpers ---
   private ensureStatus(b: Booking, expected: BookingStatus[]) {
     if (!expected.includes(b.status)) {

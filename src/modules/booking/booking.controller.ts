@@ -96,4 +96,12 @@ export class BookingController {
   firstRentPaid(@Param('id') id: string) {
     return this.bookingService.markFirstRentPaid(id);
   }
+
+  @Post(':id/handover')
+  @ApiOperation({ summary: 'Chủ nhà bàn giao tài sản' })
+  @Roles(RoleEnum.LANDLORD, RoleEnum.ADMIN)
+  @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
+  handover(@Param('id') id: string) {
+    return this.bookingService.handover(id);
+  }
 }
