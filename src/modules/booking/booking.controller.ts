@@ -76,4 +76,12 @@ export class BookingController {
   reject(@Param('id') id: string) {
     return this.bookingService.landlordReject(id);
   }
+
+  @Post(':id/sign')
+  @ApiOperation({ summary: 'Người thuê ký hợp đồng (digital signature)' })
+  @Roles(RoleEnum.TENANT, RoleEnum.ADMIN)
+  @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
+  tenantSign(@Param('id') id: string) {
+    return this.bookingService.tenantSign(id);
+  }
 }

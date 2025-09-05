@@ -43,6 +43,17 @@ export class BookingService {
     return this.bookingRepository.save(b);
   }
 
+  async tenantSign(id: string, depositDeadlineHours = 24) {
+    const b = await this.findOne(id);
+    this.ensureStatus(b, [BookingStatus.PENDING_SIGNATURE]);
+    b.status = BookingStatus.AWAITING_DEPOSIT;
+    b.signedAt = new Date();
+    b.escrowDepositDueAt = new Date(
+      Date.now() + depositDeadlineHours * 60 * 60 * 1000,
+    );
+    return this.bookingRepository.save(b);
+  }
+
   // --- Helpers ---
   private ensureStatus(b: Booking, expected: BookingStatus[]) {
     if (!expected.includes(b.status)) {
