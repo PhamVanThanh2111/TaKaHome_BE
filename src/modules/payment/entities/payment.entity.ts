@@ -9,6 +9,7 @@ import {
 import { Contract } from '../../contract/entities/contract.entity';
 import { PaymentMethodEnum } from '../../common/enums/payment-method.enum';
 import { PaymentStatusEnum } from 'src/modules/common/enums/payment-status.enum';
+import { PaymentPurpose } from 'src/modules/common/enums/payment-purpose.enum';
 
 @Entity()
 export class Payment {
@@ -20,6 +21,9 @@ export class Payment {
 
   @Column()
   amount: number;
+
+  @Column({ type: 'enum', enum: PaymentPurpose })
+  purpose: PaymentPurpose;
 
   @Column({ type: 'enum', enum: PaymentMethodEnum })
   method: PaymentMethodEnum;

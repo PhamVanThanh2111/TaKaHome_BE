@@ -31,6 +31,31 @@ export class Booking {
   })
   status: BookingStatus;
 
+  // Mốc thời gian nghiệp vụ
+  @Column({ type: 'timestamptz', nullable: true })
+  signedAt?: Date;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  escrowDepositDueAt?: Date; // hạn nộp cọc (+24h sau SIGNED)
+
+  @Column({ type: 'timestamptz', nullable: true })
+  escrowDepositFundedAt?: Date; // IPN cọc thành công
+
+  @Column({ type: 'timestamptz', nullable: true })
+  firstRentDueAt?: Date; // hạn thanh toán kỳ đầu (+ 72h sau SIGNED)
+
+  @Column({ type: 'timestamptz', nullable: true })
+  firstRentPaidAt?: Date; // IPN thanh toán kỳ đầu thành công
+
+  @Column({ type: 'timestamptz', nullable: true })
+  handoverAt?: Date; // bàn giao
+
+  @Column({ type: 'timestamptz', nullable: true })
+  activatedAt?: Date; // bắt đầu thời gian thuê
+
+  @Column({ type: 'timestamptz', nullable: true })
+  closedAt?: Date; // kết thúc/settled
+
   @CreateDateColumn()
   createdAt: Date;
 
