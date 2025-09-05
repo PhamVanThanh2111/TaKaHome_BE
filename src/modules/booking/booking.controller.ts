@@ -68,4 +68,12 @@ export class BookingController {
   approve(@Param('id') id: string) {
     return this.bookingService.landlordApprove(id);
   }
+
+  @Post(':id/reject')
+  @ApiOperation({ summary: 'Chủ nhà từ chối booking' })
+  @Roles(RoleEnum.LANDLORD, RoleEnum.ADMIN)
+  @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
+  reject(@Param('id') id: string) {
+    return this.bookingService.landlordReject(id);
+  }
 }

@@ -32,6 +32,17 @@ export class BookingService {
     return this.bookingRepository.save(b);
   }
 
+  async landlordReject(id: string) {
+    const b = await this.findOne(id);
+    if (
+      b.status === BookingStatus.CANCELLED ||
+      b.status === BookingStatus.REJECTED
+    )
+      return b;
+    b.status = BookingStatus.REJECTED;
+    return this.bookingRepository.save(b);
+  }
+
   // --- Helpers ---
   private ensureStatus(b: Booking, expected: BookingStatus[]) {
     if (!expected.includes(b.status)) {
