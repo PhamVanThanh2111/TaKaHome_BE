@@ -18,6 +18,7 @@ import { BookingResponseDto } from './dto/booking-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
+import { RoleEnum } from '../common/enums/role.enum';
 
 @Controller('bookings')
 @ApiBearerAuth()
@@ -56,25 +57,15 @@ export class BookingController {
     description: 'Không tìm thấy booking',
   })
   findOne(@Param('id') id: string) {
-    return this.bookingService.findOne(+id);
+    return this.bookingService.findOne(id);
   }
 
-  @Patch(':id')
-  @ApiOperation({ summary: 'Cập nhật booking' })
+  // --- Nghiệp vụ flow ---
+  @Post(':id/approve')
+  @ApiOperation({ summary: 'Chủ nhà duyệt booking' })
+  @Roles(RoleEnum.LANDLORD, RoleEnum.ADMIN)
   @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
-  update(@Param('id') id: string, @Body() updateBookingDto: UpdateBookingDto) {
-    return this.bookingService.update(+id, updateBookingDto);
-  }
-
-  @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Xoá booking' })
-  @ApiResponse({
-    status: HttpStatus.NO_CONTENT,
-    description: 'Xoá booking thành công',
-  })
-  @Roles('ADMIN')
-  remove(@Param('id') id: string) {
-    return this.bookingService.remove(+id);
+  approve(@Param('id') id: string) {
+    return this.bookingService.landlordApprove(id);
   }
 }

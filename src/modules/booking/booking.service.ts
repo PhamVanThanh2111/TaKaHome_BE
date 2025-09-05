@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Booking } from './entities/booking.entity';
@@ -25,30 +25,32 @@ export class BookingService {
     return this.bookingRepository.save(b);
   }
 
+  async landlordApprove(id: string) {
+    const b = await this.findOne(id);
+    this.ensureStatus(b, [BookingStatus.PENDING_LANDLORD]);
+    b.status = BookingStatus.PENDING_SIGNATURE;
+    return this.bookingRepository.save(b);
+  }
+
+  // --- Helpers ---
+  private ensureStatus(b: Booking, expected: BookingStatus[]) {
+    if (!expected.includes(b.status)) {
+      throw new BadRequestException(
+        `Invalid state: ${b.status}. Expected: ${expected.join(', ')}`,
+      );
+    }
+  }
+
+  async findOne(id: string) {
+    const b = await this.bookingRepository.findOne({
+      where: { id },
+      relations: ['tenant', 'landlord', 'property'],
+    });
+    if (!b) throw new NotFoundException('Booking not found');
+    return b;
+  }
+
   async findAll(): Promise<Booking[]> {
     return this.bookingRepository.find({ relations: ['tenant', 'property'] });
-  }
-
-  async findOne(id: number): Promise<Booking> {
-    const booking = await this.bookingRepository.findOne({
-      where: { id: id.toString() },
-      relations: ['tenant', 'property'],
-    });
-    if (!booking) {
-      throw new Error(`Booking with id ${id} not found`);
-    }
-    return booking;
-  }
-
-  async update(
-    id: number,
-    updateBookingDto: UpdateBookingDto,
-  ): Promise<Booking> {
-    await this.bookingRepository.update(id, updateBookingDto);
-    return this.findOne(id);
-  }
-
-  async remove(id: number): Promise<void> {
-    await this.bookingRepository.delete(id);
   }
 }
