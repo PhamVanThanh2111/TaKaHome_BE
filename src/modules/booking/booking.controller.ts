@@ -123,4 +123,13 @@ export class BookingController {
   closeSettled(@Param('id') id: string) {
     return this.bookingService.closeSettled(id);
   }
+
+  // Cập nhật mốc thời gian/hạn (nếu cần chỉnh tay)
+  @Patch(':id')
+  @Roles(RoleEnum.ADMIN, RoleEnum.LANDLORD)
+  @ApiOperation({ summary: 'Cập nhật thông tin booking' })
+  @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
+  updateMeta(@Param('id') id: string, @Body() dto: UpdateBookingDto) {
+    return this.bookingService.updateMeta(id, dto);
+  }
 }

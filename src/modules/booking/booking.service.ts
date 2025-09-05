@@ -104,6 +104,15 @@ export class BookingService {
     return this.bookingRepository.save(b);
   }
 
+  async updateMeta(id: string, dto: UpdateBookingDto) {
+    const b = await this.findOne(id);
+    if (dto.escrowDepositDueAt)
+      b.escrowDepositDueAt = new Date(dto.escrowDepositDueAt);
+    if (dto.firstRentDueAt) b.firstRentDueAt = new Date(dto.firstRentDueAt);
+    if (dto.status) b.status = dto.status; // dùng thận trọng
+    return this.bookingRepository.save(b);
+  }
+
   // --- Helpers ---
   private ensureStatus(b: Booking, expected: BookingStatus[]) {
     if (!expected.includes(b.status)) {
