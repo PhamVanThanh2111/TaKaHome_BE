@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Booking } from './entities/booking.entity';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
+import { BookingStatus } from '../common/enums/booking-status.enum';
 
 @Injectable()
 export class BookingService {
@@ -12,9 +13,16 @@ export class BookingService {
     private bookingRepository: Repository<Booking>,
   ) {}
 
-  async create(createBookingDto: CreateBookingDto): Promise<Booking> {
-    const booking = this.bookingRepository.create(createBookingDto);
-    return this.bookingRepository.save(booking);
+  async create(dto: CreateBookingDto) {
+    const b = this.bookingRepository.create({
+      tenant: { id: dto.tenantId },
+      property: { id: dto.propertyId },
+      status: BookingStatus.PENDING_LANDLORD,
+      firstRentDueAt: dto.firstRentDueAt
+        ? new Date(dto.firstRentDueAt)
+        : undefined,
+    });
+    return this.bookingRepository.save(b);
   }
 
   async findAll(): Promise<Booking[]> {
