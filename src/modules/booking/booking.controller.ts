@@ -84,4 +84,10 @@ export class BookingController {
   tenantSign(@Param('id') id: string) {
     return this.bookingService.tenantSign(id);
   }
+
+  // Được gọi bởi Payment/IPN service sau khi cọc OK
+  @Post(':id/deposit-funded')
+  depositFunded(@Param('id') id: string) {
+    return this.bookingService.markDepositFunded(id);
+  }
 }

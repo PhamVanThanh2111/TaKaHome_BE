@@ -54,6 +54,20 @@ export class BookingService {
     return this.bookingRepository.save(b);
   }
 
+  // Gọi khi IPN cọc thành công (service thanh toán sẽ gọi sang)
+  async markDepositFunded(id: string) {
+    const b = await this.findOne(id);
+    this.ensureStatus(b, [BookingStatus.AWAITING_DEPOSIT]);
+    b.status = BookingStatus.DEPOSIT_FUNDED;
+    b.escrowDepositFundedAt = new Date();
+    // Option: nếu muốn ấn định hạn kỳ đầu tại đây
+    if (!b.firstRentDueAt) {
+      // hạn kỳ đầu = 3 ngày sau khi cọc xong
+      b.firstRentDueAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    }
+    return this.bookingRepository.save(b);
+  }
+
   // --- Helpers ---
   private ensureStatus(b: Booking, expected: BookingStatus[]) {
     if (!expected.includes(b.status)) {
