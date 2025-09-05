@@ -68,6 +68,18 @@ export class BookingService {
     return this.bookingRepository.save(b);
   }
 
+  // Gọi khi thanh toán kỳ đầu thành công (IPN hoặc ví)
+  async markFirstRentPaid(id: string) {
+    const b = await this.findOne(id);
+    this.ensureStatus(b, [
+      BookingStatus.DEPOSIT_FUNDED,
+      BookingStatus.AWAITING_FIRST_RENT,
+    ]);
+    b.status = BookingStatus.READY_FOR_HANDOVER;
+    b.firstRentPaidAt = new Date();
+    return this.bookingRepository.save(b);
+  }
+
   // --- Helpers ---
   private ensureStatus(b: Booking, expected: BookingStatus[]) {
     if (!expected.includes(b.status)) {

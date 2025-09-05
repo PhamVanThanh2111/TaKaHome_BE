@@ -90,4 +90,10 @@ export class BookingController {
   depositFunded(@Param('id') id: string) {
     return this.bookingService.markDepositFunded(id);
   }
+
+  // Được gọi bởi Payment/IPN service sau khi kỳ đầu OK
+  @Post(':id/first-rent-paid')
+  firstRentPaid(@Param('id') id: string) {
+    return this.bookingService.markFirstRentPaid(id);
+  }
 }
