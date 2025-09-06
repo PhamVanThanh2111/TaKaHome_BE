@@ -55,6 +55,9 @@ export class BookingService {
     b.escrowDepositDueAt = new Date(
       Date.now() + depositDeadlineHours * 60 * 60 * 1000,
     );
+    b.firstRentDueAt = new Date(
+      Date.now() + depositDeadlineHours * 3 * 60 * 60 * 1000,
+    );
     return this.bookingRepository.save(b);
   }
 
