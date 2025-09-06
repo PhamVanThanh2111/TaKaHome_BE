@@ -21,9 +21,6 @@ export class Booking {
   @ManyToOne(() => Property, (property) => property.bookings)
   property: Property;
 
-  @Column({ type: 'date' })
-  bookingDate: Date;
-
   @Column({
     type: 'enum',
     enum: BookingStatus,
