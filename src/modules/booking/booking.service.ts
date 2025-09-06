@@ -55,6 +55,9 @@ export class BookingService {
     b.escrowDepositDueAt = new Date(
       Date.now() + depositDeadlineHours * 60 * 60 * 1000,
     );
+    b.firstRentDueAt = new Date(
+      Date.now() + depositDeadlineHours * 3 * 60 * 60 * 1000,
+    );
     return this.bookingRepository.save(b);
   }
 
@@ -129,7 +132,7 @@ export class BookingService {
   async findOne(id: string) {
     const b = await this.bookingRepository.findOne({
       where: { id },
-      relations: ['tenant', 'landlord', 'property'],
+      relations: ['tenant', 'property'],
     });
     if (!b) throw new NotFoundException('Booking not found');
     return b;
