@@ -12,6 +12,7 @@ import {
 import { PaymentMethodEnum } from '../../common/enums/payment-method.enum';
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
+import { PaymentPurpose } from 'src/modules/common/enums/payment-purpose.enum';
 
 export class CreatePaymentDto {
   @IsNotEmpty()
@@ -32,6 +33,14 @@ export class CreatePaymentDto {
     description: 'Phương thức thanh toán',
   })
   method: PaymentMethodEnum;
+
+  @IsEnum(PaymentPurpose)
+  @ApiProperty({
+    required: false,
+    enum: PaymentPurpose,
+    description: 'Mục đích thanh toán (ví dụ: ESCROW_DEPOSIT)',
+  })
+  purpose: PaymentPurpose;
 
   // VNPAY
   @IsOptional()
