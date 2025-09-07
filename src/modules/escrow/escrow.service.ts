@@ -1,0 +1,84 @@
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Escrow } from './entities/escrow.entity';
+import { EscrowTransaction } from './entities/escrow-transaction.entity';
+import { Contract } from '../contract/entities/contract.entity';
+import { Payment } from '../payment/entities/payment.entity';
+import { PaymentStatusEnum } from '../common/enums/payment-status.enum';
+import { PaymentPurpose } from '../common/enums/payment-purpose.enum';
+
+@Injectable()
+export class EscrowService {
+  constructor(
+    @InjectRepository(Escrow)
+    private readonly accountRepo: Repository<Escrow>,
+    @InjectRepository(EscrowTransaction)
+    private readonly txnRepo: Repository<EscrowTransaction>,
+    @InjectRepository(Contract)
+    private readonly contractRepo: Repository<Contract>,
+    @InjectRepository(Payment)
+    private readonly paymentRepo: Repository<Payment>,
+  ) {}
+
+  /** Tạo hoặc lấy Escrow cho 1 hợp đồng */
+  async ensureAccountForContract(contractId: string): Promise<Escrow> {
+    let acc = await this.accountRepo.findOne({ where: { contractId } });
+    if (acc) return acc;
+
+    const contract = await this.contractRepo.findOne({
+      where: { id: contractId },
+      relations: ['tenant', 'property'],
+    });
+    if (!contract) throw new Error('Contract not found');
+
+    acc = this.accountRepo.create({
+      contract: { id: contractId },
+      contractId,
+      tenant: { id: contract.tenant.id },
+      tenantId: contract.tenant.id,
+      property: { id: contract.property.id },
+      propertyId: contract.property.id,
+      currentBalance: '0',
+      currency: 'VND',
+    });
+    return this.accountRepo.save(acc);
+  }
+
+  /** Ghi có tiền cọc khi Payment purpose=ESCROW_DEPOSIT đã PAID */
+  async creditDepositFromPayment(paymentId: string) {
+    const payment = await this.paymentRepo.findOne({
+      where: { id: paymentId },
+      relations: ['contract'],
+    });
+    if (!payment) throw new Error('Payment not found');
+    if (payment.status !== PaymentStatusEnum.PAID)
+      throw new Error('Payment is not PAID');
+    if (payment.purpose !== PaymentPurpose.ESCROW_DEPOSIT)
+      throw new Error('Payment is not a deposit');
+
+    const acc = await this.ensureAccountForContract(payment.contract.id);
+
+    const amount = BigInt(payment.amount);
+    const current = BigInt(acc.currentBalance || '0');
+
+    const txn = this.txnRepo.create({
+      escrow: { id: acc.id },
+      escrowId: acc.id,
+      direction: 'CREDIT',
+      type: 'DEPOSIT',
+      amount: amount.toString(),
+      status: 'COMPLETED',
+      refType: 'PAYMENT',
+      refId: payment.id,
+      note: 'Deposit funded via payment',
+      completedAt: new Date(),
+    });
+    await this.txnRepo.save(txn);
+
+    acc.currentBalance = (current + amount).toString();
+    await this.accountRepo.save(acc);
+
+    return { accountId: acc.id, balance: acc.currentBalance };
+  }
+}
