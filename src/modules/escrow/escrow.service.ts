@@ -111,4 +111,34 @@ export class EscrowService {
     acc.currentBalance = next.toString();
     return this.accountRepo.save(acc);
   }
+
+  /** Hoàn cọc lại cho người thuê (từ số dư escrow) */
+  async refund(
+    accountId: string,
+    amountVnd: number,
+    note?: string,
+  ): Promise<Escrow> {
+    const acc = await this.accountRepo.findOne({ where: { id: accountId } });
+    if (!acc) throw new Error('Escrow not found');
+    const amount = BigInt(amountVnd);
+    const current = BigInt(acc.currentBalance || '0');
+    const next = current - amount;
+    if (next < BigInt(0)) throw new Error('Insufficient escrow balance');
+
+    const txn = this.txnRepo.create({
+      escrow: { id: acc.id },
+      escrowId: acc.id,
+      direction: 'DEBIT',
+      type: 'REFUND',
+      amount: amount.toString(),
+      status: 'COMPLETED',
+      refType: 'ADJUSTMENT',
+      refId: null,
+      note: note ?? 'Refund to tenant',
+      completedAt: new Date(),
+    });
+    await this.txnRepo.save(txn);
+    acc.currentBalance = next.toString();
+    return this.accountRepo.save(acc);
+  }
 }
