@@ -141,4 +141,18 @@ export class EscrowService {
     acc.currentBalance = next.toString();
     return this.accountRepo.save(acc);
   }
+
+  /** Lấy số dư cọc hiện tại theo tenant + property */
+  async getBalanceByTenantAndProperty(tenantId: string, propertyId: string) {
+    const acc = await this.accountRepo
+      .createQueryBuilder('ea')
+      .innerJoinAndSelect('ea.contract', 'c')
+      .where('ea.tenantId = :tenantId', { tenantId })
+      .andWhere('ea.propertyId = :propertyId', { propertyId })
+      .orderBy('c.createdAt', 'DESC')
+      .getOne();
+
+    if (!acc) return { balance: '0', accountId: null };
+    return { balance: acc.currentBalance, accountId: acc.id };
+  }
 }

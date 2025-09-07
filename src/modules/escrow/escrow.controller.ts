@@ -9,4 +9,19 @@ import { RolesGuard } from '../core/auth/guards/roles.guard';
 @Controller('escrow')
 export class EscrowController {
   constructor(private readonly escrowService: EscrowService) {}
+
+  @Get('balance')
+  @ApiOperation({
+    summary: 'Lấy số dư tiền cọc hiện tại theo tenant + property',
+  })
+  @ApiResponse({ status: 200, description: 'OK' })
+  async getBalance(
+    @Query('tenantId') tenantId: string,
+    @Query('propertyId') propertyId: string,
+  ) {
+    return this.escrowService.getBalanceByTenantAndProperty(
+      tenantId,
+      propertyId,
+    );
+  }
 }
