@@ -12,6 +12,8 @@ import vnpayConfig from 'src/config/vnpay.config';
 import { PaymentStatusEnum } from '../common/enums/payment-status.enum';
 import { PaymentMethodEnum } from '../common/enums/payment-method.enum';
 import { WalletService } from '../wallet/wallet.service';
+import { PaymentPurpose } from '../common/enums/payment-purpose.enum';
+import { EscrowService } from '../escrow/escrow.service';
 
 @Injectable()
 export class PaymentService {
@@ -22,6 +24,7 @@ export class PaymentService {
     @Inject(vnpayConfig.KEY)
     private readonly vnpay: ConfigType<typeof vnpayConfig>,
     private readonly walletService: WalletService,
+    private readonly escrowService: EscrowService,
   ) {}
 
   /** API chính để khởi tạo thanh toán */
@@ -29,7 +32,7 @@ export class PaymentService {
     dto: CreatePaymentDto,
     ctx: { userId: string; ipAddr: string },
   ) {
-    const { contractId, amount, method } = dto;
+    const { contractId, amount, method, purpose } = dto;
 
     // 1) Tạo bản ghi Payment PENDING (mặc định)
     let payment = this.paymentRepository.create({
@@ -37,6 +40,7 @@ export class PaymentService {
       amount,
       method, // 'WALLET' | 'VNPAY'
       status: PaymentStatusEnum.PENDING, // PENDING khi tạo mới
+      ...(purpose ? { purpose } : {}),
     });
     payment = await this.paymentRepository.save(payment);
 
@@ -53,6 +57,11 @@ export class PaymentService {
       payment.status = PaymentStatusEnum.PAID;
       payment.paidAt = new Date();
       await this.paymentRepository.save(payment);
+
+      // Nếu là tiền cọc: ghi có escrow
+      if (payment.purpose === PaymentPurpose.ESCROW_DEPOSIT) {
+        await this.escrowService.creditDepositFromPayment(payment.id);
+      }
 
       return {
         id: payment.id,
@@ -114,7 +123,14 @@ export class PaymentService {
     updatePaymentDto: UpdatePaymentDto,
   ): Promise<Payment> {
     await this.paymentRepository.update(id, updatePaymentDto);
-    return this.findOne(id);
+    const updated = await this.findOne(id);
+    if (
+      updatePaymentDto.status === PaymentStatusEnum.PAID &&
+      updated.purpose === PaymentPurpose.ESCROW_DEPOSIT
+    ) {
+      await this.escrowService.creditDepositFromPayment(updated.id);
+    }
+    return updated;
   }
 
   /**
