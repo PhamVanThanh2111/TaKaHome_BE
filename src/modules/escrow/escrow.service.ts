@@ -81,4 +81,34 @@ export class EscrowService {
 
     return { accountId: acc.id, balance: acc.currentBalance };
   }
+
+  /** Trừ tiền cọc (khấu trừ hư hại) */
+  async deduct(
+    accountId: string,
+    amountVnd: number,
+    note?: string,
+  ): Promise<Escrow> {
+    const acc = await this.accountRepo.findOne({ where: { id: accountId } });
+    if (!acc) throw new Error('Escrow not found');
+    const amount = BigInt(amountVnd);
+    const current = BigInt(acc.currentBalance || '0');
+    const next = current - amount;
+    if (next < BigInt(0)) throw new Error('Insufficient escrow balance');
+
+    const txn = this.txnRepo.create({
+      escrow: { id: acc.id },
+      escrowId: acc.id,
+      direction: 'DEBIT',
+      type: 'DEDUCTION',
+      amount: amount.toString(),
+      status: 'COMPLETED',
+      refType: 'SETTLEMENT',
+      refId: null,
+      note: note ?? 'Deduction',
+      completedAt: new Date(),
+    });
+    await this.txnRepo.save(txn);
+    acc.currentBalance = next.toString();
+    return this.accountRepo.save(acc);
+  }
 }
