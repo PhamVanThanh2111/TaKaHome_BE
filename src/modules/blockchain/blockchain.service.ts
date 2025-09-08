@@ -18,7 +18,8 @@ import {
 } from './interfaces/fabric.interface';
 
 // Import Fabric Network directly
-import { Gateway, Wallets, Contract, Network } from 'fabric-network';
+import { Gateway, Wallets, Contract, Network, X509Identity } from 'fabric-network';
+import * as FabricCAServices from 'fabric-ca-client';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -46,7 +47,9 @@ export class BlockchainService implements OnModuleInit {
    */
   async onModuleInit(): Promise<void> {
     try {
-      await this.initializeFabricConnection();
+      // Skip auto-initialization to avoid connection errors during startup
+      // Connection will be established on-demand when needed
+      this.logger.log('✅ Blockchain service initialized (enrollment-only mode)');
       this.blockchainConfig.logConfiguration();
     } catch (error) {
       this.logger.error('Failed to initialize blockchain service', error);
@@ -141,6 +144,183 @@ export class BlockchainService implements OnModuleInit {
       this.logger.log('Disconnected from Fabric gateway');
       this.isInitialized = false;
       this.currentOrgName = null;
+    }
+  }
+
+  /**
+   * Enroll a new user for blockchain operations
+   */
+  async enrollUser(params: {
+    userId: string;
+    orgName: string;
+    role: string;
+  }): Promise<boolean> {
+    try {
+      const walletPath = path.resolve(process.cwd(), './assets/blockchain/wallet');
+      const wallet = await Wallets.newFileSystemWallet(walletPath);
+      
+      // Check if user already exists
+      const userExists = await wallet.get(params.userId);
+      if (userExists) {
+        this.logger.log(`User ${params.userId} already enrolled for ${params.orgName}`);
+        return true;
+      }
+
+      // Get admin user for the organization
+      const adminUserName = `admin-${params.orgName}`;
+      const adminUser = await wallet.get(adminUserName);
+      
+      if (!adminUser) {
+        this.logger.warn(`Admin user ${adminUserName} not found in wallet. Cannot enroll user ${params.userId} for ${params.orgName}.`);
+        this.logger.warn(`Available admin users in wallet: ${await this.getAvailableAdminUsers(wallet)}`);
+        this.logger.warn(`Please ensure ${adminUserName} is enrolled before enrolling other users.`);
+        
+        // Return false instead of throwing error to allow registration to continue
+        return false;
+      }
+
+      // Build CA client
+      const caInfo = this.buildCAClient(params.orgName);
+      if (!caInfo) {
+        this.logger.warn(`⚠️ CA information not found for ${params.orgName}. Skipping blockchain enrollment.`);
+        this.logger.warn(`This might be because the Fabric CA server is not running.`);
+        return false;
+      }
+
+      // Get admin user context
+      const provider = wallet.getProviderRegistry().getProvider(adminUser.type);
+      const adminUserContext = await provider.getUserContext(adminUser, adminUserName);
+
+      // Register the user with CA
+      const secret = await caInfo.ca.register(
+        {
+          enrollmentID: params.userId,
+          role: 'client',
+          affiliation: `${params.orgName.toLowerCase()}.department1`,
+          attrs: [
+            { name: 'role', value: params.role, ecert: true },
+            { name: 'orgName', value: params.orgName, ecert: true }
+          ]
+        },
+        adminUserContext
+      );
+
+      // Enroll the user
+      const enrollment = await caInfo.ca.enroll({
+        enrollmentID: params.userId,
+        enrollmentSecret: secret,
+      });
+
+      // Create X509 identity
+      const x509Identity: X509Identity = {
+        credentials: {
+          certificate: enrollment.certificate,
+          privateKey: enrollment.key.toBytes(),
+        },
+        mspId: caInfo.mspId,
+        type: 'X.509',
+      };
+
+      // Store identity in wallet
+      await wallet.put(params.userId, x509Identity);
+      
+      this.logger.log(`✅ Successfully enrolled user ${params.userId} for ${params.orgName} with role ${params.role}`);
+      return true;
+
+    } catch (error) {
+      this.logger.error(`❌ Failed to enroll user ${params.userId}:`, error);
+      this.logger.warn(`⚠️ Failed to enroll blockchain identity for user ${params.userId} - continuing without blockchain identity`);
+      return false;
+    }
+  }
+
+  /**
+   * Check if user is enrolled in blockchain
+   */
+  async isUserEnrolled(userId: string): Promise<boolean> {
+    try {
+      const walletPath = path.resolve(process.cwd(), './assets/blockchain/wallet');
+      const wallet = await Wallets.newFileSystemWallet(walletPath);
+      
+      const identity = await wallet.get(userId);
+      return !!identity;
+    } catch (error) {
+      this.logger.error(`Failed to check enrollment for user ${userId}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Build CA client for organization
+   */
+  private buildCAClient(orgName: string): { ca: FabricCAServices; mspId: string } | null {
+    try {
+      this.logger.debug(`Getting organization config for: ${orgName}`);
+      const organization = this.blockchainConfig.getOrganization(orgName);
+      if (!organization) {
+        throw new Error(`Organization ${orgName} not found`);
+      }
+      
+      this.logger.debug(`Organization config:`, organization);
+
+      // Use CA URL from organization config
+      const caUrl = organization.caUrl;
+      if (!caUrl) {
+        throw new Error(`No CA URL found for organization ${orgName}`);
+      }
+      
+      this.logger.debug(`Using CA URL: ${caUrl} for ${orgName}`);
+
+      // Read TLS CA cert for the organization
+      const tlsCertPath = path.resolve(process.cwd(), `./assets/blockchain/tls/ca-${orgName.toLowerCase()}.crt`);
+      let tlsCACerts = '';
+      
+      if (fs.existsSync(tlsCertPath)) {
+        tlsCACerts = fs.readFileSync(tlsCertPath, 'utf8');
+      }
+
+      // Create CA client with proper TLS configuration
+      const caOptions: any = { 
+        verify: false,
+        'ssl-target-name-override': `ca-${orgName.toLowerCase()}`,
+        protocol: 'https'
+      };
+      
+      if (tlsCACerts) {
+        caOptions.trustedRoots = [tlsCACerts];
+      }
+      
+      const ca = new FabricCAServices(caUrl, caOptions);
+      
+      return {
+        ca,
+        mspId: organization.mspId
+      };
+    } catch (error) {
+      this.logger.error(`Failed to build CA client for ${orgName}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Get list of available admin users in wallet
+   */
+  private async getAvailableAdminUsers(wallet: any): Promise<string> {
+    try {
+      const adminUsers: string[] = [];
+      const organizations = ['OrgProp', 'OrgTenant', 'OrgLandlord'];
+      
+      for (const org of organizations) {
+        const adminUserName = `admin-${org}`;
+        const exists = await wallet.get(adminUserName);
+        if (exists) {
+          adminUsers.push(adminUserName);
+        }
+      }
+      
+      return adminUsers.length > 0 ? adminUsers.join(', ') : 'None';
+    } catch (error) {
+      return 'Unable to check';
     }
   }
 

@@ -1,6 +1,9 @@
 import { 
   Controller, 
   Get,
+  Post,
+  Body,
+  Query,
   Logger,
   UseGuards
 } from '@nestjs/common';
@@ -8,13 +11,15 @@ import {
   ApiTags, 
   ApiOperation, 
   ApiResponse,
-  ApiBearerAuth
+  ApiBearerAuth,
+  ApiBody
 } from '@nestjs/swagger';
 
 import { BlockchainService } from './blockchain.service';
 import { BlockchainConfigService } from './blockchain-config.service';
 import { JwtBlockchainAuthGuard } from './guards/jwt-blockchain-auth.guard';
 import { Public } from '../core/auth/public.decorator';
+import { EnrollUserDto } from './dto/enroll-user.dto';
 
 /**
  * Blockchain Utility Controller
@@ -147,6 +152,87 @@ export class BlockchainUtilityController {
       defaultOrg: config.orgName,
       discoveryAsLocalhost: config.discoveryAsLocalhost,
       supportedOrganizations: organizations
+    };
+  }
+
+  /**
+   * Enroll blockchain user
+   */
+  @Post('enroll-user')
+  @ApiOperation({ 
+    summary: 'Enroll blockchain user',
+    description: 'Enrolls a user for blockchain operations with specified organization'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'User enrolled successfully',
+    schema: {
+      example: {
+        success: true,
+        message: 'User enrolled successfully',
+        userId: '123',
+        orgName: 'OrgTenant',
+        role: 'TENANT'
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Invalid request data or user already enrolled'
+  })
+  async enrollUser(@Body() enrollUserDto: EnrollUserDto) {
+    const success = await this.blockchainService.enrollUser(enrollUserDto);
+    
+    if (success) {
+      return {
+        success: true,
+        message: 'User enrolled successfully',
+        userId: enrollUserDto.userId,
+        orgName: enrollUserDto.orgName,
+        role: enrollUserDto.role
+      };
+    } else {
+      return {
+        success: false,
+        message: 'Failed to enroll user',
+        userId: enrollUserDto.userId,
+        orgName: enrollUserDto.orgName,
+        role: enrollUserDto.role
+      };
+    }
+  }
+
+  /**
+   * Check if user is enrolled
+   */
+  @Get('check-enrollment')
+  @ApiOperation({ 
+    summary: 'Check user enrollment status',
+    description: 'Checks if a user is enrolled in blockchain for the specified organization'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Enrollment status retrieved',
+    schema: {
+      example: {
+        userId: '123',
+        orgName: 'OrgTenant',
+        isEnrolled: true,
+        message: 'User is enrolled'
+      }
+    }
+  })
+  async checkEnrollment(
+    @Query('userId') userId: string,
+    @Query('orgName') orgName: string
+  ) {
+    const isEnrolled = await this.blockchainService.isUserEnrolled(userId);
+    
+    return {
+      userId,
+      orgName,
+      isEnrolled,
+      message: isEnrolled ? 'User is enrolled' : 'User is not enrolled'
     };
   }
 }

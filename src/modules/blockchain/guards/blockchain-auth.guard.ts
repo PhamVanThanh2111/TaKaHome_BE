@@ -16,7 +16,7 @@ export class BlockchainAuthGuard implements CanActivate {
     
     // Extract headers
     const orgName = request.headers['orgname'] || request.headers['x-org-name'];
-    const userId = request.headers['userid'] || request.headers['x-user-id'];
+    let userId = request.headers['userid'] || request.headers['x-user-id'];
 
     // Validate organization name
     if (!orgName) {
@@ -24,21 +24,30 @@ export class BlockchainAuthGuard implements CanActivate {
     }
 
     if (!this.blockchainConfig.isValidOrganization(orgName)) {
-      throw new UnauthorizedException(`Invalid organization: ${orgName}. Supported organizations: ${this.blockchainConfig.getOrganizations()}`);
+      throw new UnauthorizedException(`Invalid organization: ${orgName}. Supported organizations: ${Object.keys(this.blockchainConfig.getOrganizations())}`);
     }
 
-    // If userId not provided, use default for organization
-    let finalUserId = userId;
-    if (!finalUserId) {
-      finalUserId = this.blockchainConfig.getDefaultUserForOrg(orgName);
-      if (!finalUserId) {
+    // Priority for userId:
+    // 1. Explicit userId from header
+    // 2. User ID from JWT token (if authenticated)
+    // 3. Default admin user for organization
+    
+    if (!userId && request.user?.id) {
+      // Use JWT user ID as blockchain identity if available
+      userId = request.user.id.toString();
+    }
+    
+    if (!userId) {
+      // Fallback to default admin user
+      userId = this.blockchainConfig.getDefaultUserForOrg(orgName);
+      if (!userId) {
         throw new UnauthorizedException(`No default user configured for organization: ${orgName}`);
       }
     }
 
     // Attach blockchain user info to request
     request.blockchainUser = {
-      userId: finalUserId,
+      userId: userId,
       orgName: orgName,
       mspId: this.blockchainConfig.getOrganization(orgName)?.mspId
     };

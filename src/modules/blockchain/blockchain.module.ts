@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PassportModule } from '@nestjs/passport';
 
@@ -26,7 +26,7 @@ import { AuthModule } from '../core/auth/auth.module';
   imports: [
     ConfigModule, // For environment variable access
     PassportModule, // For JWT AuthGuard  
-    AuthModule // For JWT authentication
+    forwardRef(() => AuthModule) // For JWT authentication
   ],
   providers: [
     BlockchainService,
