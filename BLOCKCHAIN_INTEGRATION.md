@@ -245,7 +245,7 @@ curl -X POST http://localhost:3000/api/auth/login \
 
 - **JWT Integration Guide**: `src/modules/blockchain/JWT_BLOCKCHAIN_INTEGRATION.md`
 - **Implementation Summary**: `JWT_BLOCKCHAIN_INTEGRATION_SUMMARY.md`
-- **API Testing Scripts**: `test-blockchain-payments.js`, `test-jwt-blockchain-integration.js`
+- **API Documentation**: Full Swagger documentation available at `/api-docs`
 - **Project README**: `README.md`
 
 ---

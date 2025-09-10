@@ -18,7 +18,7 @@ import {
 } from './interfaces/fabric.interface';
 
 // Import Fabric Network directly
-import { Gateway, Wallets, Contract, Network, X509Identity } from 'fabric-network';
+import { Gateway, Wallets, Contract, Network, X509Identity, Identity } from 'fabric-network';
 import * as FabricCAServices from 'fabric-ca-client';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -37,6 +37,7 @@ export class BlockchainService implements OnModuleInit {
   private network: Network;
   private isInitialized = false;
   private currentOrgName: string | null = null;
+  private currentUserId: string | null = null;
 
   constructor(
     private blockchainConfig: BlockchainConfigService
@@ -59,79 +60,118 @@ export class BlockchainService implements OnModuleInit {
   }
 
   /**
-   * Initialize Fabric network connection
+   * Load user identity directly from wallet and ensure it's properly formatted
    */
-  private async initializeFabricConnection(orgName: string = 'OrgProp'): Promise<void> {
+  private async loadUserIdentityDirectly(userId: string): Promise<Identity | null> {
     try {
-      if (this.isInitialized && this.gateway) {
-        return;
+      const walletPath = path.join(process.cwd(), 'assets', 'blockchain', 'wallet');
+      const wallet = await Wallets.newFileSystemWallet(walletPath);
+      
+      // Get the raw identity from wallet
+      const rawIdentity = await wallet.get(userId);
+      if (!rawIdentity) {
+        this.logger.warn(`User identity ${userId} not found in wallet`);
+        return null;
       }
 
-      const config = this.blockchainConfig.getFabricConfig();
+      // Parse the identity data
+      const identityData = rawIdentity as any;
       
-      // Initialize wallet
-      const walletPath = path.resolve(process.cwd(), './assets/blockchain/wallet');
-      this.wallet = await Wallets.newFileSystemWallet(walletPath);
-      this.logger.log(`Wallet path: ${walletPath}`);
-
-      const defaultUser = this.blockchainConfig.getDefaultUserForOrg(orgName);
-      if (!defaultUser) {
-        throw new Error(`No default user found for organization: ${orgName}`);
-      }
-
-      // Check if user identity exists in wallet
-      const identity = await this.wallet.get(defaultUser);
-      if (!identity) {
-        throw new Error(`Identity ${defaultUser} not found in wallet. Please enroll user first.`);
-      }
-
-      // Load connection profile
-      const ccpPath = path.resolve(process.cwd(), './assets/blockchain/connection-profile.json');
-      const ccp = JSON.parse(fs.readFileSync(ccpPath, 'utf8'));
-      
-      // Override client organization in connection profile dynamically
-      const modifiedCcp = { ...ccp };
-      modifiedCcp.client.organization = orgName;
-      
-      // Create gateway connection
-      this.gateway = new Gateway();
-      const connectionOptions = {
-        wallet: this.wallet,
-        identity: defaultUser,
-        discovery: { enabled: true, asLocalhost: true }
+      // Create X.509 identity directly from wallet data
+      const x509Identity = {
+        credentials: {
+          certificate: identityData.credentials.certificate,
+          privateKey: identityData.credentials.privateKey
+        },
+        mspId: identityData.mspId,
+        type: 'X.509'
       };
 
-      await this.gateway.connect(modifiedCcp, connectionOptions);
+      // Store the properly formatted identity back to wallet
+      await wallet.put(userId, x509Identity);
       
-      // Get network and contract
-      this.network = await this.gateway.getNetwork(config.channelName);
-      this.contract = this.network.getContract(config.chaincodeName);
+      this.logger.log(`Successfully loaded and formatted identity for user: ${userId}`);
+      return x509Identity;
       
-      this.isInitialized = true;
-      this.logger.log(`Connected to Fabric gateway as ${defaultUser} for organization ${orgName}`);
-      this.logger.log(`Blockchain service initialized successfully for ${orgName}`);
     } catch (error) {
-      this.logger.error('Failed to initialize Fabric connection:', error);
-      this.isInitialized = false;
-      throw error;
+      this.logger.error(`Failed to load user identity directly: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Initialize connection to Fabric network
+   */
+  private async initializeFabricConnection(orgName: string, userId?: string): Promise<boolean> {
+    try {
+      const connectionProfile = path.join(process.cwd(), 'assets', 'blockchain', 'connection-profile.json');
+      const ccp = JSON.parse(fs.readFileSync(connectionProfile, 'utf8'));
+
+      const walletPath = path.join(process.cwd(), 'assets', 'blockchain', 'wallet');
+      this.wallet = await Wallets.newFileSystemWallet(walletPath);
+
+      // Determine which identity to use
+      let identityLabel: string;
+      
+      // If userId is provided, try to load it directly first
+      if (userId) {
+        const directIdentity = await this.loadUserIdentityDirectly(userId);
+        if (directIdentity) {
+          identityLabel = userId;
+          this.logger.log(`Using user identity: ${userId}`);
+        } else {
+          this.logger.warn(`Could not load user identity ${userId}, falling back to admin`);
+          identityLabel = this.getDefaultUser(orgName);
+        }
+      } else {
+        identityLabel = this.getDefaultUser(orgName);
+      }
+
+      const identity = await this.wallet.get(identityLabel);
+      if (!identity) {
+        this.logger.error(`❌ Identity ${identityLabel} not found in wallet`);
+        return false;
+      }
+
+      this.gateway = new Gateway();
+      await this.gateway.connect(ccp, {
+        wallet: this.wallet,
+        identity: identityLabel,
+        discovery: { enabled: true, asLocalhost: true }
+      });
+
+      const fabricConfig = this.blockchainConfig.getFabricConfig();
+      const channelName = fabricConfig.channelName;
+      const chaincodeName = fabricConfig.chaincodeName;
+      
+      this.network = await this.gateway.getNetwork(channelName);
+      this.contract = this.network.getContract(chaincodeName);
+
+      this.logger.log(`Connected to Fabric network as ${identityLabel}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`Failed to initialize Fabric connection: ${error.message}`);
+      return false;
     }
   }
 
   /**
    * Ensure connection is ready
    */
-  private async ensureConnection(orgName: string = 'OrgProp'): Promise<void> {
-    // If not initialized or organization changed, reinitialize connection
-    if (!this.isInitialized || this.currentOrgName !== orgName) {
+  private async ensureConnection(orgName: string = 'OrgProp', userId?: string): Promise<void> {
+    // If not initialized or organization changed or user changed, reinitialize connection
+    if (!this.isInitialized || this.currentOrgName !== orgName || this.currentUserId !== userId) {
       // Disconnect existing connection if exists
       if (this.gateway) {
         this.gateway.disconnect();
         this.isInitialized = false;
         this.currentOrgName = null;
+        this.currentUserId = null;
       }
       
-      await this.initializeFabricConnection(orgName);
+      await this.initializeFabricConnection(orgName, userId);
       this.currentOrgName = orgName;
+      this.currentUserId = userId || null;
     }
   }
 
@@ -162,20 +202,13 @@ export class BlockchainService implements OnModuleInit {
       // Check if user already exists
       const userExists = await wallet.get(params.userId);
       if (userExists) {
-        this.logger.log(`User ${params.userId} already enrolled for ${params.orgName}`);
+        this.logger.log(`✅ User ${params.userId} already enrolled for ${params.orgName}`);
         return true;
       }
 
-      // Get admin user for the organization
-      const adminUserName = `admin-${params.orgName}`;
-      const adminUser = await wallet.get(adminUserName);
-      
-      if (!adminUser) {
-        this.logger.warn(`Admin user ${adminUserName} not found in wallet. Cannot enroll user ${params.userId} for ${params.orgName}.`);
-        this.logger.warn(`Available admin users in wallet: ${await this.getAvailableAdminUsers(wallet)}`);
-        this.logger.warn(`Please ensure ${adminUserName} is enrolled before enrolling other users.`);
-        
-        // Return false instead of throwing error to allow registration to continue
+      // Validate organization name
+      if (!this.blockchainConfig.isValidOrganization(params.orgName)) {
+        this.logger.warn(`❌ Invalid organization name: ${params.orgName}. Valid orgs: OrgProp, OrgTenant, OrgLandlord`);
         return false;
       }
 
@@ -183,27 +216,73 @@ export class BlockchainService implements OnModuleInit {
       const caInfo = this.buildCAClient(params.orgName);
       if (!caInfo) {
         this.logger.warn(`⚠️ CA information not found for ${params.orgName}. Skipping blockchain enrollment.`);
-        this.logger.warn(`This might be because the Fabric CA server is not running.`);
+        this.logger.warn(`� This might be because the Fabric CA server is not running.`);
+        this.logger.warn(`💡 Please check if CA containers are running: docker ps | grep ca`);
         return false;
       }
 
-      // Get admin user context
-      const provider = wallet.getProviderRegistry().getProvider(adminUser.type);
-      const adminUserContext = await provider.getUserContext(adminUser, adminUserName);
+      // Try to enroll with bootstrap admin first and then register user
+      let adminUserContext;
+      try {
+        // Use bootstrap admin (admin/adminpw) to register new users
+        const bootstrapEnrollment = await caInfo.ca.enroll({
+          enrollmentID: 'admin',
+          enrollmentSecret: 'adminpw',
+        });
 
-      // Register the user with CA
-      const secret = await caInfo.ca.register(
-        {
-          enrollmentID: params.userId,
-          role: 'client',
-          affiliation: `${params.orgName.toLowerCase()}.department1`,
-          attrs: [
-            { name: 'role', value: params.role, ecert: true },
-            { name: 'orgName', value: params.orgName, ecert: true }
-          ]
-        },
-        adminUserContext
-      );
+        // Create temporary admin identity in memory
+        const tempAdminIdentity = {
+          credentials: {
+            certificate: bootstrapEnrollment.certificate,
+            privateKey: bootstrapEnrollment.key.toBytes(),
+          },
+          mspId: caInfo.mspId,
+          type: 'X.509',
+        };
+
+        // Get admin context from bootstrap enrollment
+        const provider = wallet.getProviderRegistry().getProvider(tempAdminIdentity.type);
+        adminUserContext = await provider.getUserContext(tempAdminIdentity, 'admin');
+        this.logger.log(`✅ Successfully got bootstrap admin context for ${params.orgName}`);
+
+      } catch (bootstrapError) {
+        this.logger.error(`❌ Failed to get bootstrap admin context: ${bootstrapError.message}`);
+        return false;
+      }
+
+      // Determine affiliation based on organization
+      const affiliation = this.getAffiliationForOrg(params.orgName);
+
+      // Generate a random password for the user
+      const userSecret = `${params.userId}_${Date.now()}`;
+
+      // Register the user with CA using bootstrap admin
+      let secret;
+      try {
+        secret = await caInfo.ca.register(
+          {
+            enrollmentID: params.userId,
+            enrollmentSecret: userSecret,
+            role: 'client',
+            affiliation: affiliation,
+            maxEnrollments: 1,
+            attrs: [
+              { name: 'role', value: params.role, ecert: true },
+              { name: 'orgName', value: params.orgName, ecert: true }
+            ]
+          },
+          adminUserContext
+        );
+        this.logger.log(`✅ Successfully registered user ${params.userId} with CA`);
+      } catch (regError) {
+        if (regError.message && regError.message.includes('already registered')) {
+          this.logger.log(`⚠️ User ${params.userId} already registered, trying to enroll with default secret`);
+          secret = userSecret;
+        } else {
+          this.logger.error(`❌ Failed to register user ${params.userId}: ${regError.message}`);
+          return false;
+        }
+      }
 
       // Enroll the user
       const enrollment = await caInfo.ca.enroll({
@@ -225,10 +304,19 @@ export class BlockchainService implements OnModuleInit {
       await wallet.put(params.userId, x509Identity);
       
       this.logger.log(`✅ Successfully enrolled user ${params.userId} for ${params.orgName} with role ${params.role}`);
+      this.logger.log(`📋 User ${params.userId} can now participate in blockchain transactions`);
       return true;
 
     } catch (error) {
-      this.logger.error(`❌ Failed to enroll user ${params.userId}:`, error);
+      if (error.message && error.message.includes('already enrolled')) {
+        this.logger.warn(`⚠️ User ${params.userId} is already enrolled with the CA for ${params.orgName}`);
+        return true;
+      }
+      
+      this.logger.error(`❌ Failed to enroll user ${params.userId} for ${params.orgName}:`, {
+        error: error.message,
+        stack: error.stack
+      });
       this.logger.warn(`⚠️ Failed to enroll blockchain identity for user ${params.userId} - continuing without blockchain identity`);
       return false;
     }
@@ -255,21 +343,16 @@ export class BlockchainService implements OnModuleInit {
    */
   private buildCAClient(orgName: string): { ca: FabricCAServices; mspId: string } | null {
     try {
-      this.logger.debug(`Getting organization config for: ${orgName}`);
       const organization = this.blockchainConfig.getOrganization(orgName);
       if (!organization) {
         throw new Error(`Organization ${orgName} not found`);
       }
-      
-      this.logger.debug(`Organization config:`, organization);
 
       // Use CA URL from organization config
       const caUrl = organization.caUrl;
       if (!caUrl) {
         throw new Error(`No CA URL found for organization ${orgName}`);
       }
-      
-      this.logger.debug(`Using CA URL: ${caUrl} for ${orgName}`);
 
       // Read TLS CA cert for the organization
       const tlsCertPath = path.resolve(process.cwd(), `./assets/blockchain/tls/ca-${orgName.toLowerCase()}.crt`);
@@ -303,6 +386,13 @@ export class BlockchainService implements OnModuleInit {
   }
 
   /**
+   * Get default admin user for organization
+   */
+  private getDefaultUser(orgName: string): string {
+    return `admin-${orgName}`;
+  }
+
+  /**
    * Get list of available admin users in wallet
    */
   private async getAvailableAdminUsers(wallet: any): Promise<string> {
@@ -318,13 +408,23 @@ export class BlockchainService implements OnModuleInit {
         }
       }
       
-      return adminUsers.length > 0 ? adminUsers.join(', ') : 'None';
+      return adminUsers.length > 0 ? adminUsers.join(', ') : 'No admin users found';
     } catch (error) {
-      return 'Unable to check';
+      return 'Error checking admin users';
     }
   }
 
   /**
+   * Get affiliation for organization
+   */
+  private getAffiliationForOrg(orgName: string): string {
+    const affiliations = {
+      'OrgProp': 'orgProp.department1',
+      'OrgTenant': 'orgTenant.department1', 
+      'OrgLandlord': 'orgLandlord.department1'
+    };
+    return affiliations[orgName] || `${orgName}.department1`;
+  }  /**
    * Handle blockchain errors and convert to appropriate HTTP exceptions
    */
   private handleBlockchainError(error: any, operation: string): never {
@@ -351,16 +451,17 @@ export class BlockchainService implements OnModuleInit {
   private async executeBlockchainOperation<T>(
     operation: () => Promise<T>,
     operationName: string,
-    orgName: string = 'OrgProp'
+    orgName: string = 'OrgProp',
+    userId?: string
   ): Promise<BlockchainResponse<T>> {
     try {
-      await this.ensureConnection(orgName);
+      await this.ensureConnection(orgName, userId);
       
       const startTime = Date.now();
       const result = await operation();
       const duration = Date.now() - startTime;
       
-      this.logger.debug(`Blockchain operation [${operationName}] completed in ${duration}ms`);
+      this.logger.log(`Blockchain operation [${operationName}] completed in ${duration}ms for user ${userId || 'admin'}`);
       
       return {
         success: true,
@@ -415,7 +516,8 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'createContract',
-      user.orgName
+      user.orgName,
+      user.userId // Truyền userId để sử dụng identity cụ thể
     );
   }
 
@@ -429,7 +531,8 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'getContract',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 
@@ -443,7 +546,8 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'activateContract',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 
@@ -457,7 +561,8 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'terminateContract',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 
@@ -477,7 +582,8 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'addSignature',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 
@@ -491,7 +597,8 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'getContractHistory',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 
@@ -507,7 +614,8 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'queryContractsByStatus',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 
@@ -521,7 +629,8 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'queryContractsByParty',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 
@@ -539,7 +648,8 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'queryContractsByDateRange',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 
@@ -580,7 +690,8 @@ export class BlockchainService implements OnModuleInit {
         return results;
       },
       'createPaymentSchedule',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 
@@ -600,7 +711,8 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'recordPayment',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 
@@ -614,7 +726,8 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'markPaymentOverdue',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 
@@ -635,7 +748,8 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'applyPenalty',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 
@@ -649,7 +763,8 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'queryPaymentsByStatus',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 
@@ -663,7 +778,8 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'queryOverduePayments',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 
@@ -717,15 +833,13 @@ export class BlockchainService implements OnModuleInit {
       async () => {
         const result = await this.contract.evaluateTransaction('QueryPenaltiesByContract', contractId);
         const rawData = result.toString();
-        this.logger.debug(`Raw chaincode response for QueryPenaltiesByContract: ${rawData}`);
-        
         const parsedData = JSON.parse(rawData);
-        this.logger.debug(`Parsed chaincode response: ${JSON.stringify(parsedData)}`);
         
         return parsedData;
       },
       'getContractPenalties',
-      user.orgName
+      user.orgName,
+      user.userId
     );
   }
 }

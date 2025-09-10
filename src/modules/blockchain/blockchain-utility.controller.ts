@@ -74,6 +74,7 @@ export class BlockchainUtilityController {
    * Get supported organizations
    */
   @Get('organizations')
+  @Public() // Public endpoint for organization information
   @ApiOperation({ 
     summary: 'Get supported organizations',
     description: 'Returns list of supported blockchain organizations'
@@ -159,6 +160,7 @@ export class BlockchainUtilityController {
    * Enroll blockchain user
    */
   @Post('enroll-user')
+  @Public() // Public endpoint for user enrollment
   @ApiOperation({ 
     summary: 'Enroll blockchain user',
     description: 'Enrolls a user for blockchain operations with specified organization'
@@ -206,6 +208,7 @@ export class BlockchainUtilityController {
    * Check if user is enrolled
    */
   @Get('check-enrollment')
+  @Public() // Make check-enrollment public
   @ApiOperation({ 
     summary: 'Check user enrollment status',
     description: 'Checks if a user is enrolled in blockchain for the specified organization'
