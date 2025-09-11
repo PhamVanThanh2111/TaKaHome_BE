@@ -56,7 +56,7 @@ export class ContractController {
     description: 'Không tìm thấy hợp đồng',
   })
   findOne(@Param('id') id: string) {
-    return this.contractService.findOne(+id);
+    return this.contractService.findOne(id);
   }
 
   @Patch(':id')
@@ -67,6 +67,14 @@ export class ContractController {
     @Param('id') id: string,
     @Body() updateContractDto: UpdateContractDto,
   ) {
-    return this.contractService.update(+id, updateContractDto);
+    return this.contractService.update(id, updateContractDto);
+  }
+
+  @Patch(':id/activate')
+  @ApiOperation({ summary: 'Kích hoạt hợp đồng' })
+  @ApiResponse({ status: HttpStatus.OK, type: ContractResponseDto })
+  @Roles('ADMIN')
+  activate(@Param('id') id: string) {
+    return this.contractService.activate(id);
   }
 }

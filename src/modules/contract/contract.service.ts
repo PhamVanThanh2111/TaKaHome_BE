@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Contract } from './entities/contract.entity';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
+import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 
 @Injectable()
 export class ContractService {
@@ -23,7 +24,7 @@ export class ContractService {
     });
   }
 
-  async findOne(id: number): Promise<Contract | null> {
+  async findOne(id: string): Promise<Contract | null> {
     return this.contractRepository.findOne({
       where: { id: id.toString() },
       relations: ['tenant', 'landlord', 'property'],
@@ -31,7 +32,7 @@ export class ContractService {
   }
 
   async update(
-    id: number,
+    id: string,
     updateContractDto: UpdateContractDto,
   ): Promise<Contract> {
     await this.contractRepository.update(id, updateContractDto);
@@ -40,5 +41,24 @@ export class ContractService {
       throw new Error(`Contract with id ${id} not found`);
     }
     return updatedContract;
+  }
+
+  private ensureStatus(
+    contract: Contract,
+    expected: ContractStatusEnum[],
+  ): void {
+    if (!expected.includes(contract.status)) {
+      throw new BadRequestException(
+        `Invalid state: ${contract.status}. Expected: ${expected.join(', ')}`,
+      );
+    }
+  }
+
+  async activate(id: string): Promise<Contract> {
+    const contract = await this.findOne(id);
+    if (!contract) throw new Error(`Contract with id ${id} not found`);
+    this.ensureStatus(contract, [ContractStatusEnum.PENDING_SIGNATURE]);
+    contract.status = ContractStatusEnum.ACTIVE;
+    return this.contractRepository.save(contract);
   }
 }
