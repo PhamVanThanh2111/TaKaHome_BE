@@ -56,7 +56,7 @@ export class ContractController {
     description: 'Không tìm thấy hợp đồng',
   })
   findOne(@Param('id') id: string) {
-    return this.contractService.findOne(+id);
+    return this.contractService.findOne(id);
   }
 
   @Patch(':id')
@@ -67,6 +67,38 @@ export class ContractController {
     @Param('id') id: string,
     @Body() updateContractDto: UpdateContractDto,
   ) {
-    return this.contractService.update(+id, updateContractDto);
+    return this.contractService.update(id, updateContractDto);
+  }
+
+  @Patch(':id/activate')
+  @ApiOperation({ summary: 'Kích hoạt hợp đồng' })
+  @ApiResponse({ status: HttpStatus.OK, type: ContractResponseDto })
+  @Roles('ADMIN')
+  activate(@Param('id') id: string) {
+    return this.contractService.activate(id);
+  }
+
+  @Patch(':id/complete')
+  @ApiOperation({ summary: 'Hoàn thành hợp đồng' })
+  @ApiResponse({ status: HttpStatus.OK, type: ContractResponseDto })
+  @Roles('ADMIN')
+  complete(@Param('id') id: string) {
+    return this.contractService.complete(id);
+  }
+
+  @Patch(':id/cancel')
+  @ApiOperation({ summary: 'Hủy hợp đồng' })
+  @ApiResponse({ status: HttpStatus.OK, type: ContractResponseDto })
+  @Roles('ADMIN')
+  cancel(@Param('id') id: string) {
+    return this.contractService.cancel(id);
+  }
+
+  @Patch(':id/terminate')
+  @ApiOperation({ summary: 'Chấm dứt hợp đồng' })
+  @ApiResponse({ status: HttpStatus.OK, type: ContractResponseDto })
+  @Roles('ADMIN')
+  terminate(@Param('id') id: string) {
+    return this.contractService.terminate(id);
   }
 }
