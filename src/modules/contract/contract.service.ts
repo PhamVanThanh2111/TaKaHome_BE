@@ -31,6 +31,13 @@ export class ContractService {
     });
   }
 
+  async findByTenant(tenantId: string): Promise<Contract[]> {
+    return this.contractRepository.find({
+      where: { tenant: { id: tenantId } },
+      relations: ['tenant', 'landlord', 'property'],
+    });
+  }
+
   async update(
     id: string,
     updateContractDto: UpdateContractDto,
