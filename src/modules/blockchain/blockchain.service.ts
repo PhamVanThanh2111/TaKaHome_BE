@@ -22,6 +22,7 @@ import { Gateway, Wallets, Contract, Network, X509Identity, Identity } from 'fab
 import * as FabricCAServices from 'fabric-ca-client';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 
 /**
  * Blockchain Service
@@ -253,10 +254,13 @@ export class BlockchainService implements OnModuleInit {
       // Determine affiliation based on organization
       const affiliation = this.getAffiliationForOrg(params.orgName);
 
-      // Generate a random password for the user
-      const userSecret = `${params.userId}_${Date.now()}`;
+      // Generate a cryptographically secure random password
+      const userSecret = crypto.randomBytes(32).toString('hex');
 
       // Register the user with CA using bootstrap admin
+      const isProduction = process.env.NODE_ENV === 'production';
+      const maxEnrollments = isProduction ? 1 : 0; // 0 = unlimited for dev, 1 for production
+      
       let secret;
       try {
         secret = await caInfo.ca.register(
@@ -265,7 +269,7 @@ export class BlockchainService implements OnModuleInit {
             enrollmentSecret: userSecret,
             role: 'client',
             affiliation: affiliation,
-            maxEnrollments: 1,
+            maxEnrollments: maxEnrollments,
             attrs: [
               { name: 'role', value: params.role, ecert: true },
               { name: 'orgName', value: params.orgName, ecert: true }
@@ -308,15 +312,29 @@ export class BlockchainService implements OnModuleInit {
       return true;
 
     } catch (error) {
+      // Handle specific error cases
       if (error.message && error.message.includes('already enrolled')) {
         this.logger.warn(`⚠️ User ${params.userId} is already enrolled with the CA for ${params.orgName}`);
         return true;
       }
       
-      this.logger.error(`❌ Failed to enroll user ${params.userId} for ${params.orgName}:`, {
-        error: error.message,
-        stack: error.stack
-      });
+      // Categorize errors for better debugging
+      if (error.message && error.message.includes('ECONNREFUSED')) {
+        this.logger.error(`🚫 CA server not accessible for ${params.orgName}. Check if CA containers are running.`);
+      } else if (error.message && error.message.includes('certificate')) {
+        this.logger.error(`🔒 TLS certificate issue for ${params.orgName}. Check certificate validity.`);
+      } else if (error.message && error.message.includes('Authentication failure')) {
+        this.logger.error(`🔑 Authentication failed for ${params.orgName}. Check admin credentials.`);
+      } else if (error.message && error.message.includes('affiliation')) {
+        this.logger.error(`🏢 Affiliation not found for ${params.orgName}. Check organization setup.`);
+      } else {
+        this.logger.error(`❌ Failed to enroll user ${params.userId} for ${params.orgName}:`, {
+          error: error.message,
+          // Only log stack trace in development
+          ...(process.env.NODE_ENV !== 'production' && { stack: error.stack })
+        });
+      }
+      
       this.logger.warn(`⚠️ Failed to enroll blockchain identity for user ${params.userId} - continuing without blockchain identity`);
       return false;
     }
@@ -363,8 +381,9 @@ export class BlockchainService implements OnModuleInit {
       }
 
       // Create CA client with proper TLS configuration
+      const isProduction = process.env.NODE_ENV === 'production';
       const caOptions: any = { 
-        verify: false,
+        verify: isProduction, // Enable TLS verification in production
         'ssl-target-name-override': `ca-${orgName.toLowerCase()}`,
         protocol: 'https'
       };
@@ -372,6 +391,9 @@ export class BlockchainService implements OnModuleInit {
       if (tlsCACerts) {
         caOptions.trustedRoots = [tlsCACerts];
       }
+      
+      // Log TLS configuration for security audit
+      this.logger.log(`🔒 TLS verification ${isProduction ? 'ENABLED' : 'DISABLED'} for ${orgName} (NODE_ENV: ${process.env.NODE_ENV || 'development'})`);
       
       const ca = new FabricCAServices(caUrl, caOptions);
       
