@@ -26,7 +26,7 @@ export class ContractService {
 
   async findOne(id: string): Promise<Contract | null> {
     return this.contractRepository.findOne({
-      where: { id: id.toString() },
+      where: { id },
       relations: ['tenant', 'landlord', 'property'],
     });
   }
