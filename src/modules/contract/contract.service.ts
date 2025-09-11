@@ -69,4 +69,15 @@ export class ContractService {
     contract.status = ContractStatusEnum.COMPLETED;
     return this.contractRepository.save(contract);
   }
+
+  async cancel(id: string): Promise<Contract> {
+    const contract = await this.findOne(id);
+    if (!contract) throw new Error(`Contract with id ${id} not found`);
+    this.ensureStatus(contract, [
+      ContractStatusEnum.DRAFT,
+      ContractStatusEnum.PENDING_SIGNATURE,
+    ]);
+    contract.status = ContractStatusEnum.CANCELLED;
+    return this.contractRepository.save(contract);
+  }
 }

@@ -85,4 +85,12 @@ export class ContractController {
   complete(@Param('id') id: string) {
     return this.contractService.complete(id);
   }
+
+  @Patch(':id/cancel')
+  @ApiOperation({ summary: 'Hủy hợp đồng' })
+  @ApiResponse({ status: HttpStatus.OK, type: ContractResponseDto })
+  @Roles('ADMIN')
+  cancel(@Param('id') id: string) {
+    return this.contractService.cancel(id);
+  }
 }
