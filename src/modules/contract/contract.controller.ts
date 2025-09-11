@@ -77,4 +77,12 @@ export class ContractController {
   activate(@Param('id') id: string) {
     return this.contractService.activate(id);
   }
+
+  @Patch(':id/complete')
+  @ApiOperation({ summary: 'Hoàn thành hợp đồng' })
+  @ApiResponse({ status: HttpStatus.OK, type: ContractResponseDto })
+  @Roles('ADMIN')
+  complete(@Param('id') id: string) {
+    return this.contractService.complete(id);
+  }
 }

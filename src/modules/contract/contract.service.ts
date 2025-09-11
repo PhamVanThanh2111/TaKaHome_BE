@@ -61,4 +61,12 @@ export class ContractService {
     contract.status = ContractStatusEnum.ACTIVE;
     return this.contractRepository.save(contract);
   }
+
+  async complete(id: string): Promise<Contract> {
+    const contract = await this.findOne(id);
+    if (!contract) throw new Error(`Contract with id ${id} not found`);
+    this.ensureStatus(contract, [ContractStatusEnum.ACTIVE]);
+    contract.status = ContractStatusEnum.COMPLETED;
+    return this.contractRepository.save(contract);
+  }
 }
