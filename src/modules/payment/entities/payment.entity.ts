@@ -10,6 +10,7 @@ import { Contract } from '../../contract/entities/contract.entity';
 import { PaymentMethodEnum } from '../../common/enums/payment-method.enum';
 import { PaymentStatusEnum } from 'src/modules/common/enums/payment-status.enum';
 import { PaymentPurpose } from 'src/modules/common/enums/payment-purpose.enum';
+import { Invoice } from 'src/modules/invoice/entities/invoice.entity';
 
 @Entity()
 export class Payment {
@@ -18,6 +19,9 @@ export class Payment {
 
   @ManyToOne(() => Contract, (contract) => contract.id)
   contract: Contract;
+
+  @ManyToOne(() => Invoice, (invoice) => invoice.payments, { nullable: true })
+  invoice: Invoice;
 
   @Column()
   amount: number;
