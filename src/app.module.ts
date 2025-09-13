@@ -26,6 +26,7 @@ import * as Joi from 'joi';
 import vnpayConfig from './config/vnpay.config';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { EscrowModule } from './modules/escrow/escrow.module';
+import { InvoiceModule } from './modules/invoice/invoice.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { EscrowModule } from './modules/escrow/escrow.module';
     ChatMessageModule,
     WalletModule,
     EscrowModule,
+    InvoiceModule,
   ],
 })
 export class AppModule implements NestModule {
