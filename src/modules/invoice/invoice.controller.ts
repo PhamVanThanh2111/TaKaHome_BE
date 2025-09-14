@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -54,5 +55,12 @@ export class InvoiceController {
   @ApiResponse({ status: HttpStatus.OK, type: [InvoiceResponseDto] })
   findByContract(@Param('contractId') contractId: string) {
     return this.invoiceService.findByContract(contractId);
+  }
+
+  @Patch(':id/pay')
+  @ApiOperation({ summary: 'Thanh toán hóa đơn' })
+  @ApiResponse({ status: HttpStatus.OK, type: InvoiceResponseDto })
+  markPaid(@Param('id') id: string) {
+    return this.invoiceService.markPaid(id);
   }
 }
