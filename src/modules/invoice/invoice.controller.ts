@@ -48,4 +48,11 @@ export class InvoiceController {
   findOne(@Param('id') id: string) {
     return this.invoiceService.findOne(id);
   }
+
+  @Get('contract/:contractId')
+  @ApiOperation({ summary: 'Lấy hóa đơn theo hợp đồng' })
+  @ApiResponse({ status: HttpStatus.OK, type: [InvoiceResponseDto] })
+  findByContract(@Param('contractId') contractId: string) {
+    return this.invoiceService.findByContract(contractId);
+  }
 }

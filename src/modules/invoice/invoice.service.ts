@@ -41,6 +41,13 @@ export class InvoiceService {
     });
   }
 
+  findByContract(contractId: string): Promise<Invoice[]> {
+    return this.invoiceRepository.find({
+      where: { contract: { id: contractId } },
+      relations: ['items', 'contract', 'payments'],
+    });
+  }
+
   // ---- Helper methods ----
   generateCode() {
     const now = new Date();
