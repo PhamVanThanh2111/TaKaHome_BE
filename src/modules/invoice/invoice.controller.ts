@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Post,
@@ -12,6 +13,7 @@ import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoiceResponseDto } from './dto/invoice-response.dto';
+import { Roles } from 'src/common/decorators/roles.decorator';
 
 @Controller('invoices')
 @ApiBearerAuth()
@@ -29,5 +31,13 @@ export class InvoiceController {
   })
   create(@Body() dto: CreateInvoiceDto) {
     return this.invoiceService.create(dto);
+  }
+
+  @Get()
+  @ApiOperation({ summary: 'Lấy danh sách hóa đơn' })
+  @ApiResponse({ status: HttpStatus.OK, type: [InvoiceResponseDto] })
+  @Roles('ADMIN')
+  findAll() {
+    return this.invoiceService.findAll();
   }
 }

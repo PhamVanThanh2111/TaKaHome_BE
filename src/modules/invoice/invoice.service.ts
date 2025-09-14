@@ -28,6 +28,12 @@ export class InvoiceService {
     return this.invoiceRepository.save(invoice);
   }
 
+  findAll(): Promise<Invoice[]> {
+    return this.invoiceRepository.find({
+      relations: ['items', 'contract', 'payments'],
+    });
+  }
+
   // ---- Helper methods ----
   generateCode() {
     const now = new Date();
