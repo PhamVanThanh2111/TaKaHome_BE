@@ -1,10 +1,18 @@
-/* eslint-disable @typescript-eslint/require-await */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+
+export type JwtPayload = {
+  sub: string;
+  email?: string;
+  roles?: string[];
+};
+
+export type JwtUser = {
+  id: string;
+  email?: string;
+  roles?: string[];
+};
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -12,11 +20,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || 'rent_home_khoa_luan_secret',
+      secretOrKey: process.env.JWT_SECRET,
     });
   }
 
-  async validate(payload: any) {
-    return { userId: payload.sub, email: payload.email, roles: payload.roles };
+  async validate(payload: JwtPayload): Promise<JwtUser> {
+    return await Promise.resolve({
+      id: payload.sub,
+      email: payload.email,
+      roles: payload.roles,
+    });
   }
 }

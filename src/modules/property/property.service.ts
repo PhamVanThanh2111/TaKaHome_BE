@@ -12,9 +12,16 @@ export class PropertyService {
     private propertyRepository: Repository<Property>,
   ) {}
 
-  async create(createPropertyDto: CreatePropertyDto): Promise<Property> {
-    const property = this.propertyRepository.create(createPropertyDto);
-    return this.propertyRepository.save(property);
+  async create(createPropertyDto: CreatePropertyDto, landlordId: string): Promise<Property> {
+    try {
+      const property = this.propertyRepository.create({
+        ...createPropertyDto,
+        landlord: { id: landlordId },
+      });
+      return await this.propertyRepository.save(property);
+    } catch (error) {
+      throw new Error(`Error creating property: ${error.message}`);
+    }
   }
 
   async findAll(): Promise<Property[]> {

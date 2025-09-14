@@ -18,19 +18,31 @@ import { PropertyUtilityModule } from './modules/property-utility/property-utili
 import { ChatRoomModule } from './modules/chatroom/chatroom.module';
 import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
 import { AuthModule } from './modules/core/auth/auth.module';
+import AppDataSourcePromise from './modules/core/database/data-source';
 
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
+import { ConfigModule } from '@nestjs/config';
+import * as Joi from 'joi';
+import vnpayConfig from './config/vnpay.config';
+import { WalletModule } from './modules/wallet/wallet.module';
+import { EscrowModule } from './modules/escrow/escrow.module';
+import { InvoiceModule } from './modules/invoice/invoice.module';
+
 @Module({
   imports: [
-    TypeOrmModule.forRoot({
-      type: 'postgres', // or mysql, etc.
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT ?? '5432'),
-      username: process.env.DB_USER || 'postgres',
-      password: process.env.DB_PASS || 'root',
-      database: process.env.DB_NAME || 'rent_home',
-      autoLoadEntities: true,
-      synchronize: true, // OFF on production!
+    TypeOrmModule.forRootAsync({
+      useFactory: async () => (await AppDataSourcePromise).options,
+    }),
+    ConfigModule.forRoot({
+      isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
+      load: [vnpayConfig], // <— nạp file config/vnpay.config.ts
+      validationSchema: Joi.object({
+        VNP_TMN_CODE: Joi.string().required(),
+        VNP_HASH_SECRET: Joi.string().required(),
+        VNP_URL: Joi.string().uri().required(),
+        VNP_RETURN_URL: Joi.string().uri().required(),
+        VNP_IPN_URL: Joi.string().uri().optional(),
+      }),
     }),
     AuthModule,
     UserModule,
@@ -48,6 +60,9 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
     PropertyUtilityModule,
     ChatRoomModule,
     ChatMessageModule,
+    WalletModule,
+    EscrowModule,
+    InvoiceModule,
   ],
 })
 export class AppModule implements NestModule {

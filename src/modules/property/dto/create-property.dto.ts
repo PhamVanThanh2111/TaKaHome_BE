@@ -66,10 +66,4 @@ export class CreatePropertyDto {
     required: false,
   })
   mapLocation?: string;
-
-  @ApiProperty({
-    example: '6a36daba-79e1-4de8-8db5-281d8f6a81c1',
-    description: 'ID chủ nhà (landlord)',
-  })
-  landlordId: string;
 }

@@ -7,13 +7,13 @@ import {
   OneToMany,
   OneToOne,
 } from 'typeorm';
-import { StatusEnum } from '../../common/enums/status.enum';
 import { Booking } from '../../booking/entities/booking.entity';
 import { Contract } from '../../contract/entities/contract.entity';
 import { Review } from '../../review/entities/review.entity';
 import { Favorite } from '../../favorite/entities/favorite.entity';
 import { Report } from '../../report/entities/report.entity';
 import { Account } from 'src/modules/account/entities/account.entity';
+import { UserStatusEnum } from '../../common/enums/user-status.enum';
 
 @Entity()
 export class User {
@@ -37,10 +37,10 @@ export class User {
 
   @Column({
     type: 'enum',
-    enum: StatusEnum,
-    default: StatusEnum.ACTIVE,
+    enum: UserStatusEnum,
+    default: UserStatusEnum.ACTIVE,
   })
-  status: StatusEnum;
+  status: UserStatusEnum;
 
   @CreateDateColumn()
   createAt: Date;

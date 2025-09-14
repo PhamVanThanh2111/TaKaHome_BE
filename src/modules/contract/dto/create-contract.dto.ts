@@ -46,7 +46,7 @@ export class CreateContractDto {
   @IsEnum(ContractStatusEnum)
   @IsOptional()
   @ApiProperty({
-    example: ContractStatusEnum.PENDING_SIGNATURE,
+    example: ContractStatusEnum.DRAFT,
     enum: ContractStatusEnum,
     required: false,
     description: 'Trạng thái hợp đồng',
