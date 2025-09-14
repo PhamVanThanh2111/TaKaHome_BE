@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -39,5 +40,12 @@ export class InvoiceController {
   @Roles('ADMIN')
   findAll() {
     return this.invoiceService.findAll();
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Lấy hóa đơn theo id' })
+  @ApiResponse({ status: HttpStatus.OK, type: InvoiceResponseDto })
+  findOne(@Param('id') id: string) {
+    return this.invoiceService.findOne(id);
   }
 }

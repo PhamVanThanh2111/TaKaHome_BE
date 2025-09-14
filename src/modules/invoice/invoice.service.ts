@@ -34,6 +34,13 @@ export class InvoiceService {
     });
   }
 
+  findOne(id: string): Promise<Invoice | null> {
+    return this.invoiceRepository.findOne({
+      where: { id },
+      relations: ['items', 'contract', 'payments'],
+    });
+  }
+
   // ---- Helper methods ----
   generateCode() {
     const now = new Date();
