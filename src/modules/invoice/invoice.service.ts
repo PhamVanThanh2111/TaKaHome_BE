@@ -57,6 +57,14 @@ export class InvoiceService {
     return this.invoiceRepository.save(invoice);
   }
 
+  async cancel(id: string): Promise<Invoice> {
+    const invoice = await this.findOne(id);
+    if (!invoice) throw new Error(`Invoice with id ${id} not found`);
+    this.ensureStatus(invoice, [InvoiceStatusEnum.PENDING]);
+    invoice.status = InvoiceStatusEnum.CANCELLED;
+    return this.invoiceRepository.save(invoice);
+  }
+
   // ---- Helper methods ----
   generateCode() {
     const now = new Date();

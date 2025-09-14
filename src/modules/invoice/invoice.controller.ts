@@ -63,4 +63,11 @@ export class InvoiceController {
   markPaid(@Param('id') id: string) {
     return this.invoiceService.markPaid(id);
   }
+
+  @Patch(':id/cancel')
+  @ApiOperation({ summary: 'Hủy hóa đơn' })
+  @ApiResponse({ status: HttpStatus.OK, type: InvoiceResponseDto })
+  cancel(@Param('id') id: string) {
+    return this.invoiceService.cancel(id);
+  }
 }
