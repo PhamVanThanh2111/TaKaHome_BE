@@ -59,7 +59,10 @@ export class PaymentService {
       await this.paymentRepository.save(payment);
 
       // Nếu là tiền cọc: ghi có escrow
-      if (payment.purpose === PaymentPurpose.ESCROW_DEPOSIT) {
+      if (
+        payment.purpose === PaymentPurpose.ESCROW_DEPOSIT ||
+        payment.purpose === PaymentPurpose.OWNER_ESCROW_DEPOSIT
+      ) {
         await this.escrowService.creditDepositFromPayment(payment.id);
       }
 
@@ -126,7 +129,8 @@ export class PaymentService {
     const updated = await this.findOne(id);
     if (
       updatePaymentDto.status === PaymentStatusEnum.PAID &&
-      updated.purpose === PaymentPurpose.ESCROW_DEPOSIT
+      (updated.purpose === PaymentPurpose.ESCROW_DEPOSIT ||
+        updated.purpose === PaymentPurpose.OWNER_ESCROW_DEPOSIT)
     ) {
       await this.escrowService.creditDepositFromPayment(updated.id);
     }

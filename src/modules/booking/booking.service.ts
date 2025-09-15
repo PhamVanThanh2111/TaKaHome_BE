@@ -55,24 +55,36 @@ export class BookingService {
     b.escrowDepositDueAt = new Date(
       Date.now() + depositDeadlineHours * 60 * 60 * 1000,
     );
+    b.landlordEscrowDepositDueAt = new Date(
+      Date.now() + depositDeadlineHours * 60 * 60 * 1000,
+    );
     b.firstRentDueAt = new Date(
       Date.now() + depositDeadlineHours * 3 * 60 * 60 * 1000,
     );
     return this.bookingRepository.save(b);
   }
 
-  // Gọi khi IPN cọc thành công (service thanh toán sẽ gọi sang)
-  async markDepositFunded(id: string) {
+  // Gọi khi IPN cọc Người thuê thành công
+  async markTenantDepositFunded(id: string) {
     const b = await this.findOne(id);
     this.ensureStatus(b, [BookingStatus.AWAITING_DEPOSIT]);
-    b.status = BookingStatus.DEPOSIT_FUNDED;
     b.escrowDepositFundedAt = new Date();
-    // Option: nếu muốn ấn định hạn kỳ đầu tại đây
-    if (!b.firstRentDueAt) {
-      // hạn kỳ đầu = 3 ngày sau khi cọc xong
-      b.firstRentDueAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-    }
+    this.maybeMarkDualEscrowFunded(b);
     return this.bookingRepository.save(b);
+  }
+
+  // Gọi khi IPN ký quỹ Chủ nhà thành công
+  async markLandlordDepositFunded(id: string) {
+    const b = await this.findOne(id);
+    this.ensureStatus(b, [BookingStatus.AWAITING_DEPOSIT]);
+    b.landlordEscrowDepositFundedAt = new Date();
+    this.maybeMarkDualEscrowFunded(b);
+    return this.bookingRepository.save(b);
+  }
+
+  // Alias cũ giữ nguyên API
+  async markDepositFunded(id: string) {
+    return this.markTenantDepositFunded(id);
   }
 
   // Gọi khi thanh toán kỳ đầu thành công (IPN hoặc ví)
@@ -80,6 +92,7 @@ export class BookingService {
     const b = await this.findOne(id);
     this.ensureStatus(b, [
       BookingStatus.DEPOSIT_FUNDED,
+      BookingStatus.DUAL_ESCROW_FUNDED,
       BookingStatus.AWAITING_FIRST_RENT,
     ]);
     b.status = BookingStatus.READY_FOR_HANDOVER;
@@ -118,6 +131,35 @@ export class BookingService {
     if (dto.firstRentDueAt) b.firstRentDueAt = new Date(dto.firstRentDueAt);
     if (dto.status) b.status = dto.status; // dùng thận trọng
     return this.bookingRepository.save(b);
+  }
+
+  async cancelOverdueDeposits(now = new Date()) {
+    const bookings = await this.bookingRepository.find({
+      where: { status: BookingStatus.AWAITING_DEPOSIT },
+    });
+    for (const b of bookings) {
+      const tenantLate =
+        !b.escrowDepositFundedAt &&
+        b.escrowDepositDueAt &&
+        b.escrowDepositDueAt < now;
+      const landlordLate =
+        !b.landlordEscrowDepositFundedAt &&
+        b.landlordEscrowDepositDueAt &&
+        b.landlordEscrowDepositDueAt < now;
+      if (tenantLate || landlordLate) {
+        b.status = BookingStatus.CANCELLED;
+        await this.bookingRepository.save(b);
+      }
+    }
+  }
+
+  private maybeMarkDualEscrowFunded(b: Booking) {
+    if (b.escrowDepositFundedAt && b.landlordEscrowDepositFundedAt) {
+      b.status = BookingStatus.DUAL_ESCROW_FUNDED;
+      if (!b.firstRentDueAt) {
+        b.firstRentDueAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+      }
+    }
   }
 
   // --- Helpers ---
