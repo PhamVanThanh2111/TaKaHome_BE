@@ -42,6 +42,12 @@ export class Booking {
   firstRentDueAt?: Date; // hạn thanh toán kỳ đầu (+ 72h sau SIGNED)
 
   @Column({ type: 'timestamptz', nullable: true })
+  landlordEscrowDepositDueAt?: Date; // hạn nộp ký quỹ chủ nhà
+
+  @Column({ type: 'timestamptz', nullable: true })
+  landlordEscrowDepositFundedAt?: Date; // Chủ nhà đã nộp ký quỹ
+
+  @Column({ type: 'timestamptz', nullable: true })
   firstRentPaidAt?: Date; // IPN thanh toán kỳ đầu thành công
 
   @Column({ type: 'timestamptz', nullable: true })

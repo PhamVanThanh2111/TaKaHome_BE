@@ -54,7 +54,10 @@ export class EscrowService {
     if (!payment) throw new Error('Payment not found');
     if (payment.status !== PaymentStatusEnum.PAID)
       throw new Error('Payment is not PAID');
-    if (payment.purpose !== PaymentPurpose.ESCROW_DEPOSIT)
+    if (
+      payment.purpose !== PaymentPurpose.ESCROW_DEPOSIT &&
+      payment.purpose !== PaymentPurpose.OWNER_ESCROW_DEPOSIT
+    )
       throw new Error('Payment is not a deposit');
 
     const acc = await this.ensureAccountForContract(payment.contract.id);
@@ -71,7 +74,10 @@ export class EscrowService {
       status: 'COMPLETED',
       refType: 'PAYMENT',
       refId: payment.id,
-      note: 'Deposit funded via payment',
+      note:
+        payment.purpose === PaymentPurpose.OWNER_ESCROW_DEPOSIT
+          ? 'Owner deposit funded via payment'
+          : 'Deposit funded via payment',
       completedAt: new Date(),
     });
     await this.txnRepo.save(txn);
