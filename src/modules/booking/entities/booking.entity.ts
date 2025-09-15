@@ -5,10 +5,12 @@ import {
   ManyToOne,
   CreateDateColumn,
   UpdateDateColumn,
+  OneToMany,
 } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { Property } from '../../property/entities/property.entity';
 import { BookingStatus } from 'src/modules/common/enums/booking-status.enum';
+import { MaintenanceTicket } from 'src/modules/maintenance/entities/maintenance-ticket.entity';
 
 @Entity()
 export class Booking {
@@ -64,4 +66,7 @@ export class Booking {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @OneToMany(() => MaintenanceTicket, (t) => t.booking)
+  maintenanceTickets: MaintenanceTicket[];
 }
