@@ -19,11 +19,13 @@ import { ChatRoomModule } from './modules/chatroom/chatroom.module';
 import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
 import { AuthModule } from './modules/core/auth/auth.module';
 import { BlockchainModule } from './modules/blockchain/blockchain.module';
+import { SmartCAModule } from './modules/smartca/smartca.module';
 
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { ConfigModule } from '@nestjs/config';
 import * as Joi from 'joi';
 import vnpayConfig from './config/vnpay.config';
+import smartcaConfig from './config/smartca.config';
 
 @Module({
   imports: [
@@ -42,17 +44,22 @@ import vnpayConfig from './config/vnpay.config';
     }),
     ConfigModule.forRoot({
       isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
-      load: [vnpayConfig], // <— nạp file config/vnpay.config.ts
+      load: [vnpayConfig, smartcaConfig], // <— nạp file config/vnpay.config.ts và smartca.config.ts
       validationSchema: Joi.object({
         VNP_TMN_CODE: Joi.string().required(),
         VNP_HASH_SECRET: Joi.string().required(),
         VNP_URL: Joi.string().uri().required(),
         VNP_RETURN_URL: Joi.string().uri().required(),
         VNP_IPN_URL: Joi.string().uri().optional(),
+        // SmartCA validation (optional in case not configured)
+        SMARTCA_SP_ID: Joi.string().optional(),
+        SMARTCA_SP_PASSWORD: Joi.string().optional(),
+        SMARTCA_ENVIRONMENT: Joi.string().valid('production', 'uat').default('production'),
       }),
     }),
     AuthModule,
     BlockchainModule,
+    SmartCAModule,
     UserModule,
     PropertyModule,
     ContractModule,
