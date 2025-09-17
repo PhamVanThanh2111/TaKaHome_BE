@@ -67,6 +67,9 @@ export class BookingService {
   // Gọi khi IPN cọc Người thuê thành công
   async markTenantDepositFunded(id: string) {
     const b = await this.findOne(id);
+    if (b.escrowDepositFundedAt) {
+      return b;
+    }
     this.ensureStatus(b, [BookingStatus.AWAITING_DEPOSIT]);
     b.escrowDepositFundedAt = new Date();
     this.maybeMarkDualEscrowFunded(b);
@@ -76,6 +79,9 @@ export class BookingService {
   // Gọi khi IPN ký quỹ Chủ nhà thành công
   async markLandlordDepositFunded(id: string) {
     const b = await this.findOne(id);
+    if (b.landlordEscrowDepositFundedAt) {
+      return b;
+    }
     this.ensureStatus(b, [BookingStatus.AWAITING_DEPOSIT]);
     b.landlordEscrowDepositFundedAt = new Date();
     this.maybeMarkDualEscrowFunded(b);
@@ -90,6 +96,9 @@ export class BookingService {
   // Gọi khi thanh toán kỳ đầu thành công (IPN hoặc ví)
   async markFirstRentPaid(id: string) {
     const b = await this.findOne(id);
+    if (b.firstRentPaidAt) {
+      return b;
+    }
     this.ensureStatus(b, [
       BookingStatus.DEPOSIT_FUNDED,
       BookingStatus.DUAL_ESCROW_FUNDED,
@@ -182,5 +191,62 @@ export class BookingService {
 
   async findAll(): Promise<Booking[]> {
     return this.bookingRepository.find({ relations: ['tenant', 'property'] });
+  }
+
+  /**
+   * Helper cho các service khác (Payment/IPN) đánh dấu mốc theo tenant + property
+   */
+  async markTenantDepositFundedByTenantAndProperty(
+    tenantId: string,
+    propertyId: string,
+  ) {
+    const booking = await this.findLatestByTenantAndProperty(
+      tenantId,
+      propertyId,
+    );
+    if (!booking)
+      throw new NotFoundException('Booking not found for tenant/property');
+    return this.markTenantDepositFunded(booking.id);
+  }
+
+  async markLandlordDepositFundedByTenantAndProperty(
+    tenantId: string,
+    propertyId: string,
+  ) {
+    const booking = await this.findLatestByTenantAndProperty(
+      tenantId,
+      propertyId,
+    );
+    if (!booking)
+      throw new NotFoundException('Booking not found for tenant/property');
+    return this.markLandlordDepositFunded(booking.id);
+  }
+
+  async markFirstRentPaidByTenantAndProperty(
+    tenantId: string,
+    propertyId: string,
+  ) {
+    const booking = await this.findLatestByTenantAndProperty(
+      tenantId,
+      propertyId,
+    );
+    if (!booking)
+      throw new NotFoundException('Booking not found for tenant/property');
+    return this.markFirstRentPaid(booking.id);
+  }
+
+  private async findLatestByTenantAndProperty(
+    tenantId: string,
+    propertyId: string,
+  ) {
+    const [booking] = await this.bookingRepository.find({
+      where: {
+        tenant: { id: tenantId },
+        property: { id: propertyId },
+      },
+      order: { createdAt: 'DESC' },
+      take: 1,
+    });
+    return booking ?? null;
   }
 }
