@@ -52,4 +52,21 @@ export class EscrowController {
       updatedAt: account.updatedAt,
     };
   }
+
+  @Post(':id/refund')
+  @Roles(RoleEnum.ADMIN)
+  @ApiOperation({ summary: 'Hoàn trả tiền cọc cho người thuê' })
+  @ApiResponse({ status: 200, description: 'Hoàn cọc thành công' })
+  async refund(@Param('id') accountId: string, @Body() dto: EscrowAdjustDto) {
+    const account = await this.escrowService.refund(
+      accountId,
+      dto.amount,
+      dto.note,
+    );
+    return {
+      accountId: account.id,
+      balance: account.currentBalance,
+      updatedAt: account.updatedAt,
+    };
+  }
 }
