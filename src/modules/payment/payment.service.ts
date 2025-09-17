@@ -14,6 +14,7 @@ import { PaymentMethodEnum } from '../common/enums/payment-method.enum';
 import { WalletService } from '../wallet/wallet.service';
 import { PaymentPurpose } from '../common/enums/payment-purpose.enum';
 import { EscrowService } from '../escrow/escrow.service';
+import { BookingService } from '../booking/booking.service';
 
 @Injectable()
 export class PaymentService {
@@ -25,6 +26,7 @@ export class PaymentService {
     private readonly vnpay: ConfigType<typeof vnpayConfig>,
     private readonly walletService: WalletService,
     private readonly escrowService: EscrowService,
+    private readonly bookingService: BookingService,
   ) {}
 
   /** API chính để khởi tạo thanh toán */
@@ -58,13 +60,7 @@ export class PaymentService {
       payment.paidAt = new Date();
       await this.paymentRepository.save(payment);
 
-      // Nếu là tiền cọc: ghi có escrow
-      if (
-        payment.purpose === PaymentPurpose.ESCROW_DEPOSIT ||
-        payment.purpose === PaymentPurpose.OWNER_ESCROW_DEPOSIT
-      ) {
-        await this.escrowService.creditDepositFromPayment(payment.id);
-      }
+      await this.onPaymentPaid(payment.id);
 
       return {
         id: payment.id,
@@ -127,12 +123,8 @@ export class PaymentService {
   ): Promise<Payment> {
     await this.paymentRepository.update(id, updatePaymentDto);
     const updated = await this.findOne(id);
-    if (
-      updatePaymentDto.status === PaymentStatusEnum.PAID &&
-      (updated.purpose === PaymentPurpose.ESCROW_DEPOSIT ||
-        updated.purpose === PaymentPurpose.OWNER_ESCROW_DEPOSIT)
-    ) {
-      await this.escrowService.creditDepositFromPayment(updated.id);
+    if (updatePaymentDto.status === PaymentStatusEnum.PAID) {
+      await this.onPaymentPaid(updated.id);
     }
     return updated;
   }
@@ -282,29 +274,25 @@ export class PaymentService {
     });
   }
 
-  handleVnpayIpn(query: Record<string, string>) {
+  async handleVnpayIpn(query: Record<string, string>) {
     try {
-      console.log('test ipn');
-      // 1) Secret & TmnCode từ config (typed hoặc ConfigService)
       const secret = this.vnpay?.hashSecret;
       const tmnCode = this.vnpay?.tmnCode;
       if (!secret || !tmnCode) return 'RspCode=99&Message=Config missing';
 
-      // 2) Lấy hash nhận được và loại nó khỏi tập ký
       const receivedHash = (query.vnp_SecureHash || '').toLowerCase();
       const { vnp_SecureHash, vnp_SecureHashType, ...raw } = query;
 
-      // 3) Gom các tham số vnp_* và sort A→Z
       const vnpParams: Record<string, string> = {};
       Object.keys(raw)
         .filter((k) => k.startsWith('vnp_'))
         .sort()
-        .forEach((k) => (vnpParams[k] = raw[k]));
+        .forEach((k) => {
+          vnpParams[k] = raw[k];
+        });
 
-      // 4) Tạo signData theo sample NodeJS của VNPAY
       const signData = qs.stringify(vnpParams, '&', '=');
 
-      // 5) HMAC-SHA512 và so sánh chữ ký
       const signed = crypto
         .createHmac('sha512', secret)
         .update(Buffer.from(signData, 'utf-8'))
@@ -315,70 +303,121 @@ export class PaymentService {
         return 'RspCode=97&Message=Invalid Checksum';
       }
 
-      // 6) Kiểm tra TmnCode
       if (vnpParams['vnp_TmnCode'] !== tmnCode) {
         return 'RspCode=11&Message=Invalid TmnCode';
       }
 
-      // 7) Trích dữ liệu cần thiết
       const txnRef = vnpParams['vnp_TxnRef'];
-      const amountFromGateway = Number(vnpParams['vnp_Amount'] || 0); // đơn vị: x100 VND
-      const responseCode = vnpParams['vnp_ResponseCode']; // '00' = thành công
-      const transStatus = vnpParams['vnp_TransactionStatus']; // '00' = thành công
+      if (!txnRef) {
+        return 'RspCode=01&Message=Order not found';
+      }
+
+      const payment = await this.paymentRepository.findOne({
+        where: { gatewayTxnRef: txnRef },
+        relations: ['contract', 'contract.tenant', 'contract.property'],
+      });
+
+      if (!payment) {
+        return 'RspCode=01&Message=Order not found';
+      }
+
+      const amountFromGateway = Number(vnpParams['vnp_Amount'] || 0);
+      if (!Number.isFinite(amountFromGateway)) {
+        return 'RspCode=04&Message=Amount invalid';
+      }
+
+      const expected = Math.round(Number(payment.amount) * 100);
+      if (expected !== amountFromGateway) {
+        return 'RspCode=04&Message=Amount mismatch';
+      }
+
+      if (payment.status === PaymentStatusEnum.PAID) {
+        return 'RspCode=02&Message=Order already confirmed';
+      }
+
+      const responseCode = vnpParams['vnp_ResponseCode'];
+      const transStatus = vnpParams['vnp_TransactionStatus'];
       const transactionNo = vnpParams['vnp_TransactionNo'];
       const bankCode = vnpParams['vnp_BankCode'];
       const payDate = vnpParams['vnp_PayDate'];
-      console.log('txnRef', txnRef);
-      console.log('amountFromGateway', amountFromGateway);
-      console.log('responseCode', responseCode);
-      console.log('transStatus', transStatus);
-      console.log('transactionNo', transactionNo);
-      console.log('bankCode', bankCode);
-      console.log('payDate', payDate);
 
-      // if (!txnRef) return 'RspCode=01&Message=Order not found';
+      if (responseCode === '00' && transStatus === '00') {
+        payment.status = PaymentStatusEnum.PAID;
+        payment.transactionNo = transactionNo ?? payment.transactionNo;
+        payment.bankCode = bankCode ?? payment.bankCode;
+        payment.paidAt = payDate ? this.parseVnpDate(payDate) : new Date();
+        await this.paymentRepository.save(payment);
 
-      // // 8) Tìm payment theo txnRef trong DB (tùy cột bạn đang lưu)
-      // // Ưu tiên cột gatewayTxnRef; nếu bạn dùng tên khác, đổi lại cho đúng.
-      // const payment = await this.paymentRepository.findOne({
-      //   where: { gatewayTxnRef: txnRef },
-      // });
+        await this.onPaymentPaid(payment.id, payment);
 
-      // if (!payment) {
-      //   return 'RspCode=01&Message=Order not found';
-      // }
+        return 'RspCode=00&Message=Confirm Success';
+      }
 
-      // // 9) Idempotent: nếu đã PAID thì báo đã xác nhận
-      // if (payment.status === StatusEnum.PAID) {
-      //   return 'RspCode=02&Message=Order already confirmed';
-      // }
+      payment.status = PaymentStatusEnum.FAILED;
+      await this.paymentRepository.save(payment);
 
-      // // 10) Đối chiếu số tiền
-      // const expected = Math.round(payment.amount) * 100;
-      // if (expected !== amountFromGateway) {
-      //   return 'RspCode=04&Message=Amount mismatch';
-      // }
-
-      // // 11) Cập nhật trạng thái
-      // if (responseCode === '00' && transStatus === '00') {
-      //   payment.status = StatusEnum.PAID;
-      //   payment.transactionNo = transactionNo ?? payment.transactionNo;
-      //   payment.bankCode = bankCode ?? payment.bankCode;
-      //   payment.paidAt = payDate ? this.parseVnpDate(payDate) : new Date();
-      //   await this.paymentRepository.save(payment);
-
-      //   // TODO: nếu cần, cập nhật Contract liên quan tại đây
-
-      //   return 'RspCode=00&Message=Confirm Success';
-      // } else {
-      //   payment.status = StatusEnum.FAILED;
-      //   await this.paymentRepository.save(payment);
-      //   // Theo thực tiễn, vẫn trả 00 để VNPAY không retry
-      //   return 'RspCode=00&Message=Confirm Success';
-      // }
-    } catch {
-      // Log lại để đối soát khi cần
+      return 'RspCode=00&Message=Confirm Success';
+    } catch (error) {
+      console.error('VNPay IPN error', error);
       return 'RspCode=99&Message=Unknown error';
+    }
+  }
+
+  private async onPaymentPaid(paymentId: string, loaded?: Payment) {
+    const payment =
+      loaded ??
+      (await this.paymentRepository.findOne({
+        where: { id: paymentId },
+        relations: ['contract', 'contract.tenant', 'contract.property'],
+      }));
+
+    if (!payment || !payment.contract) {
+      return;
+    }
+
+    if (
+      payment.purpose === PaymentPurpose.ESCROW_DEPOSIT ||
+      payment.purpose === PaymentPurpose.OWNER_ESCROW_DEPOSIT
+    ) {
+      await this.escrowService.creditDepositFromPayment(payment.id);
+
+      const tenantId = payment.contract.tenant?.id;
+      const propertyId = payment.contract.property?.id;
+
+      if (tenantId && propertyId) {
+        try {
+          if (payment.purpose === PaymentPurpose.ESCROW_DEPOSIT) {
+            await this.bookingService.markTenantDepositFundedByTenantAndProperty(
+              tenantId,
+              propertyId,
+            );
+          } else {
+            await this.bookingService.markLandlordDepositFundedByTenantAndProperty(
+              tenantId,
+              propertyId,
+            );
+          }
+        } catch (error) {
+          console.error('Failed to sync booking escrow state', error);
+        }
+      }
+
+      return;
+    }
+
+    if (payment.purpose === PaymentPurpose.FIRST_MONTH_RENT) {
+      const tenantId = payment.contract.tenant?.id;
+      const propertyId = payment.contract.property?.id;
+      if (tenantId && propertyId) {
+        try {
+          await this.bookingService.markFirstRentPaidByTenantAndProperty(
+            tenantId,
+            propertyId,
+          );
+        } catch (error) {
+          console.error('Failed to sync booking first rent state', error);
+        }
+      }
     }
   }
 
