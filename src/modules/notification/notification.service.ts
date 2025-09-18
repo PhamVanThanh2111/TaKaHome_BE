@@ -5,6 +5,7 @@ import { Notification } from './entities/notification.entity';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { UpdateNotificationDto } from './dto/update-notification.dto';
 import { StatusEnum } from '../common/enums/status.enum';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class NotificationService {
@@ -15,7 +16,7 @@ export class NotificationService {
 
   async create(
     createNotificationDto: CreateNotificationDto,
-  ): Promise<Notification> {
+  ): Promise<ResponseCommon<Notification>> {
     const { userId, type, title, content, status } = createNotificationDto;
     const notification = this.notificationRepository.create({
       user: { id: userId },
@@ -24,22 +25,29 @@ export class NotificationService {
       content,
       status: status || StatusEnum.PENDING, // Default to PENDING if not provided
     });
-    return this.notificationRepository.save(notification);
+    const saved = await this.notificationRepository.save(notification);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async findAll(): Promise<Notification[]> {
-    return this.notificationRepository.find({ relations: ['user'] });
+  async findAll(): Promise<ResponseCommon<Notification[]>> {
+    const notifications = await this.notificationRepository.find({
+      relations: ['user'],
+    });
+    return new ResponseCommon(200, 'SUCCESS', notifications);
   }
 
   // findAllByUserId
-  async findAllByUserId(userId: string): Promise<Notification[]> {
-    return this.notificationRepository.find({
+  async findAllByUserId(
+    userId: string,
+  ): Promise<ResponseCommon<Notification[]>> {
+    const notifications = await this.notificationRepository.find({
       where: { user: { id: userId } },
       relations: ['user'],
     });
+    return new ResponseCommon(200, 'SUCCESS', notifications);
   }
 
-  async findOne(id: string): Promise<Notification> {
+  async findOne(id: string): Promise<ResponseCommon<Notification>> {
     const notification = await this.notificationRepository.findOne({
       where: { id: id },
       relations: ['user'],
@@ -47,18 +55,26 @@ export class NotificationService {
     if (!notification) {
       throw new Error(`Notification with id ${id} not found`);
     }
-    return notification;
+    return new ResponseCommon(200, 'SUCCESS', notification);
   }
 
   async update(
     id: string,
     updateNotificationDto: UpdateNotificationDto,
-  ): Promise<Notification> {
+  ): Promise<ResponseCommon<Notification>> {
     await this.notificationRepository.update(id, updateNotificationDto);
-    return this.findOne(id);
+    const notification = await this.notificationRepository.findOne({
+      where: { id },
+      relations: ['user'],
+    });
+    if (!notification) {
+      throw new Error(`Notification with id ${id} not found`);
+    }
+    return new ResponseCommon(200, 'SUCCESS', notification);
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string): Promise<ResponseCommon<null>> {
     await this.notificationRepository.delete(id);
+    return new ResponseCommon(200, 'SUCCESS', null);
   }
 }

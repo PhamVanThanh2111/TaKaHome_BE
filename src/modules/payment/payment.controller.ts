@@ -105,23 +105,26 @@ export class PaymentController {
     const clientIp = this.getClientIpIPv4(req);
     console.log('Client IP:', clientIp);
 
-    const { paymentUrl, txnRef } =
-      await this.paymentService.createVnpayPaymentLink({
-        contractId,
-        amount: amountNum,
-        ipAddr: clientIp,
-        orderInfo,
-        locale: locale || 'vn',
-        expireIn: expireIn ? Number(expireIn) : undefined,
-      });
+    const response = await this.paymentService.createVnpayPaymentLink({
+      contractId,
+      amount: amountNum,
+      ipAddr: clientIp,
+      orderInfo,
+      locale: locale || 'vn',
+      expireIn: expireIn ? Number(expireIn) : undefined,
+    });
+    const payload = response.data ?? { paymentUrl: '', txnRef: '' };
 
     // redirect ngay nếu được yêu cầu
     if (redirect === '1' || redirect === 'true') {
-      return res.redirect(paymentUrl);
+      if (payload.paymentUrl) {
+        return res.redirect(payload.paymentUrl);
+      }
+      return res.json(response);
     }
 
     // mặc định trả JSON để FE tự xử lý
-    return res.json({ url: paymentUrl, txnRef });
+    return res.json(response);
   }
 
   @Public()
@@ -137,8 +140,8 @@ export class PaymentController {
   @Public()
   @Get('vnpay/ipn')
   @HttpCode(HttpStatus.OK)
-  vnpIpn(@Query() q: Record<string, string>) {
-    this.paymentService.handleVnpayIpn(q);
+  async vnpIpn(@Query() q: Record<string, string>) {
+    return this.paymentService.handleVnpayIpn(q);
   }
 
   /** Helper: lấy IP thật của client (hữu ích khi chạy sau reverse proxy) */

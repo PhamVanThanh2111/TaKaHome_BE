@@ -5,6 +5,7 @@ import {
   MaintenanceTicket,
   MaintenanceStatus,
 } from './entities/maintenance-ticket.entity';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class MaintenanceService {
@@ -13,20 +14,26 @@ export class MaintenanceService {
     private readonly ticketRepo: Repository<MaintenanceTicket>,
   ) {}
 
-  createTicket(bookingId: string, description: string) {
+  async createTicket(
+    bookingId: string,
+    description: string,
+  ): Promise<ResponseCommon<MaintenanceTicket>> {
     const ticket = this.ticketRepo.create({
       booking: { id: bookingId },
       description,
     });
-    return this.ticketRepo.save(ticket);
+    const saved = await this.ticketRepo.save(ticket);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  resolve(id: string) {
-    return this.updateStatus(id, MaintenanceStatus.RESOLVED);
+  async resolve(id: string): Promise<ResponseCommon<MaintenanceTicket>> {
+    const ticket = await this.updateStatus(id, MaintenanceStatus.RESOLVED);
+    return new ResponseCommon(200, 'SUCCESS', ticket);
   }
 
-  dispute(id: string) {
-    return this.updateStatus(id, MaintenanceStatus.DISPUTED);
+  async dispute(id: string): Promise<ResponseCommon<MaintenanceTicket>> {
+    const ticket = await this.updateStatus(id, MaintenanceStatus.DISPUTED);
+    return new ResponseCommon(200, 'SUCCESS', ticket);
   }
 
   private async updateStatus(id: string, status: MaintenanceStatus) {

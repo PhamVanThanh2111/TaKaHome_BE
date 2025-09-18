@@ -90,6 +90,13 @@ export class BookingController {
     return this.bookingService.markDepositFunded(id);
   }
 
+  // Gọi khi ký quỹ của chủ nhà đã được xác nhận
+  @Post(':id/landlord-deposit-funded')
+  @Roles(RoleEnum.LANDLORD, RoleEnum.ADMIN)
+  landlordDepositFunded(@Param('id') id: string) {
+    return this.bookingService.markLandlordDepositFunded(id);
+  }
+
   // Được gọi bởi Payment/IPN service sau khi kỳ đầu OK
   @Post(':id/first-rent-paid')
   firstRentPaid(@Param('id') id: string) {

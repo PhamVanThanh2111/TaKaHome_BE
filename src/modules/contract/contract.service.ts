@@ -5,6 +5,7 @@ import { Contract } from './entities/contract.entity';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
 import { ContractStatusEnum } from '../common/enums/contract-status.enum';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class ContractService {
@@ -13,48 +14,51 @@ export class ContractService {
     private contractRepository: Repository<Contract>,
   ) {}
 
-  async create(createContractDto: CreateContractDto): Promise<Contract> {
+  async create(
+    createContractDto: CreateContractDto,
+  ): Promise<ResponseCommon<Contract>> {
     const contract = this.contractRepository.create(createContractDto);
-    return this.contractRepository.save(contract);
+    const saved = await this.contractRepository.save(contract);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async findAll(): Promise<Contract[]> {
-    return this.contractRepository.find({
+  async findAll(): Promise<ResponseCommon<Contract[]>> {
+    const contracts = await this.contractRepository.find({
       relations: ['tenant', 'landlord', 'property'],
     });
+    return new ResponseCommon(200, 'SUCCESS', contracts);
   }
 
-  async findOne(id: string): Promise<Contract | null> {
-    return this.contractRepository.findOne({
-      where: { id },
-      relations: ['tenant', 'landlord', 'property'],
-    });
+  async findOne(id: string): Promise<ResponseCommon<Contract>> {
+    const contract = await this.loadContractOrFail(id);
+    return new ResponseCommon(200, 'SUCCESS', contract);
   }
 
-  async findByTenant(tenantId: string): Promise<Contract[]> {
-    return this.contractRepository.find({
+  async findByTenant(tenantId: string): Promise<ResponseCommon<Contract[]>> {
+    const contracts = await this.contractRepository.find({
       where: { tenant: { id: tenantId } },
       relations: ['tenant', 'landlord', 'property'],
     });
+    return new ResponseCommon(200, 'SUCCESS', contracts);
   }
 
-  async findByLandlord(landlordId: string): Promise<Contract[]> {
-    return this.contractRepository.find({
+  async findByLandlord(
+    landlordId: string,
+  ): Promise<ResponseCommon<Contract[]>> {
+    const contracts = await this.contractRepository.find({
       where: { landlord: { id: landlordId } },
       relations: ['tenant', 'landlord', 'property'],
     });
+    return new ResponseCommon(200, 'SUCCESS', contracts);
   }
 
   async update(
     id: string,
     updateContractDto: UpdateContractDto,
-  ): Promise<Contract> {
+  ): Promise<ResponseCommon<Contract>> {
     await this.contractRepository.update(id, updateContractDto);
-    const updatedContract = await this.findOne(id);
-    if (!updatedContract) {
-      throw new Error(`Contract with id ${id} not found`);
-    }
-    return updatedContract;
+    const contract = await this.loadContractOrFail(id);
+    return new ResponseCommon(200, 'SUCCESS', contract);
   }
 
   private ensureStatus(
@@ -68,38 +72,49 @@ export class ContractService {
     }
   }
 
-  async activate(id: string): Promise<Contract> {
-    const contract = await this.findOne(id);
-    if (!contract) throw new Error(`Contract with id ${id} not found`);
+  async activate(id: string): Promise<ResponseCommon<Contract>> {
+    const contract = await this.loadContractOrFail(id);
     this.ensureStatus(contract, [ContractStatusEnum.PENDING_SIGNATURE]);
     contract.status = ContractStatusEnum.ACTIVE;
-    return this.contractRepository.save(contract);
+    const saved = await this.contractRepository.save(contract);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async complete(id: string): Promise<Contract> {
-    const contract = await this.findOne(id);
-    if (!contract) throw new Error(`Contract with id ${id} not found`);
+  async complete(id: string): Promise<ResponseCommon<Contract>> {
+    const contract = await this.loadContractOrFail(id);
     this.ensureStatus(contract, [ContractStatusEnum.ACTIVE]);
     contract.status = ContractStatusEnum.COMPLETED;
-    return this.contractRepository.save(contract);
+    const saved = await this.contractRepository.save(contract);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async cancel(id: string): Promise<Contract> {
-    const contract = await this.findOne(id);
-    if (!contract) throw new Error(`Contract with id ${id} not found`);
+  async cancel(id: string): Promise<ResponseCommon<Contract>> {
+    const contract = await this.loadContractOrFail(id);
     this.ensureStatus(contract, [
       ContractStatusEnum.DRAFT,
       ContractStatusEnum.PENDING_SIGNATURE,
     ]);
     contract.status = ContractStatusEnum.CANCELLED;
-    return this.contractRepository.save(contract);
+    const saved = await this.contractRepository.save(contract);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async terminate(id: string): Promise<Contract> {
-    const contract = await this.findOne(id);
-    if (!contract) throw new Error(`Contract with id ${id} not found`);
+  async terminate(id: string): Promise<ResponseCommon<Contract>> {
+    const contract = await this.loadContractOrFail(id);
     this.ensureStatus(contract, [ContractStatusEnum.ACTIVE]);
     contract.status = ContractStatusEnum.TERMINATED;
-    return this.contractRepository.save(contract);
+    const saved = await this.contractRepository.save(contract);
+    return new ResponseCommon(200, 'SUCCESS', saved);
+  }
+
+  private async loadContractOrFail(id: string): Promise<Contract> {
+    const contract = await this.contractRepository.findOne({
+      where: { id },
+      relations: ['tenant', 'landlord', 'property'],
+    });
+    if (!contract) {
+      throw new Error(`Contract with id ${id} not found`);
+    }
+    return contract;
   }
 }
