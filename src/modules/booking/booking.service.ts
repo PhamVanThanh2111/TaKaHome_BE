@@ -100,7 +100,6 @@ export class BookingService {
       return b;
     }
     this.ensureStatus(b, [
-      BookingStatus.DEPOSIT_FUNDED,
       BookingStatus.DUAL_ESCROW_FUNDED,
       BookingStatus.AWAITING_FIRST_RENT,
     ]);
