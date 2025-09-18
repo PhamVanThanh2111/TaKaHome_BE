@@ -12,7 +12,10 @@ export class PropertyService {
     private propertyRepository: Repository<Property>,
   ) {}
 
-  async create(createPropertyDto: CreatePropertyDto, landlordId: string): Promise<Property> {
+  async create(
+    createPropertyDto: CreatePropertyDto,
+    landlordId: string,
+  ): Promise<Property> {
     try {
       const property = this.propertyRepository.create({
         ...createPropertyDto,
@@ -20,7 +23,8 @@ export class PropertyService {
       });
       return await this.propertyRepository.save(property);
     } catch (error) {
-      throw new Error(`Error creating property: ${error.message}`);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Error creating property: ${message}`);
     }
   }
 
