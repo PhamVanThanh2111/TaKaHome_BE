@@ -5,6 +5,7 @@ import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoiceItem } from './entities/invoice-item.entity';
 import { Invoice } from './entities/invoice.entity';
 import { InvoiceStatusEnum } from '../common/enums/invoice-status.enum';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class InvoiceService {
@@ -15,7 +16,7 @@ export class InvoiceService {
     private readonly itemRepository: Repository<InvoiceItem>,
   ) {}
 
-  async create(dto: CreateInvoiceDto): Promise<Invoice> {
+  async create(dto: CreateInvoiceDto): Promise<ResponseCommon<Invoice>> {
     const items = dto.items.map((i) => this.itemRepository.create(i));
     const total = items.reduce((sum, item) => sum + item.amount, 0);
     const code = this.generateCode();
@@ -26,47 +27,50 @@ export class InvoiceService {
       items,
       totalAmount: total,
     });
-    return this.invoiceRepository.save(invoice);
+    const saved = await this.invoiceRepository.save(invoice);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  findAll(): Promise<Invoice[]> {
-    return this.invoiceRepository.find({
+  async findAll(): Promise<ResponseCommon<Invoice[]>> {
+    const invoices = await this.invoiceRepository.find({
       relations: ['items', 'contract', 'payments'],
     });
+    return new ResponseCommon(200, 'SUCCESS', invoices);
   }
 
-  findOne(id: string): Promise<Invoice | null> {
-    return this.invoiceRepository.findOne({
-      where: { id },
-      relations: ['items', 'contract', 'payments'],
-    });
+  async findOne(id: string): Promise<ResponseCommon<Invoice | null>> {
+    const invoice = await this.loadInvoice(id);
+    return new ResponseCommon(200, 'SUCCESS', invoice);
   }
 
-  findByContract(contractId: string): Promise<Invoice[]> {
-    return this.invoiceRepository.find({
+  async findByContract(contractId: string): Promise<ResponseCommon<Invoice[]>> {
+    const invoices = await this.invoiceRepository.find({
       where: { contract: { id: contractId } },
       relations: ['items', 'contract', 'payments'],
     });
+    return new ResponseCommon(200, 'SUCCESS', invoices);
   }
 
-  async markPaid(id: string): Promise<Invoice> {
-    const invoice = await this.findOne(id);
+  async markPaid(id: string): Promise<ResponseCommon<Invoice>> {
+    const invoice = await this.loadInvoice(id);
     if (!invoice) throw new Error(`Invoice with id ${id} not found`);
     this.ensureStatus(invoice, [InvoiceStatusEnum.PENDING]);
     invoice.status = InvoiceStatusEnum.PAID;
-    return this.invoiceRepository.save(invoice);
+    const saved = await this.invoiceRepository.save(invoice);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async cancel(id: string): Promise<Invoice> {
-    const invoice = await this.findOne(id);
+  async cancel(id: string): Promise<ResponseCommon<Invoice>> {
+    const invoice = await this.loadInvoice(id);
     if (!invoice) throw new Error(`Invoice with id ${id} not found`);
     this.ensureStatus(invoice, [InvoiceStatusEnum.PENDING]);
     invoice.status = InvoiceStatusEnum.CANCELLED;
-    return this.invoiceRepository.save(invoice);
+    const saved = await this.invoiceRepository.save(invoice);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
   // ---- Helper methods ----
-  generateCode() {
+  private generateCode() {
     const now = new Date();
     const yyyymmdd = now.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
     const rand = Math.random().toString(36).slice(2, 6).toUpperCase(); // 4 kí tự
@@ -79,5 +83,12 @@ export class InvoiceService {
         `Invalid state: ${invoice.status}. Expected: ${expected.join(', ')}`,
       );
     }
+  }
+
+  private loadInvoice(id: string): Promise<Invoice | null> {
+    return this.invoiceRepository.findOne({
+      where: { id },
+      relations: ['items', 'contract', 'payments'],
+    });
   }
 }

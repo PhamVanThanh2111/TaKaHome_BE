@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Contract } from '../contract/entities/contract.entity';
 import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 import { InvoiceService } from './invoice.service';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class InvoiceCronService implements OnModuleInit {
@@ -24,9 +25,11 @@ export class InvoiceCronService implements OnModuleInit {
     );
   }
 
-  async generateMonthly() {
+  async generateMonthly(): Promise<ResponseCommon<null>> {
     const today = new Date();
-    if (today.getDate() !== 1) return;
+    if (today.getDate() !== 1) {
+      return new ResponseCommon(200, 'SKIPPED', null);
+    }
     const contracts = await this.contractRepo.find({
       where: { status: ContractStatusEnum.ACTIVE },
       relations: ['property'],
@@ -47,5 +50,6 @@ export class InvoiceCronService implements OnModuleInit {
         ],
       });
     }
+    return new ResponseCommon(200, 'SUCCESS', null);
   }
 }
