@@ -15,6 +15,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { PaymentPurpose } from '../common/enums/payment-purpose.enum';
 import { EscrowService } from '../escrow/escrow.service';
 import { BookingService } from '../booking/booking.service';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class PaymentService {
@@ -33,7 +34,17 @@ export class PaymentService {
   async createPayment(
     dto: CreatePaymentDto,
     ctx: { userId: string; ipAddr: string },
-  ) {
+  ): Promise<
+    ResponseCommon<{
+      id: string;
+      contractId: string;
+      amount: number;
+      method: PaymentMethodEnum;
+      status: PaymentStatusEnum;
+      paymentUrl?: string;
+      txnRef?: string;
+    }>
+  > {
     const { contractId, amount, method, purpose } = dto;
 
     // 1) Tạo bản ghi Payment PENDING (mặc định)
@@ -62,18 +73,18 @@ export class PaymentService {
 
       await this.onPaymentPaid(payment.id);
 
-      return {
+      return new ResponseCommon(200, 'SUCCESS', {
         id: payment.id,
         contractId,
         amount,
         method,
         status: payment.status,
-      };
+      });
     }
 
     if (method === PaymentMethodEnum.VNPAY) {
       // 2B) Thanh toán VNPAY: tạo URL và giữ PENDING chờ IPN
-      const { paymentUrl, txnRef } = await this.createVnpayPaymentLink({
+      const { data } = await this.createVnpayPaymentLink({
         contractId,
         amount,
         ipAddr: ctx.ipAddr,
@@ -81,12 +92,16 @@ export class PaymentService {
         locale: dto.locale ?? 'vn',
         expireIn: dto.expireIn ?? 15,
       });
+      if (!data) {
+        throw new Error('Failed to create VNPay payment link');
+      }
+      const { paymentUrl, txnRef } = data;
 
       // lưu txnRef để IPN map về
       payment.gatewayTxnRef = txnRef;
       await this.paymentRepository.save(payment);
 
-      return {
+      return new ResponseCommon(200, 'SUCCESS', {
         id: payment.id,
         contractId,
         amount,
@@ -94,17 +109,20 @@ export class PaymentService {
         status: payment.status, // PENDING
         paymentUrl,
         txnRef,
-      };
+      });
     }
 
     throw new BadRequestException('Unsupported payment method');
   }
 
-  async findAll(): Promise<Payment[]> {
-    return this.paymentRepository.find({ relations: ['contract'] });
+  async findAll(): Promise<ResponseCommon<Payment[]>> {
+    const payments = await this.paymentRepository.find({
+      relations: ['contract'],
+    });
+    return new ResponseCommon(200, 'SUCCESS', payments);
   }
 
-  async findOne(id: number): Promise<Payment> {
+  async findOne(id: number): Promise<ResponseCommon<Payment>> {
     const payment = await this.paymentRepository.findOne({
       where: { id: id.toString() },
       relations: ['contract'],
@@ -114,19 +132,25 @@ export class PaymentService {
       throw new Error(`Payment with id ${id} not found`);
     }
 
-    return payment;
+    return new ResponseCommon(200, 'SUCCESS', payment);
   }
 
   async update(
     id: number,
     updatePaymentDto: UpdatePaymentDto,
-  ): Promise<Payment> {
+  ): Promise<ResponseCommon<Payment>> {
     await this.paymentRepository.update(id, updatePaymentDto);
-    const updated = await this.findOne(id);
+    const updated = await this.paymentRepository.findOne({
+      where: { id: id.toString() },
+      relations: ['contract'],
+    });
+    if (!updated) {
+      throw new Error(`Payment with id ${id} not found`);
+    }
     if (updatePaymentDto.status === PaymentStatusEnum.PAID) {
       await this.onPaymentPaid(updated.id);
     }
-    return updated;
+    return new ResponseCommon(200, 'SUCCESS', updated);
   }
 
   /**
@@ -141,7 +165,7 @@ export class PaymentService {
     orderInfo?: string;
     locale?: 'vn'; // default 'vn'
     expireIn?: number; // minutes, default 15
-  }): Promise<{ paymentUrl: string; txnRef: string }> {
+  }): Promise<ResponseCommon<{ paymentUrl: string; txnRef: string }>> {
     const {
       contractId,
       amount,
@@ -217,10 +241,24 @@ export class PaymentService {
     // console.log('vnp_SecureHash =', vnp_SecureHash);
     // console.log('paymentUrl =', paymentUrl);
 
-    return Promise.resolve({ paymentUrl, txnRef });
+    return Promise.resolve(
+      new ResponseCommon(200, 'SUCCESS', { paymentUrl, txnRef }),
+    );
   }
 
-  async verifyVnpayReturn(query: Record<string, string>) {
+  async verifyVnpayReturn(query: Record<string, string>): Promise<
+    ResponseCommon<{
+      ok: boolean;
+      reason: string;
+      code: string | undefined;
+      status: string | undefined;
+      txnRef: string | undefined;
+      amount: number;
+      bankCode?: string;
+      payDate?: string;
+      orderInfo?: string;
+    }>
+  > {
     // 1) Lấy secret từ config
     const secret = this.vnpay.hashSecret;
     if (!secret) {
@@ -256,29 +294,38 @@ export class PaymentService {
     const code = vnpParams['vnp_ResponseCode']; // '00' = success
     const status = vnpParams['vnp_TransactionStatus']; // '00' = success
 
-    return Promise.resolve({
-      ok: okSignature && code === '00' && status === '00',
-      reason: !okSignature
-        ? 'INVALID_SIGNATURE'
-        : code === '00'
-          ? 'OK'
-          : 'GATEWAY_FAILED',
-      code, // 00/.. từ VNPay
-      status, // 00/.. từ VNPay
-      txnRef, // để FE/BE tra cứu payment
-      amount,
-      // có thể trả thêm bankCode, payDate...
-      bankCode: vnpParams['vnp_BankCode'],
-      payDate: vnpParams['vnp_PayDate'],
-      orderInfo: vnpParams['vnp_OrderInfo'],
-    });
+    return Promise.resolve(
+      new ResponseCommon(200, 'SUCCESS', {
+        ok: okSignature && code === '00' && status === '00',
+        reason: !okSignature
+          ? 'INVALID_SIGNATURE'
+          : code === '00'
+            ? 'OK'
+            : 'GATEWAY_FAILED',
+        code, // 00/.. từ VNPay
+        status, // 00/.. từ VNPay
+        txnRef, // để FE/BE tra cứu payment
+        amount,
+        // có thể trả thêm bankCode, payDate...
+        bankCode: vnpParams['vnp_BankCode'],
+        payDate: vnpParams['vnp_PayDate'],
+        orderInfo: vnpParams['vnp_OrderInfo'],
+      }),
+    );
   }
 
-  async handleVnpayIpn(query: Record<string, string>) {
+  async handleVnpayIpn(
+    query: Record<string, string>,
+  ): Promise<ResponseCommon<string>> {
     try {
       const secret = this.vnpay?.hashSecret;
       const tmnCode = this.vnpay?.tmnCode;
-      if (!secret || !tmnCode) return 'RspCode=99&Message=Config missing';
+      if (!secret || !tmnCode)
+        return new ResponseCommon(
+          200,
+          'SUCCESS',
+          'RspCode=99&Message=Config missing',
+        );
 
       const receivedHash = (query.vnp_SecureHash || '').toLowerCase();
       const { vnp_SecureHash, vnp_SecureHashType, ...raw } = query;
@@ -300,16 +347,28 @@ export class PaymentService {
         .toLowerCase();
 
       if (signed !== receivedHash) {
-        return 'RspCode=97&Message=Invalid Checksum';
+        return new ResponseCommon(
+          200,
+          'SUCCESS',
+          'RspCode=97&Message=Invalid Checksum',
+        );
       }
 
       if (vnpParams['vnp_TmnCode'] !== tmnCode) {
-        return 'RspCode=11&Message=Invalid TmnCode';
+        return new ResponseCommon(
+          200,
+          'SUCCESS',
+          'RspCode=11&Message=Invalid TmnCode',
+        );
       }
 
       const txnRef = vnpParams['vnp_TxnRef'];
       if (!txnRef) {
-        return 'RspCode=01&Message=Order not found';
+        return new ResponseCommon(
+          200,
+          'SUCCESS',
+          'RspCode=01&Message=Order not found',
+        );
       }
 
       const payment = await this.paymentRepository.findOne({
@@ -318,21 +377,37 @@ export class PaymentService {
       });
 
       if (!payment) {
-        return 'RspCode=01&Message=Order not found';
+        return new ResponseCommon(
+          200,
+          'SUCCESS',
+          'RspCode=01&Message=Order not found',
+        );
       }
 
       const amountFromGateway = Number(vnpParams['vnp_Amount'] || 0);
       if (!Number.isFinite(amountFromGateway)) {
-        return 'RspCode=04&Message=Amount invalid';
+        return new ResponseCommon(
+          200,
+          'SUCCESS',
+          'RspCode=04&Message=Amount invalid',
+        );
       }
 
       const expected = Math.round(Number(payment.amount) * 100);
       if (expected !== amountFromGateway) {
-        return 'RspCode=04&Message=Amount mismatch';
+        return new ResponseCommon(
+          200,
+          'SUCCESS',
+          'RspCode=04&Message=Amount mismatch',
+        );
       }
 
       if (payment.status === PaymentStatusEnum.PAID) {
-        return 'RspCode=02&Message=Order already confirmed';
+        return new ResponseCommon(
+          200,
+          'SUCCESS',
+          'RspCode=02&Message=Order already confirmed',
+        );
       }
 
       const responseCode = vnpParams['vnp_ResponseCode'];
@@ -350,16 +425,28 @@ export class PaymentService {
 
         await this.onPaymentPaid(payment.id, payment);
 
-        return 'RspCode=00&Message=Confirm Success';
+        return new ResponseCommon(
+          200,
+          'SUCCESS',
+          'RspCode=00&Message=Confirm Success',
+        );
       }
 
       payment.status = PaymentStatusEnum.FAILED;
       await this.paymentRepository.save(payment);
 
-      return 'RspCode=00&Message=Confirm Success';
+      return new ResponseCommon(
+        200,
+        'SUCCESS',
+        'RspCode=00&Message=Confirm Success',
+      );
     } catch (error) {
       console.error('VNPay IPN error', error);
-      return 'RspCode=99&Message=Unknown error';
+      return new ResponseCommon(
+        200,
+        'SUCCESS',
+        'RspCode=99&Message=Unknown error',
+      );
     }
   }
 
