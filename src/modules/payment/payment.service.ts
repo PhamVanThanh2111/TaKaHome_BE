@@ -194,9 +194,10 @@ export class PaymentService {
       .replace(/[#&=?]/g, ' ') // tránh ký tự đặc biệt
       .trim();
 
-    const createDate = this.formatDateYYYYMMDDHHmmss(new Date());
+    const now = new Date();
+    const createDate = this.formatDateYYYYMMDDHHmmss(now);
     const expireDate = this.formatDateYYYYMMDDHHmmss(
-      new Date(Date.now() + (expireIn || 15) * 60 * 1000),
+      new Date(now.getTime() + (expireIn || 15) * 60 * 1000),
     );
 
     // vnp_TxnRef phải duy nhất
@@ -511,7 +512,7 @@ export class PaymentService {
   /** ===== Helpers ===== */
 
   private formatDateYYYYMMDDHHmmss(d: Date, tz = 'Asia/Ho_Chi_Minh') {
-    const parts = new Intl.DateTimeFormat('en-US', {
+    const parts = new Intl.DateTimeFormat('vi-VN-u-hc-h23', {
       timeZone: tz,
       year: 'numeric',
       month: '2-digit',
@@ -520,12 +521,13 @@ export class PaymentService {
       minute: '2-digit',
       second: '2-digit',
       hour12: false,
+      hourCycle: 'h23',
     })
       .formatToParts(d)
-      .reduce((acc: Record<string, string>, p) => {
-        if (p.type !== 'literal') acc[p.type] = p.value;
-        return acc;
-      }, {});
+      .reduce(
+        (a, p) => (p.type !== 'literal' ? { ...a, [p.type]: p.value } : a),
+        {} as Record<string, string>,
+      );
 
     return `${parts.year}${parts.month}${parts.day}${parts.hour}${parts.minute}${parts.second}`;
   }
