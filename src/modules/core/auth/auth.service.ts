@@ -8,6 +8,7 @@ import { User } from '../../user/entities/user.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RoleEnum } from '../../common/enums/role.enum';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class AuthService {
@@ -19,7 +20,9 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
 
-  async register(dto: RegisterDto) {
+  async register(
+    dto: RegisterDto,
+  ): Promise<ResponseCommon<{ message: string }>> {
     // Check email đã tồn tại
     const exist = await this.accountRepo.findOne({
       where: { email: dto.email },
@@ -48,24 +51,28 @@ export class AuthService {
     });
     await this.accountRepo.save(account);
 
-    return { message: 'Register successful!' };
+    return new ResponseCommon(200, 'SUCCESS', {
+      message: 'Register successful!',
+    });
   }
 
   async validateAccount(
     email: string,
     password: string,
-  ): Promise<Account | null> {
+  ): Promise<ResponseCommon<Account | null>> {
     const acc = await this.accountRepo.findOne({
       where: { email },
       relations: ['user'],
     });
-    if (!acc) return null;
+    if (!acc) return new ResponseCommon(200, 'SUCCESS', null);
     const match = await bcrypt.compare(password, acc.password);
-    if (!match) return null;
-    return acc;
+    if (!match) return new ResponseCommon(200, 'SUCCESS', null);
+    return new ResponseCommon(200, 'SUCCESS', acc);
   }
 
-  async login(dto: LoginDto) {
+  async login(
+    dto: LoginDto,
+  ): Promise<ResponseCommon<{ accessToken: string; account: any }>> {
     const acc = await this.accountRepo.findOne({
       where: { email: dto.email },
       relations: ['user'],
@@ -78,7 +85,7 @@ export class AuthService {
       email: acc.email,
       roles: acc.roles, // RoleEnum[]
     };
-    return {
+    return new ResponseCommon(200, 'SUCCESS', {
       accessToken: this.jwtService.sign(payload),
       account: {
         id: acc.id,
@@ -92,6 +99,6 @@ export class AuthService {
           status: acc.user.status,
         },
       },
-    };
+    });
   }
 }
