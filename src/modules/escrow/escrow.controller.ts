@@ -41,11 +41,15 @@ export class EscrowController {
   @ApiOperation({ summary: 'Khấu trừ tiền cọc (ví dụ: bồi thường hư hại)' })
   @ApiResponse({ status: 200, description: 'Khấu trừ thành công' })
   async deduct(@Param('id') accountId: string, @Body() dto: EscrowAdjustDto) {
-    const account = await this.escrowService.deduct(
+    const result = await this.escrowService.deduct(
       accountId,
       dto.amount,
       dto.note,
     );
+    const account = result.data;
+    if (!account) {
+      throw new Error('Không thể khấu trừ escrow');
+    }
     return {
       accountId: account.id,
       balance: account.currentBalance,
@@ -58,11 +62,15 @@ export class EscrowController {
   @ApiOperation({ summary: 'Hoàn trả tiền cọc cho người thuê' })
   @ApiResponse({ status: 200, description: 'Hoàn cọc thành công' })
   async refund(@Param('id') accountId: string, @Body() dto: EscrowAdjustDto) {
-    const account = await this.escrowService.refund(
+    const result = await this.escrowService.refund(
       accountId,
       dto.amount,
       dto.note,
     );
+    const account = result.data;
+    if (!account) {
+      throw new Error('Không thể hoàn escrow');
+    }
     return {
       accountId: account.id,
       balance: account.currentBalance,
