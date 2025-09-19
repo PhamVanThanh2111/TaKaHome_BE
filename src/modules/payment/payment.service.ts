@@ -510,15 +510,24 @@ export class PaymentService {
 
   /** ===== Helpers ===== */
 
-  private formatDateYYYYMMDDHHmmss(d: Date) {
-    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-    const yyyy = d.getFullYear();
-    const MM = pad(d.getMonth() + 1);
-    const dd = pad(d.getDate());
-    const HH = pad(d.getHours());
-    const mm = pad(d.getMinutes());
-    const ss = pad(d.getSeconds());
-    return `${yyyy}${MM}${dd}${HH}${mm}${ss}`;
+  private formatDateYYYYMMDDHHmmss(d: Date, tz = 'Asia/Ho_Chi_Minh') {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    })
+      .formatToParts(d)
+      .reduce((acc: Record<string, string>, p) => {
+        if (p.type !== 'literal') acc[p.type] = p.value;
+        return acc;
+      }, {});
+
+    return `${parts.year}${parts.month}${parts.day}${parts.hour}${parts.minute}${parts.second}`;
   }
 
   private generateVnpTxnRef() {
