@@ -9,6 +9,7 @@ import { WalletCreditDto } from './dto/wallet-credit.dto';
 import { WalletDebitDto } from './dto/wallet-debit.dto';
 import { WalletTransaction } from './entities/wallet-transaction.entity';
 import { Wallet } from './entities/wallet.entity';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class WalletService {
@@ -20,31 +21,35 @@ export class WalletService {
   ) {}
 
   /** Tạo ví nếu chưa có, trả về ví */
-  async ensureWallet(userId: string): Promise<Wallet> {
-    let wallet = await this.walletRepo.findOne({ where: { userId } });
-    if (!wallet) {
-      wallet = this.walletRepo.create({
-        userId,
-        availableBalance: '0',
-        currency: 'VND',
-      });
-      wallet = await this.walletRepo.save(wallet);
-    }
-    return wallet;
+  async ensureWallet(userId: string): Promise<ResponseCommon<Wallet>> {
+    const wallet = await this.ensureWalletEntity(userId);
+    return new ResponseCommon(200, 'SUCCESS', wallet);
   }
 
-  async getMyWallet(userId: string) {
-    const wallet = await this.ensureWallet(userId);
-    return {
+  async getMyWallet(userId: string): Promise<
+    ResponseCommon<{
+      walletId: string;
+      availableBalance: number;
+      currency: string;
+      updatedAt: Date;
+    }>
+  > {
+    const wallet = await this.ensureWalletEntity(userId);
+    return new ResponseCommon(200, 'SUCCESS', {
       walletId: wallet.id,
       availableBalance: Number(wallet.availableBalance),
       currency: wallet.currency,
       updatedAt: wallet.updatedAt,
-    };
+    });
   }
 
   /** Nạp / hoàn / điều chỉnh số dư (ghi CREDIT) */
-  async credit(userId: string, dto: WalletCreditDto) {
+  async credit(
+    userId: string,
+    dto: WalletCreditDto,
+  ): Promise<
+    ResponseCommon<{ walletId: string; balance: number; txnId: string }>
+  > {
     const { amount, type, refType, refId, note } = dto;
     if (amount <= 0) throw new BadRequestException('Amount must be > 0');
 
@@ -91,11 +96,11 @@ export class WalletService {
       await runner.manager.save(txn);
 
       await runner.commitTransaction();
-      return {
+      return new ResponseCommon(200, 'SUCCESS', {
         walletId: wallet.id,
         balance: Number(wallet.availableBalance),
         txnId: txn.id,
-      };
+      });
     } catch (e) {
       await runner.rollbackTransaction();
       throw e;
@@ -105,7 +110,12 @@ export class WalletService {
   }
 
   /** Trừ tiền ví để thanh toán hợp đồng (ghi DEBIT) */
-  async debit(userId: string, dto: WalletDebitDto) {
+  async debit(
+    userId: string,
+    dto: WalletDebitDto,
+  ): Promise<
+    ResponseCommon<{ walletId: string; balance: number; txnId: string }>
+  > {
     const { amount, type, refType, refId, note } = dto;
     if (amount <= 0) throw new BadRequestException('Amount must be > 0');
 
@@ -143,16 +153,31 @@ export class WalletService {
       await runner.manager.save(txn);
 
       await runner.commitTransaction();
-      return {
+      return new ResponseCommon(200, 'SUCCESS', {
         walletId: wallet.id,
         balance: Number(wallet.availableBalance),
         txnId: txn.id,
-      };
+      });
     } catch (e) {
       await runner.rollbackTransaction();
       throw e;
     } finally {
       await runner.release();
     }
+  }
+
+  // --- HELPER ---
+
+  private async ensureWalletEntity(userId: string): Promise<Wallet> {
+    let wallet = await this.walletRepo.findOne({ where: { userId } });
+    if (!wallet) {
+      wallet = this.walletRepo.create({
+        userId,
+        availableBalance: '0',
+        currency: 'VND',
+      });
+      wallet = await this.walletRepo.save(wallet);
+    }
+    return wallet;
   }
 }
