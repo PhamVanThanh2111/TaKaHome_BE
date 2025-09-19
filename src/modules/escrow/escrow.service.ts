@@ -7,6 +7,7 @@ import { Contract } from '../contract/entities/contract.entity';
 import { Payment } from '../payment/entities/payment.entity';
 import { PaymentStatusEnum } from '../common/enums/payment-status.enum';
 import { PaymentPurpose } from '../common/enums/payment-purpose.enum';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class EscrowService {
@@ -22,9 +23,11 @@ export class EscrowService {
   ) {}
 
   /** Tạo hoặc lấy Escrow cho 1 hợp đồng */
-  async ensureAccountForContract(contractId: string): Promise<Escrow> {
+  async ensureAccountForContract(
+    contractId: string,
+  ): Promise<ResponseCommon<Escrow>> {
     let acc = await this.accountRepo.findOne({ where: { contractId } });
-    if (acc) return acc;
+    if (acc) return new ResponseCommon(200, 'SUCCESS', acc);
 
     const contract = await this.contractRepo.findOne({
       where: { id: contractId },
@@ -42,11 +45,14 @@ export class EscrowService {
       currentBalance: '0',
       currency: 'VND',
     });
-    return this.accountRepo.save(acc);
+    const saved = await this.accountRepo.save(acc);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
   /** Ghi có tiền cọc khi Payment purpose=ESCROW_DEPOSIT đã PAID */
-  async creditDepositFromPayment(paymentId: string) {
+  async creditDepositFromPayment(
+    paymentId: string,
+  ): Promise<ResponseCommon<{ accountId: string; balance: string }>> {
     const payment = await this.paymentRepo.findOne({
       where: { id: paymentId },
       relations: ['contract'],
@@ -54,10 +60,15 @@ export class EscrowService {
     if (!payment) throw new Error('Payment not found');
     if (payment.status !== PaymentStatusEnum.PAID)
       throw new Error('Payment is not PAID');
-    if (payment.purpose !== PaymentPurpose.ESCROW_DEPOSIT)
+    if (
+      payment.purpose !== PaymentPurpose.ESCROW_DEPOSIT &&
+      payment.purpose !== PaymentPurpose.OWNER_ESCROW_DEPOSIT
+    )
       throw new Error('Payment is not a deposit');
 
-    const acc = await this.ensureAccountForContract(payment.contract.id);
+    const ensured = await this.ensureAccountForContract(payment.contract.id);
+    const acc = ensured.data;
+    if (!acc) throw new Error('Escrow account could not be ensured');
 
     const amount = BigInt(payment.amount);
     const current = BigInt(acc.currentBalance || '0');
@@ -71,15 +82,21 @@ export class EscrowService {
       status: 'COMPLETED',
       refType: 'PAYMENT',
       refId: payment.id,
-      note: 'Deposit funded via payment',
+      note:
+        payment.purpose === PaymentPurpose.OWNER_ESCROW_DEPOSIT
+          ? 'Owner deposit funded via payment'
+          : 'Deposit funded via payment',
       completedAt: new Date(),
     });
     await this.txnRepo.save(txn);
 
     acc.currentBalance = (current + amount).toString();
-    await this.accountRepo.save(acc);
+    const updated = await this.accountRepo.save(acc);
 
-    return { accountId: acc.id, balance: acc.currentBalance };
+    return new ResponseCommon(200, 'SUCCESS', {
+      accountId: updated.id,
+      balance: updated.currentBalance,
+    });
   }
 
   /** Trừ tiền cọc (khấu trừ hư hại) */
@@ -87,7 +104,7 @@ export class EscrowService {
     accountId: string,
     amountVnd: number,
     note?: string,
-  ): Promise<Escrow> {
+  ): Promise<ResponseCommon<Escrow>> {
     const acc = await this.accountRepo.findOne({ where: { id: accountId } });
     if (!acc) throw new Error('Escrow not found');
     const amount = BigInt(amountVnd);
@@ -109,7 +126,8 @@ export class EscrowService {
     });
     await this.txnRepo.save(txn);
     acc.currentBalance = next.toString();
-    return this.accountRepo.save(acc);
+    const saved = await this.accountRepo.save(acc);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
   /** Hoàn cọc lại cho người thuê (từ số dư escrow) */
@@ -117,7 +135,7 @@ export class EscrowService {
     accountId: string,
     amountVnd: number,
     note?: string,
-  ): Promise<Escrow> {
+  ): Promise<ResponseCommon<Escrow>> {
     const acc = await this.accountRepo.findOne({ where: { id: accountId } });
     if (!acc) throw new Error('Escrow not found');
     const amount = BigInt(amountVnd);
@@ -139,11 +157,15 @@ export class EscrowService {
     });
     await this.txnRepo.save(txn);
     acc.currentBalance = next.toString();
-    return this.accountRepo.save(acc);
+    const saved = await this.accountRepo.save(acc);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
   /** Lấy số dư cọc hiện tại theo tenant + property */
-  async getBalanceByTenantAndProperty(tenantId: string, propertyId: string) {
+  async getBalanceByTenantAndProperty(
+    tenantId: string,
+    propertyId: string,
+  ): Promise<ResponseCommon<{ balance: string; accountId: string | null }>> {
     const acc = await this.accountRepo
       .createQueryBuilder('ea')
       .innerJoinAndSelect('ea.contract', 'c')
@@ -152,7 +174,14 @@ export class EscrowService {
       .orderBy('c.createdAt', 'DESC')
       .getOne();
 
-    if (!acc) return { balance: '0', accountId: null };
-    return { balance: acc.currentBalance, accountId: acc.id };
+    if (!acc)
+      return new ResponseCommon(200, 'SUCCESS', {
+        balance: '0',
+        accountId: null,
+      });
+    return new ResponseCommon(200, 'SUCCESS', {
+      balance: acc.currentBalance,
+      accountId: acc.id,
+    });
   }
 }

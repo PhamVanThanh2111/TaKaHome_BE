@@ -5,10 +5,12 @@ import {
   ManyToOne,
   CreateDateColumn,
   UpdateDateColumn,
+  OneToMany,
 } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { Property } from '../../property/entities/property.entity';
 import { BookingStatus } from 'src/modules/common/enums/booking-status.enum';
+import { MaintenanceTicket } from 'src/modules/maintenance/entities/maintenance-ticket.entity';
 
 @Entity()
 export class Booking {
@@ -42,6 +44,12 @@ export class Booking {
   firstRentDueAt?: Date; // hạn thanh toán kỳ đầu (+ 72h sau SIGNED)
 
   @Column({ type: 'timestamptz', nullable: true })
+  landlordEscrowDepositDueAt?: Date; // hạn nộp ký quỹ chủ nhà
+
+  @Column({ type: 'timestamptz', nullable: true })
+  landlordEscrowDepositFundedAt?: Date; // Chủ nhà đã nộp ký quỹ
+
+  @Column({ type: 'timestamptz', nullable: true })
   firstRentPaidAt?: Date; // IPN thanh toán kỳ đầu thành công
 
   @Column({ type: 'timestamptz', nullable: true })
@@ -58,4 +66,7 @@ export class Booking {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @OneToMany(() => MaintenanceTicket, (t) => t.booking)
+  maintenanceTickets: MaintenanceTicket[];
 }

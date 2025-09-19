@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { PropertyImage } from './entities/property-image.entity';
 import { CreatePropertyImageDto } from './dto/create-property-image.dto';
 import { UpdatePropertyImageDto } from './dto/update-property-image.dto';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class PropertyImageService {
@@ -14,39 +15,48 @@ export class PropertyImageService {
 
   async create(
     createPropertyImageDto: CreatePropertyImageDto,
-  ): Promise<PropertyImage> {
+  ): Promise<ResponseCommon<PropertyImage>> {
     const { propertyId, imageUrl } = createPropertyImageDto;
     const propertyImage = this.propertyImageRepository.create({
       imageUrl,
       property: { id: propertyId },
     });
-    return this.propertyImageRepository.save(propertyImage);
+    const saved = await this.propertyImageRepository.save(propertyImage);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async findAll(): Promise<PropertyImage[]> {
-    return this.propertyImageRepository.find({ relations: ['property'] });
+  async findAll(): Promise<ResponseCommon<PropertyImage[]>> {
+    const images = await this.propertyImageRepository.find({
+      relations: ['property'],
+    });
+    return new ResponseCommon(200, 'SUCCESS', images);
   }
 
-  async findOne(id: number): Promise<PropertyImage | null> {
-    return this.propertyImageRepository.findOne({
+  async findOne(id: number): Promise<ResponseCommon<PropertyImage | null>> {
+    const image = await this.propertyImageRepository.findOne({
       where: { id: id.toString() },
       relations: ['property'],
     });
+    return new ResponseCommon(200, 'SUCCESS', image);
   }
 
   async update(
     id: number,
     updatePropertyImageDto: UpdatePropertyImageDto,
-  ): Promise<PropertyImage> {
+  ): Promise<ResponseCommon<PropertyImage>> {
     await this.propertyImageRepository.update(id, updatePropertyImageDto);
-    const updated = await this.findOne(id);
+    const updated = await this.propertyImageRepository.findOne({
+      where: { id: id.toString() },
+      relations: ['property'],
+    });
     if (!updated) {
       throw new Error(`PropertyImage with id ${id} not found`);
     }
-    return updated;
+    return new ResponseCommon(200, 'SUCCESS', updated);
   }
 
-  async remove(id: number): Promise<void> {
+  async remove(id: number): Promise<ResponseCommon<null>> {
     await this.propertyImageRepository.delete(id);
+    return new ResponseCommon(200, 'SUCCESS', null);
   }
 }

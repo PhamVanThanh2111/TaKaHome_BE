@@ -105,15 +105,18 @@ export class PaymentController {
     const clientIp = this.getClientIpIPv4(req);
     console.log('Client IP:', clientIp);
 
-    const { paymentUrl, txnRef } =
-      await this.paymentService.createVnpayPaymentLink({
-        contractId,
-        amount: amountNum,
-        ipAddr: clientIp,
-        orderInfo,
-        locale: locale || 'vn',
-        expireIn: expireIn ? Number(expireIn) : undefined,
-      });
+    const { data } = await this.paymentService.createVnpayPaymentLink({
+      contractId,
+      amount: amountNum,
+      ipAddr: clientIp,
+      orderInfo,
+      locale: locale || 'vn',
+      expireIn: expireIn ? Number(expireIn) : undefined,
+    });
+    if (!data) {
+      throw new BadRequestException('Không tạo được link thanh toán VNPay');
+    }
+    const { paymentUrl, txnRef } = data;
 
     // redirect ngay nếu được yêu cầu
     if (redirect === '1' || redirect === 'true') {
@@ -129,7 +132,7 @@ export class PaymentController {
   async vnpReturn(@Query() q: Record<string, string>, @Res() res: Response) {
     const result = await this.paymentService.verifyVnpayReturn(q);
     // trả JSON
-    return res.json(result);
+    return res.json(result.data ?? {});
     // hoặc redirect FE:
     // return res.redirect(`${FE_URL}/payment-result?ok=${result.ok}&code=${result.code}&txnRef=${result.txnRef}`);
   }
@@ -137,8 +140,9 @@ export class PaymentController {
   @Public()
   @Get('vnpay/ipn')
   @HttpCode(HttpStatus.OK)
-  vnpIpn(@Query() q: Record<string, string>) {
-    this.paymentService.handleVnpayIpn(q);
+  async vnpIpn(@Query() q: Record<string, string>) {
+    const response = await this.paymentService.handleVnpayIpn(q);
+    return response.data ?? 'RspCode=99&Message=Unknown error';
   }
 
   /** Helper: lấy IP thật của client (hữu ích khi chạy sau reverse proxy) */

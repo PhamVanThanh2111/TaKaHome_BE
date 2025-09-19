@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Account } from './entities/account.entity';
 import { UpdateAccountDto } from './dto/update-account.dto';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class AccountService {
@@ -11,24 +12,41 @@ export class AccountService {
     private readonly accountRepo: Repository<Account>,
   ) {}
 
-  async findAll(): Promise<Account[]> {
-    return this.accountRepo.find({ relations: ['user'] });
+  async findAll(): Promise<ResponseCommon<Account[]>> {
+    const accounts = await this.accountRepo.find({ relations: ['user'] });
+    return new ResponseCommon(200, 'SUCCESS', accounts);
   }
 
-  async findOne(id: string): Promise<Account | null> {
-    return this.accountRepo.findOne({ where: { id }, relations: ['user'] });
+  async findOne(id: string): Promise<ResponseCommon<Account | null>> {
+    const account = await this.accountRepo.findOne({
+      where: { id },
+      relations: ['user'],
+    });
+    return new ResponseCommon(200, 'SUCCESS', account);
   }
 
-  async findByEmail(email: string): Promise<Account | null> {
-    return this.accountRepo.findOne({ where: { email }, relations: ['user'] });
+  async findByEmail(email: string): Promise<ResponseCommon<Account | null>> {
+    const account = await this.accountRepo.findOne({
+      where: { email },
+      relations: ['user'],
+    });
+    return new ResponseCommon(200, 'SUCCESS', account);
   }
 
-  async update(id: string, dto: UpdateAccountDto): Promise<Account | null> {
+  async update(
+    id: string,
+    dto: UpdateAccountDto,
+  ): Promise<ResponseCommon<Account | null>> {
     await this.accountRepo.update(id, dto);
-    return this.findOne(id);
+    const account = await this.accountRepo.findOne({
+      where: { id },
+      relations: ['user'],
+    });
+    return new ResponseCommon(200, 'SUCCESS', account);
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string): Promise<ResponseCommon<null>> {
     await this.accountRepo.delete(id);
+    return new ResponseCommon(200, 'SUCCESS', null);
   }
 }
