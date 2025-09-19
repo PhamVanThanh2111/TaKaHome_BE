@@ -9,6 +9,7 @@ import { Booking } from './entities/booking.entity';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
 import { BookingStatus } from '../common/enums/booking-status.enum';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class BookingService {
@@ -17,8 +18,8 @@ export class BookingService {
     private bookingRepository: Repository<Booking>,
   ) {}
 
-  async create(dto: CreateBookingDto) {
-    const b = this.bookingRepository.create({
+  async create(dto: CreateBookingDto): Promise<ResponseCommon<Booking>> {
+    const booking = this.bookingRepository.create({
       tenant: { id: dto.tenantId },
       property: { id: dto.propertyId },
       status: BookingStatus.PENDING_LANDLORD,
@@ -26,139 +27,228 @@ export class BookingService {
         ? new Date(dto.firstRentDueAt)
         : undefined,
     });
-    return this.bookingRepository.save(b);
+    const saved = await this.bookingRepository.save(booking);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async landlordApprove(id: string) {
-    const b = await this.findOne(id);
-    this.ensureStatus(b, [BookingStatus.PENDING_LANDLORD]);
-    b.status = BookingStatus.PENDING_SIGNATURE;
-    return this.bookingRepository.save(b);
+  async landlordApprove(id: string): Promise<ResponseCommon<Booking>> {
+    const booking = await this.loadBookingOrThrow(id);
+    this.ensureStatus(booking, [BookingStatus.PENDING_LANDLORD]);
+    booking.status = BookingStatus.PENDING_SIGNATURE;
+    const saved = await this.bookingRepository.save(booking);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async landlordReject(id: string) {
-    const b = await this.findOne(id);
+  async landlordReject(id: string): Promise<ResponseCommon<Booking>> {
+    const booking = await this.loadBookingOrThrow(id);
     if (
-      b.status === BookingStatus.CANCELLED ||
-      b.status === BookingStatus.REJECTED
-    )
-      return b;
-    b.status = BookingStatus.REJECTED;
-    return this.bookingRepository.save(b);
+      booking.status === BookingStatus.CANCELLED ||
+      booking.status === BookingStatus.REJECTED
+    ) {
+      return new ResponseCommon(200, 'SUCCESS', booking);
+    }
+    booking.status = BookingStatus.REJECTED;
+    const saved = await this.bookingRepository.save(booking);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async tenantSign(id: string, depositDeadlineHours = 24) {
-    const b = await this.findOne(id);
-    this.ensureStatus(b, [BookingStatus.PENDING_SIGNATURE]);
-    b.status = BookingStatus.AWAITING_DEPOSIT;
-    b.signedAt = new Date();
-    b.escrowDepositDueAt = new Date(
+  async tenantSign(
+    id: string,
+    depositDeadlineHours = 24,
+  ): Promise<ResponseCommon<Booking>> {
+    const booking = await this.loadBookingOrThrow(id);
+    this.ensureStatus(booking, [BookingStatus.PENDING_SIGNATURE]);
+    booking.status = BookingStatus.AWAITING_DEPOSIT;
+    booking.signedAt = new Date();
+    booking.escrowDepositDueAt = new Date(
       Date.now() + depositDeadlineHours * 60 * 60 * 1000,
     );
-    b.landlordEscrowDepositDueAt = new Date(
+    booking.landlordEscrowDepositDueAt = new Date(
       Date.now() + depositDeadlineHours * 60 * 60 * 1000,
     );
-    b.firstRentDueAt = new Date(
+    booking.firstRentDueAt = new Date(
       Date.now() + depositDeadlineHours * 3 * 60 * 60 * 1000,
     );
-    return this.bookingRepository.save(b);
+    const saved = await this.bookingRepository.save(booking);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
   // Gọi khi IPN cọc Người thuê thành công
-  async markTenantDepositFunded(id: string) {
-    const b = await this.findOne(id);
-    if (b.escrowDepositFundedAt) {
-      return b;
+  async markTenantDepositFunded(id: string): Promise<ResponseCommon<Booking>> {
+    const booking = await this.loadBookingOrThrow(id);
+    if (booking.escrowDepositFundedAt) {
+      return new ResponseCommon(200, 'SUCCESS', booking);
     }
-    this.ensureStatus(b, [BookingStatus.AWAITING_DEPOSIT]);
-    b.escrowDepositFundedAt = new Date();
-    this.maybeMarkDualEscrowFunded(b);
-    return this.bookingRepository.save(b);
+    this.ensureStatus(booking, [BookingStatus.AWAITING_DEPOSIT]);
+    booking.escrowDepositFundedAt = new Date();
+    this.maybeMarkDualEscrowFunded(booking);
+    const saved = await this.bookingRepository.save(booking);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
   // Gọi khi IPN ký quỹ Chủ nhà thành công
-  async markLandlordDepositFunded(id: string) {
-    const b = await this.findOne(id);
-    if (b.landlordEscrowDepositFundedAt) {
-      return b;
+  async markLandlordDepositFunded(
+    id: string,
+  ): Promise<ResponseCommon<Booking>> {
+    const booking = await this.loadBookingOrThrow(id);
+    if (booking.landlordEscrowDepositFundedAt) {
+      return new ResponseCommon(200, 'SUCCESS', booking);
     }
-    this.ensureStatus(b, [BookingStatus.AWAITING_DEPOSIT]);
-    b.landlordEscrowDepositFundedAt = new Date();
-    this.maybeMarkDualEscrowFunded(b);
-    return this.bookingRepository.save(b);
+    this.ensureStatus(booking, [BookingStatus.AWAITING_DEPOSIT]);
+    booking.landlordEscrowDepositFundedAt = new Date();
+    this.maybeMarkDualEscrowFunded(booking);
+    const saved = await this.bookingRepository.save(booking);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
   // Alias cũ giữ nguyên API
-  async markDepositFunded(id: string) {
+  async markDepositFunded(id: string): Promise<ResponseCommon<Booking>> {
     return this.markTenantDepositFunded(id);
   }
 
   // Gọi khi thanh toán kỳ đầu thành công (IPN hoặc ví)
-  async markFirstRentPaid(id: string) {
-    const b = await this.findOne(id);
-    if (b.firstRentPaidAt) {
-      return b;
+  async markFirstRentPaid(id: string): Promise<ResponseCommon<Booking>> {
+    const booking = await this.loadBookingOrThrow(id);
+    if (booking.firstRentPaidAt) {
+      return new ResponseCommon(200, 'SUCCESS', booking);
     }
-    this.ensureStatus(b, [
+    this.ensureStatus(booking, [
       BookingStatus.DUAL_ESCROW_FUNDED,
       BookingStatus.AWAITING_FIRST_RENT,
     ]);
-    b.status = BookingStatus.READY_FOR_HANDOVER;
-    b.firstRentPaidAt = new Date();
-    return this.bookingRepository.save(b);
+    booking.status = BookingStatus.READY_FOR_HANDOVER;
+    booking.firstRentPaidAt = new Date();
+    const saved = await this.bookingRepository.save(booking);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async handover(id: string) {
-    const b = await this.findOne(id);
-    this.ensureStatus(b, [BookingStatus.READY_FOR_HANDOVER]);
-    b.status = BookingStatus.ACTIVE;
-    b.handoverAt = new Date();
-    b.activatedAt = new Date();
-    return this.bookingRepository.save(b);
+  async handover(id: string): Promise<ResponseCommon<Booking>> {
+    const booking = await this.loadBookingOrThrow(id);
+    this.ensureStatus(booking, [BookingStatus.READY_FOR_HANDOVER]);
+    booking.status = BookingStatus.ACTIVE;
+    booking.handoverAt = new Date();
+    booking.activatedAt = new Date();
+    const saved = await this.bookingRepository.save(booking);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async startSettlement(id: string) {
-    const b = await this.findOne(id);
-    this.ensureStatus(b, [BookingStatus.ACTIVE]);
-    b.status = BookingStatus.SETTLEMENT_PENDING;
-    return this.bookingRepository.save(b);
+  async startSettlement(id: string): Promise<ResponseCommon<Booking>> {
+    const booking = await this.loadBookingOrThrow(id);
+    this.ensureStatus(booking, [BookingStatus.ACTIVE]);
+    booking.status = BookingStatus.SETTLEMENT_PENDING;
+    const saved = await this.bookingRepository.save(booking);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async closeSettled(id: string) {
-    const b = await this.findOne(id);
-    this.ensureStatus(b, [BookingStatus.SETTLEMENT_PENDING]);
-    b.status = BookingStatus.SETTLED;
-    b.closedAt = new Date();
-    return this.bookingRepository.save(b);
+  async closeSettled(id: string): Promise<ResponseCommon<Booking>> {
+    const booking = await this.loadBookingOrThrow(id);
+    this.ensureStatus(booking, [BookingStatus.SETTLEMENT_PENDING]);
+    booking.status = BookingStatus.SETTLED;
+    booking.closedAt = new Date();
+    const saved = await this.bookingRepository.save(booking);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async updateMeta(id: string, dto: UpdateBookingDto) {
-    const b = await this.findOne(id);
+  async updateMeta(
+    id: string,
+    dto: UpdateBookingDto,
+  ): Promise<ResponseCommon<Booking>> {
+    const booking = await this.loadBookingOrThrow(id);
     if (dto.escrowDepositDueAt)
-      b.escrowDepositDueAt = new Date(dto.escrowDepositDueAt);
-    if (dto.firstRentDueAt) b.firstRentDueAt = new Date(dto.firstRentDueAt);
-    if (dto.status) b.status = dto.status; // dùng thận trọng
-    return this.bookingRepository.save(b);
+      booking.escrowDepositDueAt = new Date(dto.escrowDepositDueAt);
+    if (dto.firstRentDueAt)
+      booking.firstRentDueAt = new Date(dto.firstRentDueAt);
+    if (dto.status) booking.status = dto.status; // dùng thận trọng
+    const saved = await this.bookingRepository.save(booking);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async cancelOverdueDeposits(now = new Date()) {
+  async cancelOverdueDeposits(
+    now = new Date(),
+  ): Promise<ResponseCommon<{ cancelled: number }>> {
     const bookings = await this.bookingRepository.find({
       where: { status: BookingStatus.AWAITING_DEPOSIT },
     });
-    for (const b of bookings) {
+    let cancelled = 0;
+    for (const booking of bookings) {
       const tenantLate =
-        !b.escrowDepositFundedAt &&
-        b.escrowDepositDueAt &&
-        b.escrowDepositDueAt < now;
+        !booking.escrowDepositFundedAt &&
+        booking.escrowDepositDueAt &&
+        booking.escrowDepositDueAt < now;
       const landlordLate =
-        !b.landlordEscrowDepositFundedAt &&
-        b.landlordEscrowDepositDueAt &&
-        b.landlordEscrowDepositDueAt < now;
+        !booking.landlordEscrowDepositFundedAt &&
+        booking.landlordEscrowDepositDueAt &&
+        booking.landlordEscrowDepositDueAt < now;
       if (tenantLate || landlordLate) {
-        b.status = BookingStatus.CANCELLED;
-        await this.bookingRepository.save(b);
+        booking.status = BookingStatus.CANCELLED;
+        await this.bookingRepository.save(booking);
+        cancelled += 1;
       }
     }
+    return new ResponseCommon(200, 'SUCCESS', { cancelled });
+  }
+
+  private async loadBookingOrThrow(id: string): Promise<Booking> {
+    const booking = await this.bookingRepository.findOne({
+      where: { id },
+      relations: ['tenant', 'property'],
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+    return booking;
+  }
+
+  async findOne(id: string): Promise<ResponseCommon<Booking>> {
+    const booking = await this.loadBookingOrThrow(id);
+    return new ResponseCommon(200, 'SUCCESS', booking);
+  }
+
+  async findAll(): Promise<ResponseCommon<Booking[]>> {
+    const bookings = await this.bookingRepository.find({
+      relations: ['tenant', 'property'],
+    });
+    return new ResponseCommon(200, 'SUCCESS', bookings);
+  }
+
+  /**
+   * Helper cho các service khác (Payment/IPN) đánh dấu mốc theo tenant + property
+   */
+  async markTenantDepositFundedByTenantAndProperty(
+    tenantId: string,
+    propertyId: string,
+  ): Promise<ResponseCommon<Booking>> {
+    const booking = await this.findLatestByTenantAndProperty(
+      tenantId,
+      propertyId,
+    );
+    if (!booking)
+      throw new NotFoundException('Booking not found for tenant/property');
+    return this.markTenantDepositFunded(booking.id);
+  }
+
+  async markLandlordDepositFundedByTenantAndProperty(
+    tenantId: string,
+    propertyId: string,
+  ): Promise<ResponseCommon<Booking>> {
+    const booking = await this.findLatestByTenantAndProperty(
+      tenantId,
+      propertyId,
+    );
+    if (!booking)
+      throw new NotFoundException('Booking not found for tenant/property');
+    return this.markLandlordDepositFunded(booking.id);
+  }
+
+  async markFirstRentPaidByTenantAndProperty(
+    tenantId: string,
+    propertyId: string,
+  ): Promise<ResponseCommon<Booking>> {
+    const booking = await this.findLatestByTenantAndProperty(
+      tenantId,
+      propertyId,
+    );
+    if (!booking)
+      throw new NotFoundException('Booking not found for tenant/property');
+    return this.markFirstRentPaid(booking.id);
   }
 
   private maybeMarkDualEscrowFunded(b: Booking) {
@@ -177,61 +267,6 @@ export class BookingService {
         `Invalid state: ${b.status}. Expected: ${expected.join(', ')}`,
       );
     }
-  }
-
-  async findOne(id: string) {
-    const b = await this.bookingRepository.findOne({
-      where: { id },
-      relations: ['tenant', 'property'],
-    });
-    if (!b) throw new NotFoundException('Booking not found');
-    return b;
-  }
-
-  async findAll(): Promise<Booking[]> {
-    return this.bookingRepository.find({ relations: ['tenant', 'property'] });
-  }
-
-  /**
-   * Helper cho các service khác (Payment/IPN) đánh dấu mốc theo tenant + property
-   */
-  async markTenantDepositFundedByTenantAndProperty(
-    tenantId: string,
-    propertyId: string,
-  ) {
-    const booking = await this.findLatestByTenantAndProperty(
-      tenantId,
-      propertyId,
-    );
-    if (!booking)
-      throw new NotFoundException('Booking not found for tenant/property');
-    return this.markTenantDepositFunded(booking.id);
-  }
-
-  async markLandlordDepositFundedByTenantAndProperty(
-    tenantId: string,
-    propertyId: string,
-  ) {
-    const booking = await this.findLatestByTenantAndProperty(
-      tenantId,
-      propertyId,
-    );
-    if (!booking)
-      throw new NotFoundException('Booking not found for tenant/property');
-    return this.markLandlordDepositFunded(booking.id);
-  }
-
-  async markFirstRentPaidByTenantAndProperty(
-    tenantId: string,
-    propertyId: string,
-  ) {
-    const booking = await this.findLatestByTenantAndProperty(
-      tenantId,
-      propertyId,
-    );
-    if (!booking)
-      throw new NotFoundException('Booking not found for tenant/property');
-    return this.markFirstRentPaid(booking.id);
   }
 
   private async findLatestByTenantAndProperty(
