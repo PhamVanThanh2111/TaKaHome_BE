@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsString, MinLength, IsOptional } from 'class-validator';
+import { RoleEnum } from 'src/modules/common/enums/role.enum';
 
 export class RegisterDto {
   @IsEmail()
@@ -31,4 +32,8 @@ export class RegisterDto {
   @ApiProperty({ example: '0123456789', required: false })
   @IsOptional()
   phone?: string;
+
+  @ApiProperty({ example: [RoleEnum.TENANT], required: false })
+  @IsOptional()
+  roles?: RoleEnum[];
 }

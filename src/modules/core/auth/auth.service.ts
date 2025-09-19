@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -27,7 +31,7 @@ export class AuthService {
     const exist = await this.accountRepo.findOne({
       where: { email: dto.email },
     });
-    if (exist) throw new UnauthorizedException('Email already registered');
+    if (exist) throw new ConflictException('Email already registered');
 
     const hash = await bcrypt.hash(dto.password, 10);
 
@@ -41,6 +45,15 @@ export class AuthService {
 
     // role mặc định cho account mới (TENANT)
     const defaultRoles = [RoleEnum.TENANT];
+
+    // check roles từ dto (nếu có)
+    if (
+      dto.roles &&
+      dto.roles.length > 0 &&
+      dto.roles.includes(RoleEnum.LANDLORD)
+    ) {
+      defaultRoles.push(RoleEnum.LANDLORD);
+    }
 
     const account = this.accountRepo.create({
       email: dto.email,
