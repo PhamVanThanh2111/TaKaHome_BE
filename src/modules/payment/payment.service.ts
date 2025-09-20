@@ -464,8 +464,8 @@ export class PaymentService {
     }
 
     if (
-      payment.purpose === PaymentPurpose.ESCROW_DEPOSIT ||
-      payment.purpose === PaymentPurpose.OWNER_ESCROW_DEPOSIT
+      payment.purpose === PaymentPurpose.TENANT_ESCROW_DEPOSIT ||
+      payment.purpose === PaymentPurpose.LANDLORD_ESCROW_DEPOSIT
     ) {
       await this.escrowService.creditDepositFromPayment(payment.id);
 
@@ -474,7 +474,7 @@ export class PaymentService {
 
       if (tenantId && propertyId) {
         try {
-          if (payment.purpose === PaymentPurpose.ESCROW_DEPOSIT) {
+          if (payment.purpose === PaymentPurpose.TENANT_ESCROW_DEPOSIT) {
             await this.bookingService.markTenantDepositFundedByTenantAndProperty(
               tenantId,
               propertyId,
