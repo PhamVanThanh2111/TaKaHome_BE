@@ -79,7 +79,10 @@ export class BookingService {
     if (booking.escrowDepositFundedAt) {
       return new ResponseCommon(200, 'SUCCESS', booking);
     }
-    this.ensureStatus(booking, [BookingStatus.AWAITING_DEPOSIT]);
+    this.ensureStatus(booking, [
+      BookingStatus.AWAITING_DEPOSIT,
+      BookingStatus.ESCROW_FUNDED_L,
+    ]);
     booking.escrowDepositFundedAt = new Date();
     this.maybeMarkDualEscrowFunded(booking);
     const saved = await this.bookingRepository.save(booking);
@@ -94,19 +97,17 @@ export class BookingService {
     if (booking.landlordEscrowDepositFundedAt) {
       return new ResponseCommon(200, 'SUCCESS', booking);
     }
-    this.ensureStatus(booking, [BookingStatus.AWAITING_DEPOSIT]);
+    this.ensureStatus(booking, [
+      BookingStatus.AWAITING_DEPOSIT,
+      BookingStatus.ESCROW_FUNDED_T,
+    ]);
     booking.landlordEscrowDepositFundedAt = new Date();
     this.maybeMarkDualEscrowFunded(booking);
     const saved = await this.bookingRepository.save(booking);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  // Alias cũ giữ nguyên API
-  async markDepositFunded(id: string): Promise<ResponseCommon<Booking>> {
-    return this.markTenantDepositFunded(id);
-  }
-
-  // Gọi khi thanh toán kỳ đầu thành công (IPN hoặc ví)
+  // Gọi khi thanh toán kỳ đầu thành công (IPN vnpay hoặc ví)
   async markFirstRentPaid(id: string): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
     if (booking.firstRentPaidAt) {
