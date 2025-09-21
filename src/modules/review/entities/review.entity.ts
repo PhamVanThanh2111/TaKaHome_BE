@@ -25,6 +25,9 @@ export class Review {
   @Column({ type: 'float' })
   rating: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 }

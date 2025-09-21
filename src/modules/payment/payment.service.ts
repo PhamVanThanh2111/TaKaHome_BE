@@ -16,6 +16,13 @@ import { PaymentPurpose } from '../common/enums/payment-purpose.enum';
 import { EscrowService } from '../escrow/escrow.service';
 import { BookingService } from '../booking/booking.service';
 import { ResponseCommon } from 'src/common/dto/response.dto';
+import {
+  addMinutesVN,
+  formatVN,
+  parseVnpPayDateToUtc,
+  vnNow,
+  vnpFormatYYYYMMDDHHmmss,
+} from '../../common/datetime';
 
 @Injectable()
 export class PaymentService {
@@ -68,7 +75,7 @@ export class PaymentService {
       });
 
       payment.status = PaymentStatusEnum.PAID;
-      payment.paidAt = new Date();
+      payment.paidAt = vnNow();
       await this.paymentRepository.save(payment);
 
       await this.onPaymentPaid(payment.id);
@@ -194,10 +201,10 @@ export class PaymentService {
       .replace(/[#&=?]/g, ' ') // tránh ký tự đặc biệt
       .trim();
 
-    const now = new Date();
-    const createDate = this.formatDateYYYYMMDDHHmmss(now);
-    const expireDate = this.formatDateYYYYMMDDHHmmss(
-      new Date(now.getTime() + (expireIn || 15) * 60 * 1000),
+    const now = vnNow();
+    const createDate = vnpFormatYYYYMMDDHHmmss(now);
+    const expireDate = vnpFormatYYYYMMDDHHmmss(
+      addMinutesVN(now, expireIn || 15),
     );
 
     // vnp_TxnRef phải duy nhất
@@ -421,7 +428,7 @@ export class PaymentService {
         payment.status = PaymentStatusEnum.PAID;
         payment.transactionNo = transactionNo ?? payment.transactionNo;
         payment.bankCode = bankCode ?? payment.bankCode;
-        payment.paidAt = payDate ? this.parseVnpDate(payDate) : new Date();
+        payment.paidAt = payDate ? parseVnpPayDateToUtc(payDate) : vnNow();
         await this.paymentRepository.save(payment);
 
         await this.onPaymentPaid(payment.id, payment);
@@ -511,41 +518,13 @@ export class PaymentService {
 
   /** ===== Helpers ===== */
 
-  private formatDateYYYYMMDDHHmmss(d: Date, tz = 'Asia/Ho_Chi_Minh') {
-    const parts = new Intl.DateTimeFormat('vi-VN-u-hc-h23', {
-      timeZone: tz,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-      hourCycle: 'h23',
-    })
-      .formatToParts(d)
-      .reduce(
-        (a, p) => (p.type !== 'literal' ? { ...a, [p.type]: p.value } : a),
-        {} as Record<string, string>,
-      );
-
-    return `${parts.year}${parts.month}${parts.day}${parts.hour}${parts.minute}${parts.second}`;
-  }
-
   private generateVnpTxnRef() {
     // YYMMDDHHmmss + 6 số ngẫu nhiên — đủ uniqueness cho TEST/DEV
-    const now = new Date();
-    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-    const y = `${now.getFullYear()}`.slice(-2);
-    const MM = pad(now.getMonth() + 1);
-    const dd = pad(now.getDate());
-    const HH = pad(now.getHours());
-    const mm = pad(now.getMinutes());
-    const ss = pad(now.getSeconds());
+    const nowCode = formatVN(vnNow(), 'yyMMddHHmmss');
     const rnd = Math.floor(Math.random() * 1_000_000)
       .toString()
       .padStart(6, '0');
-    return `${y}${MM}${dd}${HH}${mm}${ss}${rnd}`;
+    return `${nowCode}${rnd}`;
   }
 
   private sortObjectByKey(obj: Record<string, string>) {
@@ -558,17 +537,5 @@ export class PaymentService {
         },
         {} as Record<string, string>,
       );
-  }
-
-  /** Parse vnp_PayDate 'YYYYMMDDHHmmss' */
-  private parseVnpDate(s?: string) {
-    if (!s || s.length !== 14) return new Date();
-    const y = Number(s.slice(0, 4));
-    const M = Number(s.slice(4, 6)) - 1;
-    const d = Number(s.slice(6, 8));
-    const h = Number(s.slice(8, 10));
-    const m = Number(s.slice(10, 12));
-    const sec = Number(s.slice(12, 14));
-    return new Date(y, M, d, h, m, sec);
   }
 }

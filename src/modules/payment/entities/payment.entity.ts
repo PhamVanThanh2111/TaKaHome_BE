@@ -39,10 +39,16 @@ export class Payment {
   })
   status: PaymentStatusEnum;
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   updatedAt: Date;
 
   // ########### BLOCKCHAIN ###########

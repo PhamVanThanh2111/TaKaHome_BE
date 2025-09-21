@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 import {
   BadRequestException,
   Injectable,
@@ -5,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { zonedTimeToUtc } from 'date-fns-tz';
 import { Booking } from './entities/booking.entity';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
@@ -13,6 +15,7 @@ import { ResponseCommon } from 'src/common/dto/response.dto';
 import { Contract } from '../contract/entities/contract.entity';
 import { ContractService } from '../contract/contract.service';
 import { ContractStatusEnum } from '../common/enums/contract-status.enum';
+import { VN_TZ, addDaysVN, addHoursVN, vnNow } from '../../common/datetime';
 
 @Injectable()
 export class BookingService {
@@ -27,9 +30,7 @@ export class BookingService {
       tenant: { id: dto.tenantId },
       property: { id: dto.propertyId },
       status: BookingStatus.PENDING_LANDLORD,
-      firstRentDueAt: dto.firstRentDueAt
-        ? new Date(dto.firstRentDueAt)
-        : undefined,
+      firstRentDueAt: this.parseOptionalInput(dto.firstRentDueAt),
     });
     const saved = await this.bookingRepository.save(booking);
     return new ResponseCommon(200, 'SUCCESS', saved);
@@ -74,16 +75,14 @@ export class BookingService {
       booking.contractId = contract.id;
     }
     booking.status = BookingStatus.AWAITING_DEPOSIT;
-    booking.signedAt = new Date();
-    booking.escrowDepositDueAt = new Date(
-      Date.now() + depositDeadlineHours * 60 * 60 * 1000,
+    const signedAt = vnNow();
+    booking.signedAt = signedAt;
+    booking.escrowDepositDueAt = addHoursVN(signedAt, depositDeadlineHours);
+    booking.landlordEscrowDepositDueAt = addHoursVN(
+      signedAt,
+      depositDeadlineHours,
     );
-    booking.landlordEscrowDepositDueAt = new Date(
-      Date.now() + depositDeadlineHours * 60 * 60 * 1000,
-    );
-    booking.firstRentDueAt = new Date(
-      Date.now() + depositDeadlineHours * 3 * 60 * 60 * 1000,
-    );
+    booking.firstRentDueAt = addHoursVN(signedAt, depositDeadlineHours * 3);
     const saved = await this.bookingRepository.save(booking);
     if (contract) {
       await this.markContractSigned(contract.id);
@@ -102,7 +101,7 @@ export class BookingService {
       BookingStatus.AWAITING_DEPOSIT,
       BookingStatus.ESCROW_FUNDED_L,
     ]);
-    booking.escrowDepositFundedAt = new Date();
+    booking.escrowDepositFundedAt = vnNow();
     if (booking.landlordEscrowDepositFundedAt) {
       this.maybeMarkDualEscrowFunded(booking);
     } else {
@@ -124,7 +123,7 @@ export class BookingService {
       BookingStatus.AWAITING_DEPOSIT,
       BookingStatus.ESCROW_FUNDED_T,
     ]);
-    booking.landlordEscrowDepositFundedAt = new Date();
+    booking.landlordEscrowDepositFundedAt = vnNow();
     if (booking.escrowDepositFundedAt) {
       this.maybeMarkDualEscrowFunded(booking);
     } else {
@@ -145,7 +144,7 @@ export class BookingService {
       BookingStatus.AWAITING_FIRST_RENT,
     ]);
     booking.status = BookingStatus.READY_FOR_HANDOVER;
-    booking.firstRentPaidAt = new Date();
+    booking.firstRentPaidAt = vnNow();
     const saved = await this.bookingRepository.save(booking);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
@@ -154,8 +153,9 @@ export class BookingService {
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.READY_FOR_HANDOVER]);
     booking.status = BookingStatus.ACTIVE;
-    booking.handoverAt = new Date();
-    booking.activatedAt = new Date();
+    const handoverAt = vnNow();
+    booking.handoverAt = handoverAt;
+    booking.activatedAt = handoverAt;
     const saved = await this.bookingRepository.save(booking);
     await this.activateContractIfPossible(booking);
     const refreshed = await this.loadBookingOrThrow(saved.id);
@@ -174,7 +174,7 @@ export class BookingService {
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.SETTLEMENT_PENDING]);
     booking.status = BookingStatus.SETTLED;
-    booking.closedAt = new Date();
+    booking.closedAt = vnNow();
     const saved = await this.bookingRepository.save(booking);
     await this.completeContractIfPossible(booking);
     const refreshed = await this.loadBookingOrThrow(saved.id);
@@ -187,16 +187,16 @@ export class BookingService {
   ): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
     if (dto.escrowDepositDueAt)
-      booking.escrowDepositDueAt = new Date(dto.escrowDepositDueAt);
+      booking.escrowDepositDueAt = this.parseInput(dto.escrowDepositDueAt);
     if (dto.firstRentDueAt)
-      booking.firstRentDueAt = new Date(dto.firstRentDueAt);
+      booking.firstRentDueAt = this.parseInput(dto.firstRentDueAt);
     if (dto.status) booking.status = dto.status; // dùng thận trọng
     const saved = await this.bookingRepository.save(booking);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
   async cancelOverdueDeposits(
-    now = new Date(),
+    now = vnNow(),
   ): Promise<ResponseCommon<{ cancelled: number }>> {
     const bookings = await this.bookingRepository.find({
       where: { status: BookingStatus.AWAITING_DEPOSIT },
@@ -283,11 +283,26 @@ export class BookingService {
     return this.markFirstRentPaid(booking.id);
   }
 
+  private parseInput(value: string): Date {
+    const normalized = value.length === 10 ? `${value}T00:00:00` : value;
+    const parsed = zonedTimeToUtc(normalized, VN_TZ) as Date;
+    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException('Invalid date input provided');
+    }
+    return parsed;
+  }
+
+  private parseOptionalInput(value?: string | Date | null): Date | undefined {
+    if (!value) return undefined;
+    if (value instanceof Date) return value;
+    return this.parseInput(value);
+  }
+
   private maybeMarkDualEscrowFunded(b: Booking) {
     if (b.escrowDepositFundedAt && b.landlordEscrowDepositFundedAt) {
       b.status = BookingStatus.DUAL_ESCROW_FUNDED;
       if (!b.firstRentDueAt) {
-        b.firstRentDueAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+        b.firstRentDueAt = addDaysVN(vnNow(), 3);
       }
     }
   }
@@ -358,7 +373,7 @@ export class BookingService {
       tenantId,
       landlordId,
       propertyId,
-      startDate: booking.signedAt ?? new Date(),
+      startDate: booking.signedAt ?? vnNow(),
     });
     booking.contractId = draft.id;
     return draft;

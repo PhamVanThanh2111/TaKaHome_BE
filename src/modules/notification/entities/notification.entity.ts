@@ -29,6 +29,9 @@ export class Notification {
   @Column({ type: 'enum', enum: StatusEnum, default: StatusEnum.PENDING })
   status: StatusEnum;
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 }

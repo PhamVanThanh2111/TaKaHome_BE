@@ -60,10 +60,16 @@ export class Property {
   @Column({ type: 'enum', enum: StatusEnum, default: StatusEnum.ACTIVE })
   status: StatusEnum;
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   updatedAt: Date;
 
   @ManyToOne(() => User, (user) => user.id)
