@@ -29,6 +29,9 @@ export class Verification {
   @ManyToOne(() => User, { nullable: true })
   verifiedBy: User;
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 }

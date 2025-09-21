@@ -25,7 +25,7 @@ export class Account {
   @Column({ default: false })
   isVerified: boolean;
 
-  @Column({ nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   lastLoginAt?: Date;
 
   @OneToOne(() => User, (user) => user.account, { cascade: true })

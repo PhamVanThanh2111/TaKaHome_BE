@@ -32,7 +32,7 @@ export class Invoice {
   @Column()
   totalAmount: number;
 
-  @Column({ type: 'date' })
+  @Column({ type: 'timestamptz' })
   dueDate: Date;
 
   @Column({
@@ -42,9 +42,15 @@ export class Invoice {
   })
   status: InvoiceStatusEnum;
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   updatedAt: Date;
 }

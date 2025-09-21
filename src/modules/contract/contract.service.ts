@@ -1,11 +1,18 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { addMonths as addMonthsFn } from 'date-fns';
+import { utcToZonedTime, zonedTimeToUtc } from 'date-fns-tz';
 import { Contract } from './entities/contract.entity';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
 import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
+import { VN_TZ, formatVN, vnNow } from '../../common/datetime';
 
 @Injectable()
 export class ContractService {
@@ -79,7 +86,7 @@ export class ContractService {
     contractCode?: string;
     contractFileUrl?: string;
   }): Promise<Contract> {
-    const start = input.startDate ? this.toDate(input.startDate) : new Date();
+    const start = input.startDate ? this.toDate(input.startDate) : vnNow();
     const proposedEnd = input.endDate
       ? this.toDate(input.endDate)
       : this.addMonths(start, 12);
@@ -199,7 +206,11 @@ export class ContractService {
 
   // --- Helpers ---
   private toDate(value: Date | string): Date {
-    const date = value instanceof Date ? value : new Date(value);
+    if (value instanceof Date) {
+      return value;
+    }
+    const normalized = value.length === 10 ? `${value}T00:00:00` : value;
+    const date = zonedTimeToUtc(normalized, VN_TZ);
     if (Number.isNaN(date.getTime())) {
       throw new BadRequestException('Invalid date provided for contract');
     }
@@ -207,15 +218,13 @@ export class ContractService {
   }
 
   private addMonths(base: Date, months: number): Date {
-    const next = new Date(base.getTime());
-    next.setMonth(next.getMonth() + months);
-    return next;
+    const vnBase = utcToZonedTime(base, VN_TZ);
+    const vnNext = addMonthsFn(vnBase, months);
+    return zonedTimeToUtc(vnNext, VN_TZ);
   }
 
-  private async generateContractCode(
-    referenceDate = new Date(),
-  ): Promise<string> {
-    const datePart = referenceDate.toISOString().slice(0, 10).replace(/-/g, '');
+  private async generateContractCode(referenceDate = vnNow()): Promise<string> {
+    const datePart = formatVN(referenceDate, 'yyyyMMdd');
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const random = Math.random().toString(36).slice(2, 8).toUpperCase();
       const code = `CT-${datePart}-${random}`;

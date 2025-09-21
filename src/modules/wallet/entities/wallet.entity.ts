@@ -6,6 +6,8 @@ import {
   OneToOne,
   JoinColumn,
   Unique,
+  CreateDateColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 
 @Entity('wallets')
@@ -28,9 +30,15 @@ export class Wallet {
   @Column({ type: 'varchar', length: 8, default: 'VND' })
   currency: string;
 
-  @Column({ type: 'timestamptz', default: () => 'now()' })
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 
-  @Column({ type: 'timestamptz', default: () => 'now()' })
+  @UpdateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   updatedAt: Date;
 }

@@ -71,10 +71,16 @@ export class Booking {
   @Column({ type: 'timestamptz', nullable: true })
   closedAt?: Date; // kết thúc/settled
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   updatedAt: Date;
 
   @OneToMany(() => MaintenanceTicket, (t) => t.booking)

@@ -1,11 +1,15 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { zonedTimeToUtc } from 'date-fns-tz';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoiceItem } from './entities/invoice-item.entity';
 import { Invoice } from './entities/invoice.entity';
 import { InvoiceStatusEnum } from '../common/enums/invoice-status.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
+import { VN_TZ, formatVN, vnNow } from '../../common/datetime';
 
 @Injectable()
 export class InvoiceService {
@@ -20,10 +24,12 @@ export class InvoiceService {
     const items = dto.items.map((i) => this.itemRepository.create(i));
     const total = items.reduce((sum, item) => sum + item.amount, 0);
     const code = this.generateCode();
+    const dueInput =
+      dto.dueDate.length === 10 ? `${dto.dueDate}T00:00:00` : dto.dueDate;
     const invoice = this.invoiceRepository.create({
       invoiceCode: code,
       contract: { id: dto.contractId },
-      dueDate: dto.dueDate,
+      dueDate: zonedTimeToUtc(dueInput, VN_TZ),
       items,
       totalAmount: total,
     });
@@ -71,8 +77,8 @@ export class InvoiceService {
 
   // ---- Helper methods ----
   private generateCode() {
-    const now = new Date();
-    const yyyymmdd = now.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
+    const now = vnNow();
+    const yyyymmdd = formatVN(now, 'yyyyMMdd');
     const rand = Math.random().toString(36).slice(2, 6).toUpperCase(); // 4 kí tự
     return `INV-${yyyymmdd}-${rand}`;
   }

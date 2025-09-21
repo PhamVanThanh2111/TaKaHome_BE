@@ -18,6 +18,9 @@ export class Favorite {
   @ManyToOne(() => Property, (property) => property.favorites)
   property: Property;
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 }

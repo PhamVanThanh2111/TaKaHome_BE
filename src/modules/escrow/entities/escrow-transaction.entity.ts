@@ -48,7 +48,10 @@ export class EscrowTransaction {
   @Column({ type: 'varchar', length: 255, nullable: true })
   note: string | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 
   @Column({ type: 'timestamptz', nullable: true })

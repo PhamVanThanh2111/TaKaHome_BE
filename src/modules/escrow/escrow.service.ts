@@ -8,6 +8,7 @@ import { Payment } from '../payment/entities/payment.entity';
 import { PaymentStatusEnum } from '../common/enums/payment-status.enum';
 import { PaymentPurpose } from '../common/enums/payment-purpose.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
+import { vnNow } from '../../common/datetime';
 
 @Injectable()
 export class EscrowService {
@@ -87,7 +88,7 @@ export class EscrowService {
         payment.purpose === PaymentPurpose.LANDLORD_ESCROW_DEPOSIT
           ? 'Landlord deposit funded via payment'
           : 'Tenant deposit funded via payment',
-      completedAt: new Date(),
+      completedAt: vnNow(),
     });
     await this.txnRepo.save(txn);
 
@@ -123,7 +124,7 @@ export class EscrowService {
       refType: 'SETTLEMENT',
       refId: null,
       note: note ?? 'Deduction',
-      completedAt: new Date(),
+      completedAt: vnNow(),
     });
     await this.txnRepo.save(txn);
     acc.currentBalance = next.toString();
@@ -154,7 +155,7 @@ export class EscrowService {
       refType: 'ADJUSTMENT',
       refId: null,
       note: note ?? 'Refund to tenant',
-      completedAt: new Date(),
+      completedAt: vnNow(),
     });
     await this.txnRepo.save(txn);
     acc.currentBalance = next.toString();

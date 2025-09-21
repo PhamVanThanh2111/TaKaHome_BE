@@ -25,6 +25,9 @@ export class Report {
   @Column({ default: false })
   resolved: boolean;
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 }

@@ -10,6 +10,7 @@ import { WalletDebitDto } from './dto/wallet-debit.dto';
 import { WalletTransaction } from './entities/wallet-transaction.entity';
 import { Wallet } from './entities/wallet.entity';
 import { ResponseCommon } from 'src/common/dto/response.dto';
+import { vnNow } from '../../common/datetime';
 
 @Injectable()
 export class WalletService {
@@ -75,7 +76,7 @@ export class WalletService {
       const cur = BigInt(wallet.availableBalance);
       const amt = BigInt(amount);
       wallet.availableBalance = (cur + amt).toString();
-      wallet.updatedAt = new Date();
+      wallet.updatedAt = vnNow();
       await runner.manager.save(wallet);
 
       const txn = runner.manager.create(WalletTransaction, {
@@ -91,7 +92,7 @@ export class WalletService {
             : {}),
         ...(refId !== undefined && refId !== null ? { refId } : {}),
         ...(note !== undefined && note !== null ? { note } : {}),
-        completedAt: new Date(),
+        completedAt: vnNow(),
       });
       await runner.manager.save(txn);
 
@@ -136,7 +137,7 @@ export class WalletService {
       if (cur < amt) throw new BadRequestException('Insufficient balance');
 
       wallet.availableBalance = (cur - amt).toString();
-      wallet.updatedAt = new Date();
+      wallet.updatedAt = vnNow();
       await runner.manager.save(wallet);
 
       const txn = runner.manager.create(WalletTransaction, {
@@ -148,7 +149,7 @@ export class WalletService {
         refType,
         refId,
         note: note ?? null,
-        completedAt: new Date(),
+        completedAt: vnNow(),
       });
       await runner.manager.save(txn);
 

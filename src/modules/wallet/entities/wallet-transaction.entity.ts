@@ -4,6 +4,7 @@ import {
   Column,
   ManyToOne,
   Index,
+  CreateDateColumn,
 } from 'typeorm';
 import { Wallet } from './wallet.entity';
 
@@ -56,7 +57,10 @@ export class WalletTransaction {
   @Column({ type: 'varchar', length: 255, nullable: true })
   note: string | null;
 
-  @Column({ type: 'timestamptz', default: () => 'now()' })
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 
   @Column({ type: 'timestamptz', nullable: true })
