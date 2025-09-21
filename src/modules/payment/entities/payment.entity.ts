@@ -18,7 +18,7 @@ export class Payment {
   id: string;
 
   @ManyToOne(() => Contract, (contract) => contract.id)
-  contract: Contract;
+  contract?: Contract;
 
   @ManyToOne(() => Invoice, (invoice) => invoice.payments, { nullable: true })
   invoice: Invoice;
@@ -46,11 +46,6 @@ export class Payment {
   updatedAt: Date;
 
   // ########### BLOCKCHAIN ###########
-  @Column({ nullable: true })
-  gatewayTxnRef?: string;
-
-  @Column({ nullable: true })
-  transactionNo?: string;
 
   // ########### VNPAY ###########
   @Column({ nullable: true })
@@ -58,4 +53,10 @@ export class Payment {
 
   @Column({ nullable: true })
   paidAt: Date;
+
+  @Column({ nullable: true })
+  gatewayTxnRef?: string;
+
+  @Column({ nullable: true })
+  transactionNo?: string;
 }

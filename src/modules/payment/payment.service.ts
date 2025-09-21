@@ -75,7 +75,7 @@ export class PaymentService {
 
       return new ResponseCommon(200, 'SUCCESS', {
         id: payment.id,
-        contractId,
+        contractId: contractId ?? '',
         amount,
         method,
         status: payment.status,
@@ -85,7 +85,7 @@ export class PaymentService {
     if (method === PaymentMethodEnum.VNPAY) {
       // 2B) Thanh toán VNPAY: tạo URL và giữ PENDING chờ IPN
       const { data } = await this.createVnpayPaymentLink({
-        contractId,
+        contractId: contractId ?? '',
         amount,
         ipAddr: ctx.ipAddr,
         orderInfo: dto.orderInfo ?? `Thanh_toan_hop_dong_${contractId}`,
@@ -103,7 +103,7 @@ export class PaymentService {
 
       return new ResponseCommon(200, 'SUCCESS', {
         id: payment.id,
-        contractId,
+        contractId: contractId ?? '',
         amount,
         method,
         status: payment.status, // PENDING

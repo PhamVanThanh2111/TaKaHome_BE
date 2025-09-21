@@ -66,6 +66,7 @@ export class EscrowService {
     )
       throw new Error('Payment is not a deposit');
 
+    if (!payment.contract) throw new Error('Payment contract is undefined');
     const ensured = await this.ensureAccountForContract(payment.contract.id);
     const acc = ensured.data;
     if (!acc) throw new Error('Escrow account could not be ensured');
