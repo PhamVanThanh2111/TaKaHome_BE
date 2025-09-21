@@ -6,11 +6,14 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
+  JoinColumn,
+  OneToOne,
 } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { Property } from '../../property/entities/property.entity';
 import { BookingStatus } from 'src/modules/common/enums/booking-status.enum';
 import { MaintenanceTicket } from 'src/modules/maintenance/entities/maintenance-ticket.entity';
+import { Contract } from '../../contract/entities/contract.entity';
 
 @Entity()
 export class Booking {
@@ -29,6 +32,13 @@ export class Booking {
     default: BookingStatus.PENDING_LANDLORD,
   })
   status: BookingStatus;
+
+  @Column({ type: 'uuid', nullable: true })
+  contractId?: string;
+
+  @OneToOne(() => Contract, { nullable: true })
+  @JoinColumn()
+  contract?: Contract;
 
   // Mốc thời gian nghiệp vụ
   @Column({ type: 'timestamptz', nullable: true })

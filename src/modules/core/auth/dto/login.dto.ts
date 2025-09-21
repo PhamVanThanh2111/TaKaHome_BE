@@ -3,7 +3,7 @@ import { IsEmail, IsString, MinLength } from 'class-validator';
 
 export class LoginDto {
   @IsEmail()
-  @ApiProperty({ example: 'user@email.com', description: 'Email đăng nhập' })
+  @ApiProperty({ example: 'admin@gmail.com', description: 'Email đăng nhập' })
   email: string;
 
   @IsString()

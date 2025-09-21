@@ -10,12 +10,16 @@ import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
 import { BookingStatus } from '../common/enums/booking-status.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
+import { Contract } from '../contract/entities/contract.entity';
+import { ContractService } from '../contract/contract.service';
+import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 
 @Injectable()
 export class BookingService {
   constructor(
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
+    private contractService: ContractService,
   ) {}
 
   async create(dto: CreateBookingDto): Promise<ResponseCommon<Booking>> {
@@ -35,6 +39,11 @@ export class BookingService {
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.PENDING_LANDLORD]);
     booking.status = BookingStatus.PENDING_SIGNATURE;
+    const contract = await this.ensureContractForBooking(booking);
+    if (contract) {
+      booking.contract = contract;
+      booking.contractId = contract.id;
+    }
     const saved = await this.bookingRepository.save(booking);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
@@ -48,6 +57,7 @@ export class BookingService {
       return new ResponseCommon(200, 'SUCCESS', booking);
     }
     booking.status = BookingStatus.REJECTED;
+    await this.cancelContractIfExists(booking);
     const saved = await this.bookingRepository.save(booking);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
@@ -58,6 +68,11 @@ export class BookingService {
   ): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.PENDING_SIGNATURE]);
+    const contract = await this.ensureContractForBooking(booking);
+    if (contract) {
+      booking.contract = contract;
+      booking.contractId = contract.id;
+    }
     booking.status = BookingStatus.AWAITING_DEPOSIT;
     booking.signedAt = new Date();
     booking.escrowDepositDueAt = new Date(
@@ -70,7 +85,11 @@ export class BookingService {
       Date.now() + depositDeadlineHours * 3 * 60 * 60 * 1000,
     );
     const saved = await this.bookingRepository.save(booking);
-    return new ResponseCommon(200, 'SUCCESS', saved);
+    if (contract) {
+      await this.markContractSigned(contract.id);
+    }
+    const refreshed = await this.loadBookingOrThrow(saved.id);
+    return new ResponseCommon(200, 'SUCCESS', refreshed);
   }
 
   // Gọi khi IPN cọc Người thuê thành công
@@ -79,9 +98,16 @@ export class BookingService {
     if (booking.escrowDepositFundedAt) {
       return new ResponseCommon(200, 'SUCCESS', booking);
     }
-    this.ensureStatus(booking, [BookingStatus.AWAITING_DEPOSIT]);
+    this.ensureStatus(booking, [
+      BookingStatus.AWAITING_DEPOSIT,
+      BookingStatus.ESCROW_FUNDED_L,
+    ]);
     booking.escrowDepositFundedAt = new Date();
-    this.maybeMarkDualEscrowFunded(booking);
+    if (booking.landlordEscrowDepositFundedAt) {
+      this.maybeMarkDualEscrowFunded(booking);
+    } else {
+      booking.status = BookingStatus.ESCROW_FUNDED_T;
+    }
     const saved = await this.bookingRepository.save(booking);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
@@ -94,19 +120,21 @@ export class BookingService {
     if (booking.landlordEscrowDepositFundedAt) {
       return new ResponseCommon(200, 'SUCCESS', booking);
     }
-    this.ensureStatus(booking, [BookingStatus.AWAITING_DEPOSIT]);
+    this.ensureStatus(booking, [
+      BookingStatus.AWAITING_DEPOSIT,
+      BookingStatus.ESCROW_FUNDED_T,
+    ]);
     booking.landlordEscrowDepositFundedAt = new Date();
-    this.maybeMarkDualEscrowFunded(booking);
+    if (booking.escrowDepositFundedAt) {
+      this.maybeMarkDualEscrowFunded(booking);
+    } else {
+      booking.status = BookingStatus.ESCROW_FUNDED_L;
+    }
     const saved = await this.bookingRepository.save(booking);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  // Alias cũ giữ nguyên API
-  async markDepositFunded(id: string): Promise<ResponseCommon<Booking>> {
-    return this.markTenantDepositFunded(id);
-  }
-
-  // Gọi khi thanh toán kỳ đầu thành công (IPN hoặc ví)
+  // Gọi khi thanh toán kỳ đầu thành công (IPN vnpay hoặc ví)
   async markFirstRentPaid(id: string): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
     if (booking.firstRentPaidAt) {
@@ -129,7 +157,9 @@ export class BookingService {
     booking.handoverAt = new Date();
     booking.activatedAt = new Date();
     const saved = await this.bookingRepository.save(booking);
-    return new ResponseCommon(200, 'SUCCESS', saved);
+    await this.activateContractIfPossible(booking);
+    const refreshed = await this.loadBookingOrThrow(saved.id);
+    return new ResponseCommon(200, 'SUCCESS', refreshed);
   }
 
   async startSettlement(id: string): Promise<ResponseCommon<Booking>> {
@@ -146,7 +176,9 @@ export class BookingService {
     booking.status = BookingStatus.SETTLED;
     booking.closedAt = new Date();
     const saved = await this.bookingRepository.save(booking);
-    return new ResponseCommon(200, 'SUCCESS', saved);
+    await this.completeContractIfPossible(booking);
+    const refreshed = await this.loadBookingOrThrow(saved.id);
+    return new ResponseCommon(200, 'SUCCESS', refreshed);
   }
 
   async updateMeta(
@@ -260,13 +292,13 @@ export class BookingService {
     }
   }
 
-  // --- Helpers ---
-  private ensureStatus(b: Booking, expected: BookingStatus[]) {
-    if (!expected.includes(b.status)) {
-      throw new BadRequestException(
-        `Invalid state: ${b.status}. Expected: ${expected.join(', ')}`,
-      );
-    }
+  private isReusableContract(contract?: Contract | null): contract is Contract {
+    if (!contract) return false;
+    return [
+      ContractStatusEnum.DRAFT,
+      ContractStatusEnum.PENDING_SIGNATURE,
+      ContractStatusEnum.SIGNED,
+    ].includes(contract.status);
   }
 
   private async findLatestByTenantAndProperty(
@@ -282,5 +314,122 @@ export class BookingService {
       take: 1,
     });
     return booking ?? null;
+  }
+
+  // --- Helpers ---
+  private ensureStatus(b: Booking, expected: BookingStatus[]) {
+    if (!expected.includes(b.status)) {
+      throw new BadRequestException(
+        `Invalid state: ${b.status}. Expected: ${expected.join(', ')}`,
+      );
+    }
+  }
+
+  private async ensureContractForBooking(
+    booking: Booking,
+  ): Promise<Contract | null> {
+    const tenantId = booking.tenant?.id;
+    const propertyId = booking.property?.id;
+    const landlordId = booking.property?.landlord?.id;
+
+    if (!tenantId || !propertyId || !landlordId) {
+      throw new BadRequestException(
+        'Booking is missing tenant, property, or landlord information',
+      );
+    }
+
+    if (booking.contractId) {
+      const linked = await this.contractService.findRawById(booking.contractId);
+      if (this.isReusableContract(linked)) {
+        return linked;
+      }
+    }
+
+    const latest = await this.contractService.findLatestByTenantAndProperty(
+      tenantId,
+      propertyId,
+    );
+    if (this.isReusableContract(latest)) {
+      booking.contractId = latest.id;
+      return latest;
+    }
+
+    const draft = await this.contractService.createDraftForBooking({
+      tenantId,
+      landlordId,
+      propertyId,
+      startDate: booking.signedAt ?? new Date(),
+    });
+    booking.contractId = draft.id;
+    return draft;
+  }
+
+  private async markContractSigned(contractId: string): Promise<void> {
+    try {
+      await this.contractService.markSigned(contractId);
+    } catch (error) {
+      this.logWorkflowError(
+        'Failed to mark contract as signed',
+        { contractId },
+        error,
+      );
+    }
+  }
+
+  private async cancelContractIfExists(booking: Booking) {
+    if (!booking.contractId) return;
+    try {
+      const contract = await this.contractService.findRawById(
+        booking.contractId,
+      );
+      if (!this.isReusableContract(contract)) {
+        return;
+      }
+      await this.contractService.cancel(booking.contractId);
+    } catch (error) {
+      this.logWorkflowError(
+        'Failed to cancel contract for booking',
+        { bookingId: booking.id, contractId: booking.contractId },
+        error,
+      );
+    }
+  }
+
+  private async activateContractIfPossible(booking: Booking) {
+    if (!booking.contractId) return;
+    try {
+      await this.contractService.activate(booking.contractId);
+    } catch (error) {
+      this.logWorkflowError(
+        'Failed to activate contract for booking',
+        { bookingId: booking.id, contractId: booking.contractId },
+        error,
+      );
+    }
+  }
+
+  private async completeContractIfPossible(booking: Booking) {
+    if (!booking.contractId) return;
+    try {
+      await this.contractService.complete(booking.contractId);
+    } catch (error) {
+      this.logWorkflowError(
+        'Failed to complete contract for booking',
+        { bookingId: booking.id, contractId: booking.contractId },
+        error,
+      );
+    }
+  }
+
+  private logWorkflowError(
+    message: string,
+    context: Record<string, unknown>,
+    error: unknown,
+  ) {
+    const normalized =
+      error instanceof Error
+        ? { message: error.message, stack: error.stack }
+        : { raw: error };
+    console.error(message, { ...context, ...normalized });
   }
 }

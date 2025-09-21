@@ -17,7 +17,9 @@ export class ContractService {
   async create(
     createContractDto: CreateContractDto,
   ): Promise<ResponseCommon<Contract>> {
-    const contract = this.contractRepository.create(createContractDto);
+    const contract = this.contractRepository.create(
+      this.buildContractPayload(createContractDto),
+    );
     const saved = await this.contractRepository.save(contract);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
@@ -30,10 +32,7 @@ export class ContractService {
   }
 
   async findOne(id: string): Promise<ResponseCommon<Contract | null>> {
-    const contract = await this.contractRepository.findOne({
-      where: { id },
-      relations: ['tenant', 'landlord', 'property'],
-    });
+    const contract = await this.findRawById(id);
     return new ResponseCommon(200, 'SUCCESS', contract);
   }
 
@@ -55,19 +54,79 @@ export class ContractService {
     return new ResponseCommon(200, 'SUCCESS', contracts);
   }
 
+  async findLatestByTenantAndProperty(
+    tenantId: string,
+    propertyId: string,
+  ): Promise<Contract | null> {
+    const [contract] = await this.contractRepository.find({
+      where: {
+        tenant: { id: tenantId },
+        property: { id: propertyId },
+      },
+      order: { createdAt: 'DESC' },
+      relations: ['tenant', 'landlord', 'property'],
+      take: 1,
+    });
+    return contract ?? null;
+  }
+
+  async createDraftForBooking(input: {
+    tenantId: string;
+    landlordId: string;
+    propertyId: string;
+    startDate?: Date;
+    endDate?: Date;
+    contractCode?: string;
+    contractFileUrl?: string;
+  }): Promise<Contract> {
+    const start = input.startDate ? this.toDate(input.startDate) : new Date();
+    const proposedEnd = input.endDate
+      ? this.toDate(input.endDate)
+      : this.addMonths(start, 12);
+    const end = proposedEnd > start ? proposedEnd : this.addMonths(start, 12);
+
+    const contract = this.contractRepository.create({
+      contractCode:
+        input.contractCode ?? (await this.generateContractCode(start)),
+      tenant: { id: input.tenantId } as unknown as Contract['tenant'],
+      landlord: { id: input.landlordId } as unknown as Contract['landlord'],
+      property: { id: input.propertyId } as unknown as Contract['property'],
+      startDate: start,
+      endDate: end,
+      status: ContractStatusEnum.PENDING_SIGNATURE,
+      contractFileUrl: input.contractFileUrl,
+    });
+    return this.contractRepository.save(contract);
+  }
+
   async update(
     id: string,
     updateContractDto: UpdateContractDto,
   ): Promise<ResponseCommon<Contract>> {
-    await this.contractRepository.update(id, updateContractDto);
-    const updatedContract = await this.contractRepository.findOne({
-      where: { id },
-      relations: ['tenant', 'landlord', 'property'],
-    });
-    if (!updatedContract) {
-      throw new Error(`Contract with id ${id} not found`);
-    }
-    return new ResponseCommon(200, 'SUCCESS', updatedContract);
+    const contract = await this.loadContractOrThrow(id);
+    if (updateContractDto.contractCode)
+      contract.contractCode = updateContractDto.contractCode;
+    if (updateContractDto.tenantId)
+      contract.tenant = {
+        id: updateContractDto.tenantId,
+      } as unknown as Contract['tenant'];
+    if (updateContractDto.landlordId)
+      contract.landlord = {
+        id: updateContractDto.landlordId,
+      } as unknown as Contract['landlord'];
+    if (updateContractDto.propertyId)
+      contract.property = {
+        id: updateContractDto.propertyId,
+      } as unknown as Contract['property'];
+    if (updateContractDto.startDate)
+      contract.startDate = this.toDate(updateContractDto.startDate);
+    if (updateContractDto.endDate)
+      contract.endDate = this.toDate(updateContractDto.endDate);
+    if (updateContractDto.contractFileUrl !== undefined)
+      contract.contractFileUrl = updateContractDto.contractFileUrl;
+    if (updateContractDto.status) contract.status = updateContractDto.status;
+    const saved = await this.contractRepository.save(contract);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
   private ensureStatus(
@@ -81,9 +140,23 @@ export class ContractService {
     }
   }
 
+  async markSigned(id: string): Promise<ResponseCommon<Contract>> {
+    const contract = await this.loadContractOrThrow(id);
+    if (contract.status === ContractStatusEnum.SIGNED) {
+      return new ResponseCommon(200, 'SUCCESS', contract);
+    }
+    this.ensureStatus(contract, [ContractStatusEnum.PENDING_SIGNATURE]);
+    contract.status = ContractStatusEnum.SIGNED;
+    const saved = await this.contractRepository.save(contract);
+    return new ResponseCommon(200, 'SUCCESS', saved);
+  }
+
   async activate(id: string): Promise<ResponseCommon<Contract>> {
     const contract = await this.loadContractOrThrow(id);
-    this.ensureStatus(contract, [ContractStatusEnum.PENDING_SIGNATURE]);
+    this.ensureStatus(contract, [
+      ContractStatusEnum.PENDING_SIGNATURE,
+      ContractStatusEnum.SIGNED,
+    ]);
     contract.status = ContractStatusEnum.ACTIVE;
     const saved = await this.contractRepository.save(contract);
     return new ResponseCommon(200, 'SUCCESS', saved);
@@ -102,6 +175,7 @@ export class ContractService {
     this.ensureStatus(contract, [
       ContractStatusEnum.DRAFT,
       ContractStatusEnum.PENDING_SIGNATURE,
+      ContractStatusEnum.SIGNED,
     ]);
     contract.status = ContractStatusEnum.CANCELLED;
     const saved = await this.contractRepository.save(contract);
@@ -116,11 +190,58 @@ export class ContractService {
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  private async loadContractOrThrow(id: string): Promise<Contract> {
-    const contract = await this.contractRepository.findOne({
+  async findRawById(id: string): Promise<Contract | null> {
+    return this.contractRepository.findOne({
       where: { id },
       relations: ['tenant', 'landlord', 'property'],
     });
+  }
+
+  // --- Helpers ---
+  private toDate(value: Date | string): Date {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Invalid date provided for contract');
+    }
+    return date;
+  }
+
+  private addMonths(base: Date, months: number): Date {
+    const next = new Date(base.getTime());
+    next.setMonth(next.getMonth() + months);
+    return next;
+  }
+
+  private async generateContractCode(
+    referenceDate = new Date(),
+  ): Promise<string> {
+    const datePart = referenceDate.toISOString().slice(0, 10).replace(/-/g, '');
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+      const code = `CT-${datePart}-${random}`;
+      const exists = await this.contractRepository.findOne({
+        where: { contractCode: code },
+      });
+      if (!exists) return code;
+    }
+    throw new Error('Unable to generate unique contract code');
+  }
+
+  private buildContractPayload(dto: CreateContractDto) {
+    return {
+      contractCode: dto.contractCode,
+      tenant: { id: dto.tenantId } as unknown as Contract['tenant'],
+      landlord: { id: dto.landlordId } as unknown as Contract['landlord'],
+      property: { id: dto.propertyId } as unknown as Contract['property'],
+      startDate: this.toDate(dto.startDate),
+      endDate: this.toDate(dto.endDate),
+      status: dto.status ?? ContractStatusEnum.PENDING_SIGNATURE,
+      contractFileUrl: dto.contractFileUrl,
+    };
+  }
+
+  private async loadContractOrThrow(id: string): Promise<Contract> {
+    const contract = await this.findRawById(id);
     if (!contract) throw new Error(`Contract with id ${id} not found`);
     return contract;
   }
