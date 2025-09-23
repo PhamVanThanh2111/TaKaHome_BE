@@ -22,7 +22,8 @@ async function bootstrap() {
   // Nếu muốn tăng payload (cho upload ảnh lớn):
   // app.useBodyParser('json', { limit: '10mb' });
 
-  const port = process.env.PORT || 3000;
+  const port = parseInt(process.env.PORT || '3000', 10);
+  const host = '0.0.0.0';
 
   // ----- Swagger Setup -----
   const config = new DocumentBuilder()
@@ -36,8 +37,26 @@ async function bootstrap() {
   SwaggerModule.setup('api-docs', app, document);
   // -------------------------
 
-  await app.listen(port);
-  console.log(`Swagger is running on http://localhost:${port}/api-docs`);
+  // Graceful shutdown để thấy log khi Railway gửi SIGTERM
+  app.enableShutdownHooks();
+  process.on('SIGTERM', () => {
+    console.log('Received SIGTERM, shutting down gracefully...');
+    app
+      .close()
+      .then(() => {
+        process.exit(0);
+      })
+      .catch((err) => {
+        console.error('Error during app close:', err);
+        process.exit(1);
+      });
+  });
+
+  await app.listen(port, host);
+
+  const url = await app.getUrl();
+  console.log(`App is running on ${url}`);
+  console.log(`Swagger is running on ${url.replace(/\/$/, '')}/api-docs`);
 }
 
 bootstrap().catch((err) => {
