@@ -84,24 +84,6 @@ export class BookingController {
     return this.bookingService.tenantSign(id);
   }
 
-  // Được gọi sau khi Payment/IPN service thông báo người thuê đã cọc OK
-  @Post(':id/tenant-deposit-funded')
-  depositFunded(@Param('id') id: string) {
-    return this.bookingService.markTenantDepositFunded(id);
-  }
-
-  // Được gọi sau khi Payment/IPN service thông báo chủ nhà đã cọc OK
-  @Post(':id/landlord-deposit-funded')
-  landlordDepositFunded(@Param('id') id: string) {
-    return this.bookingService.markLandlordDepositFunded(id);
-  }
-
-  // Được gọi sau khi Payment/IPN service thông báo thanh toán kỳ đầu OK
-  @Post(':id/first-rent-paid')
-  firstRentPaid(@Param('id') id: string) {
-    return this.bookingService.markFirstRentPaid(id);
-  }
-
   @Post(':id/handover')
   @ApiOperation({ summary: 'Chủ nhà bàn giao tài sản' })
   @Roles(RoleEnum.LANDLORD, RoleEnum.ADMIN)
