@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 import {
   BadRequestException,
   Injectable,
@@ -285,7 +284,7 @@ export class BookingService {
 
   private parseInput(value: string): Date {
     const normalized = value.length === 10 ? `${value}T00:00:00` : value;
-    const parsed = zonedTimeToUtc(normalized, VN_TZ) as Date;
+    const parsed = zonedTimeToUtc(normalized, VN_TZ);
     if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
       throw new BadRequestException('Invalid date input provided');
     }
