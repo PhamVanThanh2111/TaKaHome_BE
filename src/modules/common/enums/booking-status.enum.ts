@@ -2,7 +2,6 @@ export enum BookingStatus {
   PENDING_LANDLORD = 'PENDING_LANDLORD', // tenant gửi yêu cầu
   REJECTED = 'REJECTED', // landlord từ chối
   PENDING_SIGNATURE = 'PENDING_SIGNATURE', // landlord đồng ý, chờ tenant ký
-  SIGNED = 'SIGNED', // đủ chữ ký
   AWAITING_DEPOSIT = 'AWAITING_DEPOSIT',
   ESCROW_FUNDED_T = 'ESCROW_FUNDED_T',
   ESCROW_FUNDED_L = 'ESCROW_FUNDED_L',
