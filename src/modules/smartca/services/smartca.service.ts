@@ -89,8 +89,6 @@ export class SmartCAService {
         this.logger.log(`Found 1 certificate for user ${config.user_id}`);
         return certificates[0];
       } else if (certificates.length > 1) {
-        // In a real application, you might want to return all certificates
-        // and let the client choose, or implement a selection logic
         this.logger.log(
           `Found ${certificates.length} certificates for user ${config.user_id}`
         );

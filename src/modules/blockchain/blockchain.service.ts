@@ -170,9 +170,14 @@ export class BlockchainService implements OnModuleInit {
         this.currentUserId = null;
       }
       
-      await this.initializeFabricConnection(orgName, userId);
-      this.currentOrgName = orgName;
-      this.currentUserId = userId || null;
+      const success = await this.initializeFabricConnection(orgName, userId);
+      if (success) {
+        this.isInitialized = true;
+        this.currentOrgName = orgName;
+        this.currentUserId = userId || null;
+      } else {
+        throw new Error('Failed to initialize blockchain connection');
+      }
     }
   }
 
@@ -830,6 +835,7 @@ export class BlockchainService implements OnModuleInit {
         organizations: organizations
       };
     } catch (error) {
+      this.logger.error('Blockchain health check failed:', error.message);
       return {
         status: 'unhealthy',
         network: 'disconnected',
