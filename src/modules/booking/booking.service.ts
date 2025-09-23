@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 import {
   BadRequestException,
   Injectable,
@@ -91,7 +90,7 @@ export class BookingService {
     return new ResponseCommon(200, 'SUCCESS', refreshed);
   }
 
-  // Gọi khi IPN cọc Người thuê thành công
+  // Gọi khi IPN ký quỹ Người thuê thành công
   async markTenantDepositFunded(id: string): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
     if (booking.escrowDepositFundedAt) {
@@ -139,10 +138,7 @@ export class BookingService {
     if (booking.firstRentPaidAt) {
       return new ResponseCommon(200, 'SUCCESS', booking);
     }
-    this.ensureStatus(booking, [
-      BookingStatus.DUAL_ESCROW_FUNDED,
-      BookingStatus.AWAITING_FIRST_RENT,
-    ]);
+    this.ensureStatus(booking, [BookingStatus.DUAL_ESCROW_FUNDED]);
     booking.status = BookingStatus.READY_FOR_HANDOVER;
     booking.firstRentPaidAt = vnNow();
     const saved = await this.bookingRepository.save(booking);
@@ -285,7 +281,7 @@ export class BookingService {
 
   private parseInput(value: string): Date {
     const normalized = value.length === 10 ? `${value}T00:00:00` : value;
-    const parsed = zonedTimeToUtc(normalized, VN_TZ) as Date;
+    const parsed = zonedTimeToUtc(normalized, VN_TZ);
     if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
       throw new BadRequestException('Invalid date input provided');
     }

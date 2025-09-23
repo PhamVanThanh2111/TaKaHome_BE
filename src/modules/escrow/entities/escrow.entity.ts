@@ -15,6 +15,9 @@ import {
 } from 'typeorm';
 import { EscrowTransaction } from './escrow-transaction.entity';
 
+export const ESCROW_BALANCE_PARTIES = ['TENANT', 'LANDLORD'] as const;
+export type EscrowBalanceParty = (typeof ESCROW_BALANCE_PARTIES)[number];
+
 @Entity('escrow_accounts')
 @Unique(['contractId'])
 export class Escrow {
@@ -46,7 +49,10 @@ export class Escrow {
 
   // bigint trong DB – dùng string để đảm bảo chính xác
   @Column({ type: 'bigint', default: 0 })
-  currentBalance: string;
+  currentBalanceTenant: string;
+
+  @Column({ type: 'bigint', default: 0 })
+  currentBalanceLandlord: string;
 
   @Column({ type: 'varchar', length: 8, default: 'VND' })
   currency: string;
