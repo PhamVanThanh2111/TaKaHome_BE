@@ -9,6 +9,7 @@ import { PaymentStatusEnum } from '../common/enums/payment-status.enum';
 import { PaymentPurpose } from '../common/enums/payment-purpose.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { vnNow } from '../../common/datetime';
+import { WalletService } from '../wallet/wallet.service';
 
 type EscrowBalanceResponse = {
   accountId: string;
@@ -27,6 +28,7 @@ export class EscrowService {
     private readonly contractRepo: Repository<Contract>,
     @InjectRepository(Payment)
     private readonly paymentRepo: Repository<Payment>,
+    private readonly walletService: WalletService,
   ) {}
 
   /** Tạo hoặc lấy Escrow cho 1 hợp đồng */
@@ -156,7 +158,27 @@ export class EscrowService {
     } else {
       acc.currentBalanceLandlord = next.toString();
     }
+
+    // userId của bên nhận tiền (bên còn lại)
+    const counterpartyUserId =
+      party === 'TENANT' ? acc.contract?.landlord?.id : acc.tenantId;
+    if (!counterpartyUserId)
+      throw new Error('Counterparty wallet information missing');
+
     const saved = await this.accountRepo.save(acc);
+
+    await this.walletService.credit(counterpartyUserId, {
+      amount: amountVnd,
+      type: 'REFUND',
+      refType: 'CONTRACT',
+      refId: acc.contractId,
+      note:
+        note ??
+        (party === 'TENANT'
+          ? 'Compensation received from tenant escrow'
+          : 'Compensation received from landlord escrow'),
+    });
+
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 

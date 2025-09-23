@@ -6,10 +6,12 @@ import { EscrowService } from './escrow.service';
 import { EscrowController } from './escrow.controller';
 import { Contract } from '../contract/entities/contract.entity';
 import { Payment } from '../payment/entities/payment.entity';
+import { WalletService } from '../wallet/wallet.service';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Escrow, EscrowTransaction, Contract, Payment]),
+    WalletService,
   ],
   controllers: [EscrowController],
   providers: [EscrowService],
