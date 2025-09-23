@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Escrow } from './entities/escrow.entity';
+import { Escrow, EscrowBalanceParty } from './entities/escrow.entity';
 import { EscrowTransaction } from './entities/escrow-transaction.entity';
 import { Contract } from '../contract/entities/contract.entity';
 import { Payment } from '../payment/entities/payment.entity';
@@ -9,6 +9,12 @@ import { PaymentStatusEnum } from '../common/enums/payment-status.enum';
 import { PaymentPurpose } from '../common/enums/payment-purpose.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { vnNow } from '../../common/datetime';
+
+type EscrowBalanceResponse = {
+  accountId: string;
+  balanceTenant: string;
+  balanceLandlord: string;
+};
 
 @Injectable()
 export class EscrowService {
@@ -43,7 +49,8 @@ export class EscrowService {
       tenantId: contract.tenant.id,
       property: { id: contract.property.id },
       propertyId: contract.property.id,
-      currentBalance: '0',
+      currentBalanceTenant: '0',
+      currentBalanceLandlord: '0',
       currency: 'VND',
     });
     const saved = await this.accountRepo.save(acc);
@@ -53,7 +60,7 @@ export class EscrowService {
   /** Ghi có tiền cọc khi Payment purpose=ESCROW_DEPOSIT đã PAID */
   async creditDepositFromPayment(
     paymentId: string,
-  ): Promise<ResponseCommon<{ accountId: string; balance: string }>> {
+  ): Promise<ResponseCommon<EscrowBalanceResponse>> {
     const payment = await this.paymentRepo.findOne({
       where: { id: paymentId },
       relations: ['contract'],
@@ -73,7 +80,11 @@ export class EscrowService {
     if (!acc) throw new Error('Escrow account could not be ensured');
 
     const amount = BigInt(payment.amount);
-    const current = BigInt(acc.currentBalance || '0');
+    const isTenantDeposit =
+      payment.purpose === PaymentPurpose.TENANT_ESCROW_DEPOSIT;
+    const current = isTenantDeposit
+      ? BigInt(acc.currentBalanceTenant || '0')
+      : BigInt(acc.currentBalanceLandlord || '0');
 
     const txn = this.txnRepo.create({
       escrow: { id: acc.id },
@@ -84,20 +95,25 @@ export class EscrowService {
       status: 'COMPLETED',
       refType: 'PAYMENT',
       refId: payment.id,
-      note:
-        payment.purpose === PaymentPurpose.LANDLORD_ESCROW_DEPOSIT
-          ? 'Landlord deposit funded via payment'
-          : 'Tenant deposit funded via payment',
+      note: isTenantDeposit
+        ? 'Tenant deposit funded via payment'
+        : 'Landlord deposit funded via payment',
       completedAt: vnNow(),
     });
     await this.txnRepo.save(txn);
 
-    acc.currentBalance = (current + amount).toString();
+    const next = (current + amount).toString();
+    if (isTenantDeposit) {
+      acc.currentBalanceTenant = next;
+    } else {
+      acc.currentBalanceLandlord = next;
+    }
     const updated = await this.accountRepo.save(acc);
 
     return new ResponseCommon(200, 'SUCCESS', {
       accountId: updated.id,
-      balance: updated.currentBalance,
+      balanceTenant: updated.currentBalanceTenant,
+      balanceLandlord: updated.currentBalanceLandlord,
     });
   }
 
@@ -105,12 +121,16 @@ export class EscrowService {
   async deduct(
     accountId: string,
     amountVnd: number,
+    party: EscrowBalanceParty,
     note?: string,
   ): Promise<ResponseCommon<Escrow>> {
     const acc = await this.accountRepo.findOne({ where: { id: accountId } });
     if (!acc) throw new Error('Escrow not found');
     const amount = BigInt(amountVnd);
-    const current = BigInt(acc.currentBalance || '0');
+    const current =
+      party === 'TENANT'
+        ? BigInt(acc.currentBalanceTenant || '0')
+        : BigInt(acc.currentBalanceLandlord || '0');
     const next = current - amount;
     if (next < BigInt(0)) throw new Error('Insufficient escrow balance');
 
@@ -123,11 +143,19 @@ export class EscrowService {
       status: 'COMPLETED',
       refType: 'SETTLEMENT',
       refId: null,
-      note: note ?? 'Deduction',
+      note:
+        note ??
+        (party === 'TENANT'
+          ? 'Deduction from tenant escrow'
+          : 'Deduction from landlord escrow'),
       completedAt: vnNow(),
     });
     await this.txnRepo.save(txn);
-    acc.currentBalance = next.toString();
+    if (party === 'TENANT') {
+      acc.currentBalanceTenant = next.toString();
+    } else {
+      acc.currentBalanceLandlord = next.toString();
+    }
     const saved = await this.accountRepo.save(acc);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
@@ -136,12 +164,16 @@ export class EscrowService {
   async refund(
     accountId: string,
     amountVnd: number,
+    party: EscrowBalanceParty,
     note?: string,
   ): Promise<ResponseCommon<Escrow>> {
     const acc = await this.accountRepo.findOne({ where: { id: accountId } });
     if (!acc) throw new Error('Escrow not found');
     const amount = BigInt(amountVnd);
-    const current = BigInt(acc.currentBalance || '0');
+    const current =
+      party === 'TENANT'
+        ? BigInt(acc.currentBalanceTenant || '0')
+        : BigInt(acc.currentBalanceLandlord || '0');
     const next = current - amount;
     if (next < BigInt(0)) throw new Error('Insufficient escrow balance');
 
@@ -154,11 +186,19 @@ export class EscrowService {
       status: 'COMPLETED',
       refType: 'ADJUSTMENT',
       refId: null,
-      note: note ?? 'Refund to tenant',
+      note:
+        note ??
+        (party === 'TENANT'
+          ? 'Refund to tenant from escrow'
+          : 'Refund to landlord from escrow'),
       completedAt: vnNow(),
     });
     await this.txnRepo.save(txn);
-    acc.currentBalance = next.toString();
+    if (party === 'TENANT') {
+      acc.currentBalanceTenant = next.toString();
+    } else {
+      acc.currentBalanceLandlord = next.toString();
+    }
     const saved = await this.accountRepo.save(acc);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
@@ -167,7 +207,12 @@ export class EscrowService {
   async getBalanceByTenantAndProperty(
     tenantId: string,
     propertyId: string,
-  ): Promise<ResponseCommon<{ balance: string; accountId: string | null }>> {
+  ): Promise<
+    ResponseCommon<
+      | EscrowBalanceResponse
+      | { accountId: null; balanceTenant: string; balanceLandlord: string }
+    >
+  > {
     const acc = await this.accountRepo
       .createQueryBuilder('ea')
       .innerJoinAndSelect('ea.contract', 'c')
@@ -178,11 +223,13 @@ export class EscrowService {
 
     if (!acc)
       return new ResponseCommon(200, 'SUCCESS', {
-        balance: '0',
+        balanceTenant: '0',
+        balanceLandlord: '0',
         accountId: null,
       });
     return new ResponseCommon(200, 'SUCCESS', {
-      balance: acc.currentBalance,
+      balanceTenant: acc.currentBalanceTenant,
+      balanceLandlord: acc.currentBalanceLandlord,
       accountId: acc.id,
     });
   }
