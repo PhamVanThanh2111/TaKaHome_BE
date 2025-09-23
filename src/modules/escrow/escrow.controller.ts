@@ -44,6 +44,7 @@ export class EscrowController {
     const result = await this.escrowService.deduct(
       accountId,
       dto.amount,
+      dto.party ?? 'TENANT',
       dto.note,
     );
     const account = result.data;
@@ -52,7 +53,8 @@ export class EscrowController {
     }
     return {
       accountId: account.id,
-      balance: account.currentBalance,
+      balanceTenant: account.currentBalanceTenant,
+      balanceLandlord: account.currentBalanceLandlord,
       updatedAt: account.updatedAt,
     };
   }
@@ -65,6 +67,7 @@ export class EscrowController {
     const result = await this.escrowService.refund(
       accountId,
       dto.amount,
+      dto.party ?? 'TENANT',
       dto.note,
     );
     const account = result.data;
@@ -73,7 +76,8 @@ export class EscrowController {
     }
     return {
       accountId: account.id,
-      balance: account.currentBalance,
+      balanceTenant: account.currentBalanceTenant,
+      balanceLandlord: account.currentBalanceLandlord,
       updatedAt: account.updatedAt,
     };
   }
