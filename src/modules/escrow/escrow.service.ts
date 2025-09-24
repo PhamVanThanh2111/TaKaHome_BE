@@ -10,6 +10,7 @@ import { PaymentPurpose } from '../common/enums/payment-purpose.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { vnNow } from '../../common/datetime';
 import { WalletService } from '../wallet/wallet.service';
+import { WalletTxnType } from '../common/enums/wallet-txn-type.enum';
 
 type EscrowBalanceResponse = {
   accountId: string;
@@ -169,8 +170,7 @@ export class EscrowService {
 
     await this.walletService.credit(counterpartyUserId, {
       amount: amountVnd,
-      type: 'REFUND',
-      refType: 'CONTRACT',
+      type: WalletTxnType.REFUND,
       refId: acc.contractId,
       note:
         note ??
@@ -222,6 +222,18 @@ export class EscrowService {
       acc.currentBalanceLandlord = next.toString();
     }
     const saved = await this.accountRepo.save(acc);
+
+    await this.walletService.credit(acc.tenantId, {
+      amount: amountVnd,
+      type: WalletTxnType.REFUND,
+      refId: acc.contractId,
+      note:
+        note ??
+        (party === 'TENANT'
+          ? 'Compensation received from escrow'
+          : 'Compensation received from escrow'),
+    });
+
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 

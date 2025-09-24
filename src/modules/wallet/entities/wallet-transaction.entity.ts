@@ -7,14 +7,9 @@ import {
   CreateDateColumn,
 } from 'typeorm';
 import { Wallet } from './wallet.entity';
-
-export type WalletDirection = 'CREDIT' | 'DEBIT';
-export type WalletTxnType =
-  | 'TOPUP'
-  | 'CONTRACT_PAYMENT'
-  | 'REFUND'
-  | 'ADJUSTMENT';
-export type WalletTxnStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
+import { WalletDirection } from 'src/modules/common/enums/wallet-txn-direction.enum';
+import { WalletTxnType } from 'src/modules/common/enums/wallet-txn-type.enum';
+import { WalletTxnStatus } from 'src/modules/common/enums/wallet-txn-status.enum';
 
 @Entity('wallet_transactions')
 export class WalletTransaction {
@@ -39,10 +34,6 @@ export class WalletTransaction {
 
   @Column({ type: 'varchar', length: 12, default: 'COMPLETED' })
   status: WalletTxnStatus;
-
-  // tham chiếu nghiệp vụ (Payment/Contract/Topup…)
-  @Column({ type: 'varchar', length: 24, nullable: true })
-  refType: 'TOPUP' | 'PAYMENT' | 'CONTRACT';
 
   @Column({ type: 'uuid', nullable: true })
   refId: string | null;

@@ -23,6 +23,7 @@ import {
   vnNow,
   vnpFormatYYYYMMDDHHmmss,
 } from '../../common/datetime';
+import { WalletTxnType } from '../common/enums/wallet-txn-type.enum';
 
 @Injectable()
 export class PaymentService {
@@ -68,8 +69,7 @@ export class PaymentService {
       // 2A) Thanh toán bằng ví: trừ ví và chuyển sang PAID
       await this.walletService.debit(ctx.userId, {
         amount,
-        type: 'CONTRACT_PAYMENT',
-        refType: 'PAYMENT',
+        type: WalletTxnType.CONTRACT_PAYMENT,
         refId: payment.id,
         note: `Pay contract ${contractId} by wallet`,
       });
@@ -381,7 +381,12 @@ export class PaymentService {
 
       const payment = await this.paymentRepository.findOne({
         where: { gatewayTxnRef: txnRef },
-        relations: ['contract', 'contract.tenant', 'contract.property'],
+        relations: [
+          'contract',
+          'contract.tenant',
+          'contract.property',
+          'contract.landlord',
+        ],
       });
 
       if (!payment) {
@@ -463,12 +468,24 @@ export class PaymentService {
       loaded ??
       (await this.paymentRepository.findOne({
         where: { id: paymentId },
-        relations: ['contract', 'contract.tenant', 'contract.property'],
+        relations: [
+          'contract',
+          'contract.tenant',
+          'contract.property',
+          'contract.landlord',
+        ],
       }));
 
     if (!payment || !payment.contract) {
       return;
     }
+
+    // Xử lý theo mục đích payment
+    // Hiện có 3 mục đích chính:
+    // - Tenant đặt cọc vào Escrow (PaymentPurpose.TENANT_ESCROW_DEPOSIT)
+    // - Landlord đặt cọc vào Escrow (PaymentPurpose.LANDLORD_ESCROW_DEPOSIT)
+    // - Tenant trả tiền thuê tháng đầu (PaymentPurpose.FIRST_MONTH_RENT)
+    // - Tenant trả tiền thuê hàng tháng (PaymentPurpose.MONTHLY_RENT) -- chưa xử lý tự động
 
     if (
       payment.purpose === PaymentPurpose.TENANT_ESCROW_DEPOSIT ||
@@ -501,6 +518,7 @@ export class PaymentService {
     }
 
     if (payment.purpose === PaymentPurpose.FIRST_MONTH_RENT) {
+      await this.creditFirstMonthRentToLandlord(payment);
       const tenantId = payment.contract.tenant?.id;
       const propertyId = payment.contract.property?.id;
       if (tenantId && propertyId) {
@@ -513,6 +531,39 @@ export class PaymentService {
           console.error('Failed to sync booking first rent state', error);
         }
       }
+    }
+  }
+
+  private async creditFirstMonthRentToLandlord(payment: Payment) {
+    const landlordId = payment.contract?.landlord?.id;
+
+    if (!landlordId) {
+      console.warn('Missing landlord information for first rent payment', {
+        paymentId: payment.id,
+        contractId: payment.contract?.id,
+      });
+      return;
+    }
+
+    const contractCode =
+      payment.contract?.contractCode ?? payment.contract?.id ?? undefined;
+    const note = contractCode
+      ? `First month rent for contract ${contractCode}`
+      : 'First month rent payout';
+
+    try {
+      await this.walletService.credit(landlordId, {
+        amount: Number(payment.amount),
+        type: WalletTxnType.CONTRACT_PAYMENT,
+        refId: payment.id,
+        note,
+      });
+    } catch (error) {
+      console.error(
+        'Failed to credit landlord wallet for first month rent',
+        error,
+      );
+      throw error;
     }
   }
 
