@@ -13,7 +13,7 @@ import { Account } from '../../account/entities/account.entity';
     TypeOrmModule.forFeature([User, Account]),
     PassportModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'rent_home_khoa_luan_secret',
+      secret: process.env.JWT_SECRET,
       signOptions: { expiresIn: '7d' },
     }),
   ],
