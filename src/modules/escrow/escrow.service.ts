@@ -182,7 +182,7 @@ export class EscrowService {
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  /** Hoàn cọc lại cho người thuê (từ số dư escrow) */
+  /** Hoàn ký quỹ (từ số dư escrow) */
   async refund(
     accountId: string,
     amountVnd: number,
@@ -199,6 +199,7 @@ export class EscrowService {
     const next = current - amount;
     if (next < BigInt(0)) throw new Error('Insufficient escrow balance');
 
+    // 1. Ghi giao dịch escrow
     const txn = this.txnRepo.create({
       escrow: { id: acc.id },
       escrowId: acc.id,
@@ -216,6 +217,8 @@ export class EscrowService {
       completedAt: vnNow(),
     });
     await this.txnRepo.save(txn);
+
+    // 2. Cập nhật số dư escrow
     if (party === 'TENANT') {
       acc.currentBalanceTenant = next.toString();
     } else {
@@ -223,15 +226,14 @@ export class EscrowService {
     }
     const saved = await this.accountRepo.save(acc);
 
-    await this.walletService.credit(acc.tenantId, {
+    // 3. Hoàn tiền vào ví
+    const partyUserId =
+      party === 'TENANT' ? acc.tenantId : acc.contract?.landlord?.id;
+    await this.walletService.credit(partyUserId, {
       amount: amountVnd,
       type: WalletTxnType.REFUND,
-      refId: acc.contractId,
-      note:
-        note ??
-        (party === 'TENANT'
-          ? 'Compensation received from escrow'
-          : 'Compensation received from escrow'),
+      refId: acc.id,
+      note: 'Compensation received from escrow',
     });
 
     return new ResponseCommon(200, 'SUCCESS', saved);
