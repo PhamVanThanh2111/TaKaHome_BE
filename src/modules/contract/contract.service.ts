@@ -9,6 +9,19 @@ import { UpdateContractDto } from './dto/update-contract.dto';
 import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { VN_TZ, formatVN, vnNow } from '../../common/datetime';
+import { plainAddPlaceholder } from '@signpdf/placeholder-plain';
+
+type Place = {
+  page?: number;
+  rect?: [number, number, number, number];
+  signatureLength?: number;
+  name?: string;
+  reason?: string;
+  contactInfo?: string;
+  location?: string;
+};
+
+type PrepareOptions = Place | { places: Place[] };
 
 @Injectable()
 export class ContractService {
@@ -249,5 +262,59 @@ export class ContractService {
     const contract = await this.findRawById(id);
     if (!contract) throw new Error(`Contract with id ${id} not found`);
     return contract;
+  }
+
+  async preparePlaceholder(
+    pdfBuffer: Buffer,
+    options: PrepareOptions,
+  ): Promise<Buffer> {
+    const places: Place[] = 'places' in options ? options.places : [options];
+
+    if (!Buffer.isBuffer(pdfBuffer)) {
+      throw new Error('pdfBuffer must be a Buffer');
+    }
+    if (!places.length) {
+      return Promise.resolve(pdfBuffer);
+    }
+
+    const defaultRect: [number, number, number, number] = [50, 50, 250, 120];
+
+    // Gọi plainAddPlaceholder nhiều lần, lần nào cũng dùng buffer mới nhất
+    let out = Buffer.from(pdfBuffer);
+
+    places.forEach((p, idx) => {
+      const rect = p.rect ?? defaultRect;
+
+      // Tên field cố định, tránh trùng
+      const name = p.name?.trim() || `Signature${idx + 1}`;
+
+      // signatureLength nên đủ lớn cho CMS (thường 12k–16k là an toàn cho RSA)
+      const signatureLength = Number.isFinite(p.signatureLength as number)
+        ? Number(p.signatureLength)
+        : 12000;
+
+      // kiểm tra rect hợp lệ
+      if (
+        !Array.isArray(rect) ||
+        rect.length !== 4 ||
+        rect.some((n) => typeof n !== 'number' || !Number.isFinite(n))
+      ) {
+        throw new Error(`Invalid rect for placeholder #${idx + 1}`);
+      }
+
+      out = Buffer.from(
+        plainAddPlaceholder({
+          pdfBuffer: out,
+          name,
+          signatureLength,
+          // Các metadata tuỳ chọn
+          reason: p.reason ?? '',
+          contactInfo: p.contactInfo ?? '',
+          location: p.location ?? '',
+        }),
+      );
+    });
+
+    return out;
   }
 }
