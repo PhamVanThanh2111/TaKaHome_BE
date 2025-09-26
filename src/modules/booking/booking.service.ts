@@ -219,7 +219,7 @@ export class BookingService {
   private async loadBookingOrThrow(id: string): Promise<Booking> {
     const booking = await this.bookingRepository.findOne({
       where: { id },
-      relations: ['tenant', 'property'],
+      relations: ['tenant', 'property', 'property.landlord'],
     });
     if (!booking) throw new NotFoundException('Booking not found');
     return booking;
