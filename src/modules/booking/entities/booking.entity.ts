@@ -5,10 +5,15 @@ import {
   ManyToOne,
   CreateDateColumn,
   UpdateDateColumn,
+  OneToMany,
+  JoinColumn,
+  OneToOne,
 } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { Property } from '../../property/entities/property.entity';
-import { StatusEnum } from '../../common/enums/status.enum';
+import { BookingStatus } from 'src/modules/common/enums/booking-status.enum';
+import { MaintenanceTicket } from 'src/modules/maintenance/entities/maintenance-ticket.entity';
+import { Contract } from '../../contract/entities/contract.entity';
 
 @Entity()
 export class Booking {
@@ -21,15 +26,63 @@ export class Booking {
   @ManyToOne(() => Property, (property) => property.bookings)
   property: Property;
 
-  @Column({ type: 'date' })
-  bookingDate: Date;
+  @Column({
+    type: 'enum',
+    enum: BookingStatus,
+    default: BookingStatus.PENDING_LANDLORD,
+  })
+  status: BookingStatus;
 
-  @Column({ type: 'enum', enum: StatusEnum, default: StatusEnum.PENDING })
-  status: StatusEnum;
+  @Column({ type: 'uuid', nullable: true })
+  contractId?: string;
 
-  @CreateDateColumn()
+  @OneToOne(() => Contract, { nullable: true })
+  @JoinColumn()
+  contract?: Contract;
+
+  // Mốc thời gian nghiệp vụ
+  @Column({ type: 'timestamptz', nullable: true })
+  signedAt?: Date;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  escrowDepositDueAt?: Date; // hạn nộp cọc (+24h sau SIGNED)
+
+  @Column({ type: 'timestamptz', nullable: true })
+  escrowDepositFundedAt?: Date; // IPN cọc thành công
+
+  @Column({ type: 'timestamptz', nullable: true })
+  firstRentDueAt?: Date; // hạn thanh toán kỳ đầu (+ 72h sau SIGNED)
+
+  @Column({ type: 'timestamptz', nullable: true })
+  landlordEscrowDepositDueAt?: Date; // hạn nộp ký quỹ chủ nhà
+
+  @Column({ type: 'timestamptz', nullable: true })
+  landlordEscrowDepositFundedAt?: Date; // Chủ nhà đã nộp ký quỹ
+
+  @Column({ type: 'timestamptz', nullable: true })
+  firstRentPaidAt?: Date; // IPN thanh toán kỳ đầu thành công
+
+  @Column({ type: 'timestamptz', nullable: true })
+  handoverAt?: Date; // bàn giao
+
+  @Column({ type: 'timestamptz', nullable: true })
+  activatedAt?: Date; // bắt đầu thời gian thuê
+
+  @Column({ type: 'timestamptz', nullable: true })
+  closedAt?: Date; // kết thúc/settled
+
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   updatedAt: Date;
+
+  @OneToMany(() => MaintenanceTicket, (t) => t.booking)
+  maintenanceTickets: MaintenanceTicket[];
 }

@@ -5,7 +5,6 @@ import {
   Body,
   Patch,
   Param,
-  Delete,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -18,6 +17,7 @@ import { BookingResponseDto } from './dto/booking-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
+import { RoleEnum } from '../common/enums/role.enum';
 
 @Controller('bookings')
 @ApiBearerAuth()
@@ -56,25 +56,67 @@ export class BookingController {
     description: 'Không tìm thấy booking',
   })
   findOne(@Param('id') id: string) {
-    return this.bookingService.findOne(+id);
+    return this.bookingService.findOne(id);
   }
 
-  @Patch(':id')
-  @ApiOperation({ summary: 'Cập nhật booking' })
+  // --- Nghiệp vụ flow ---
+  @Post(':id/approve')
+  @ApiOperation({ summary: 'Chủ nhà duyệt booking' })
+  @Roles(RoleEnum.LANDLORD, RoleEnum.ADMIN)
   @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
-  update(@Param('id') id: string, @Body() updateBookingDto: UpdateBookingDto) {
-    return this.bookingService.update(+id, updateBookingDto);
+  approve(@Param('id') id: string) {
+    return this.bookingService.landlordApprove(id);
   }
 
-  @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Xoá booking' })
-  @ApiResponse({
-    status: HttpStatus.NO_CONTENT,
-    description: 'Xoá booking thành công',
+  @Post(':id/reject')
+  @ApiOperation({ summary: 'Chủ nhà từ chối booking' })
+  @Roles(RoleEnum.LANDLORD, RoleEnum.ADMIN)
+  @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
+  reject(@Param('id') id: string) {
+    return this.bookingService.landlordReject(id);
+  }
+
+  @Post(':id/sign')
+  @ApiOperation({ summary: 'Người thuê ký hợp đồng (digital signature)' })
+  @Roles(RoleEnum.TENANT, RoleEnum.ADMIN)
+  @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
+  tenantSign(@Param('id') id: string) {
+    return this.bookingService.tenantSign(id);
+  }
+
+  @Post(':id/handover')
+  @ApiOperation({ summary: 'Chủ nhà bàn giao tài sản' })
+  @Roles(RoleEnum.LANDLORD, RoleEnum.ADMIN)
+  @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
+  handover(@Param('id') id: string) {
+    return this.bookingService.handover(id);
+  }
+
+  @Post(':id/settlement/start')
+  @ApiOperation({
+    summary:
+      'Bắt đầu tranh chấp (Dispute) - Người thuê không đồng ý với Báo cáo hư hại',
   })
-  @Roles('ADMIN')
-  remove(@Param('id') id: string) {
-    return this.bookingService.remove(+id);
+  @Roles(RoleEnum.TENANT, RoleEnum.ADMIN)
+  @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
+  startSettlement(@Param('id') id: string) {
+    return this.bookingService.startSettlement(id);
+  }
+
+  @Post(':id/settlement/close')
+  @Roles(RoleEnum.ADMIN)
+  @ApiOperation({ summary: 'Kết thúc tranh chấp (Dispute) - Admin quyết định' })
+  @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
+  closeSettled(@Param('id') id: string) {
+    return this.bookingService.closeSettled(id);
+  }
+
+  // Cập nhật mốc thời gian/hạn (nếu cần chỉnh tay)
+  @Patch(':id')
+  @Roles(RoleEnum.ADMIN, RoleEnum.LANDLORD)
+  @ApiOperation({ summary: 'Cập nhật thông tin booking' })
+  @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
+  updateMeta(@Param('id') id: string, @Body() dto: UpdateBookingDto) {
+    return this.bookingService.updateMeta(id, dto);
   }
 }

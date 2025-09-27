@@ -7,17 +7,20 @@ export class PaymentResponseDto {
   id: string;
 
   @ApiProperty({ example: 'bbec70f2-6f54-4b3e-8e5d-43234a42ef6c' })
-  contractId: string;
+  contractId?: string;
 
   @ApiProperty({ example: 12000000 })
   amount: number;
 
   @ApiProperty({
-    example: PaymentMethodEnum.CASH,
+    example: PaymentMethodEnum.VNPAY,
     enum: PaymentMethodEnum,
   })
   method: PaymentMethodEnum;
 
   @ApiProperty({ example: StatusEnum.PENDING, enum: StatusEnum })
   status: StatusEnum;
+
+  paymentUrl?: string; // chỉ có khi method=VNPAY
+  txnRef?: string; // vnp_TxnRef để FE biết theo dõi
 }

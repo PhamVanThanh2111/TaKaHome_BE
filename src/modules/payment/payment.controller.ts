@@ -23,6 +23,8 @@ import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { Request, Response } from 'express';
 import { Public } from '../core/auth/public.decorator';
+import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 
 @Controller('payments')
 @ApiBearerAuth()
@@ -32,7 +34,7 @@ export class PaymentController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Tạo payment mới' })
+  @ApiOperation({ summary: 'Tạo payment' })
   @ApiResponse({
     status: HttpStatus.CREATED,
     type: PaymentResponseDto,
@@ -42,8 +44,19 @@ export class PaymentController {
     status: HttpStatus.BAD_REQUEST,
     description: 'Request không hợp lệ',
   })
-  create(@Body() createPaymentDto: CreatePaymentDto) {
-    return this.paymentService.create(createPaymentDto);
+  create(
+    @Body() dto: CreatePaymentDto,
+    @CurrentUser() user: JwtUser,
+    @Req() req: Request,
+  ) {
+    const ip =
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+      req.socket.remoteAddress;
+
+    return this.paymentService.createPayment(dto, {
+      userId: user.id,
+      ipAddr: String(ip),
+    });
   }
 
   @Get()
@@ -77,7 +90,7 @@ export class PaymentController {
     @Query('contractId') contractId: string,
     @Query('amount') amount: string,
     @Query('orderInfo') orderInfo: string,
-    @Query('locale') locale: 'vn' | 'en' = 'vn',
+    @Query('locale') locale: 'vn',
     @Query('expireIn') expireIn: string,
     @Query('redirect') redirect: string,
     @Req() req: Request,
@@ -92,15 +105,18 @@ export class PaymentController {
     const clientIp = this.getClientIpIPv4(req);
     console.log('Client IP:', clientIp);
 
-    const { paymentUrl, txnRef } =
-      await this.paymentService.createVnpayPaymentLink({
-        contractId,
-        amount: amountNum,
-        ipAddr: clientIp,
-        orderInfo,
-        locale: locale || 'vn',
-        expireIn: expireIn ? Number(expireIn) : undefined,
-      });
+    const { data } = await this.paymentService.createVnpayPaymentLink({
+      contractId,
+      amount: amountNum,
+      ipAddr: clientIp,
+      orderInfo,
+      locale: locale || 'vn',
+      expireIn: expireIn ? Number(expireIn) : undefined,
+    });
+    if (!data) {
+      throw new BadRequestException('Không tạo được link thanh toán VNPay');
+    }
+    const { paymentUrl, txnRef } = data;
 
     // redirect ngay nếu được yêu cầu
     if (redirect === '1' || redirect === 'true') {
@@ -115,17 +131,18 @@ export class PaymentController {
   @Get('vnpay/return')
   async vnpReturn(@Query() q: Record<string, string>, @Res() res: Response) {
     const result = await this.paymentService.verifyVnpayReturn(q);
-    // Tuỳ bạn: trả JSON, hoặc redirect về FE kèm trạng thái
-    return res.json(result);
-    // ví dụ redirect:
+    // trả JSON
+    return res.json(result.data ?? {});
+    // hoặc redirect FE:
     // return res.redirect(`${FE_URL}/payment-result?ok=${result.ok}&code=${result.code}&txnRef=${result.txnRef}`);
   }
 
   @Public()
   @Get('vnpay/ipn')
   @HttpCode(HttpStatus.OK)
-  vnpIpn(@Query() q: Record<string, string>) {
-    this.paymentService.handleVnpayIpn(q);
+  async vnpIpn(@Query() q: Record<string, string>) {
+    const response = await this.paymentService.handleVnpayIpn(q);
+    return response.data ?? 'RspCode=99&Message=Unknown error';
   }
 
   /** Helper: lấy IP thật của client (hữu ích khi chạy sau reverse proxy) */

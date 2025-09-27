@@ -15,7 +15,7 @@ export class Contract {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ unique: true })
   contractCode: string;
 
   @ManyToOne(() => User, (user) => user.tenantContracts)
@@ -27,10 +27,10 @@ export class Contract {
   @ManyToOne(() => Property, (property) => property.contracts)
   property: Property;
 
-  @Column({ type: 'date' })
+  @Column({ type: 'timestamptz' })
   startDate: Date;
 
-  @Column({ type: 'date' })
+  @Column({ type: 'timestamptz' })
   endDate: Date;
 
   @Column({
@@ -49,9 +49,15 @@ export class Contract {
   @Column({ nullable: true })
   smartContractAddress: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   updatedAt: Date;
 }

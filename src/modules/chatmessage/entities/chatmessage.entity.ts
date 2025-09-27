@@ -22,6 +22,9 @@ export class ChatMessage {
   @Column('text')
   content: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 }

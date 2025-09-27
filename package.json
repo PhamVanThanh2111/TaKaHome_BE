@@ -19,7 +19,11 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "migration:enroll-users": "ts-node scripts/enroll-existing-users.ts",
-    "enroll-admin-users": "ts-node scripts/enroll-admin-users.ts"
+    "enroll-admin-users": "ts-node scripts/enroll-admin-users.ts",
+    "typeorm": "npm run build && npx typeorm -d dist/modules/core/database/data-source.js",
+    "migration:generate": "npm run typeorm -- migration:generate",
+    "migration:run": "npm run typeorm -- migration:run",
+    "migration:revert": "npm run typeorm -- migration:revert"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",
@@ -40,6 +44,9 @@
     "crypto-js": "^4.2.0",
     "fabric-ca-client": "^2.2.20",
     "fabric-network": "^2.2.20",
+    "date-fns": "^2.30.0",
+    "date-fns-tz": "^2.0.0",
+    "dotenv": "^17.2.0",
     "joi": "^18.0.0",
     "multer": "^2.0.2",
     "passport": "^0.7.0",

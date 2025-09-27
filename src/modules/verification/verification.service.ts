@@ -5,6 +5,7 @@ import { Verification } from './entities/verification.entity';
 import { CreateVerificationDto } from './dto/create-verification.dto';
 import { UpdateVerificationDto } from './dto/update-verification.dto';
 import { VerificationTypeEnum } from '../common/enums/verification-type.enum';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class VerificationService {
@@ -15,7 +16,7 @@ export class VerificationService {
 
   async create(
     createVerificationDto: CreateVerificationDto,
-  ): Promise<Verification> {
+  ): Promise<ResponseCommon<Verification>> {
     const { userId, type, documentUrl, verifiedById } = createVerificationDto;
     const verification = this.verificationRepository.create({
       type: type || VerificationTypeEnum.NONE,
@@ -23,16 +24,18 @@ export class VerificationService {
       user: { id: userId },
       ...(verifiedById && { verifiedBy: { id: verifiedById } }),
     });
-    return this.verificationRepository.save(verification);
+    const saved = await this.verificationRepository.save(verification);
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async findAll(): Promise<Verification[]> {
-    return this.verificationRepository.find({
+  async findAll(): Promise<ResponseCommon<Verification[]>> {
+    const verifications = await this.verificationRepository.find({
       relations: ['user', 'verifiedBy'],
     });
+    return new ResponseCommon(200, 'SUCCESS', verifications);
   }
 
-  async findOne(id: number): Promise<Verification> {
+  async findOne(id: number): Promise<ResponseCommon<Verification>> {
     const verification = await this.verificationRepository.findOne({
       where: { id: id.toString() },
       relations: ['user', 'verifiedBy'],
@@ -40,18 +43,19 @@ export class VerificationService {
     if (!verification) {
       throw new Error(`Verification with id ${id} not found`);
     }
-    return verification;
+    return new ResponseCommon(200, 'SUCCESS', verification);
   }
 
   async update(
     id: number,
     updateVerificationDto: UpdateVerificationDto,
-  ): Promise<Verification> {
+  ): Promise<ResponseCommon<Verification>> {
     await this.verificationRepository.update(id, updateVerificationDto);
     return this.findOne(id);
   }
 
-  async remove(id: number): Promise<void> {
+  async remove(id: number): Promise<ResponseCommon<null>> {
     await this.verificationRepository.delete(id);
+    return new ResponseCommon(200, 'SUCCESS', null);
   }
 }

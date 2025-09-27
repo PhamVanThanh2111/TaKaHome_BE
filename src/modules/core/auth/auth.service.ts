@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, Inject, forwardRef, Logger } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Inject, forwardRef, Logger ,ConflictException} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -9,6 +9,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RoleEnum } from '../../common/enums/role.enum';
 import { BlockchainService } from '../../blockchain/blockchain.service';
+import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class AuthService {
@@ -24,12 +25,14 @@ export class AuthService {
     private readonly blockchainService: BlockchainService,
   ) {}
 
-  async register(dto: RegisterDto) {
+  async register(
+    dto: RegisterDto,
+  ): Promise<ResponseCommon<{ message: string }>> {
     // Check email đã tồn tại
     const exist = await this.accountRepo.findOne({
       where: { email: dto.email },
     });
-    if (exist) throw new UnauthorizedException('Email already registered');
+    if (exist) throw new ConflictException('Email already registered');
 
     const hash = await bcrypt.hash(dto.password, 10);
 
@@ -42,7 +45,16 @@ export class AuthService {
     await this.userRepo.save(user);
 
     // role mặc định cho account mới (TENANT), hoặc sử dụng role từ DTO
-    const defaultRoles = dto.role ? [dto.role] : [RoleEnum.TENANT];
+    const defaultRoles = [RoleEnum.TENANT];
+
+    // check roles từ dto (nếu có)
+    if (
+      dto.roles &&
+      dto.roles.length > 0 &&
+      dto.roles.includes(RoleEnum.LANDLORD)
+    ) {
+      defaultRoles.push(RoleEnum.LANDLORD);
+    }
 
     const account = this.accountRepo.create({
       email: dto.email,
@@ -68,7 +80,9 @@ export class AuthService {
       }
     }
 
-    return { message: 'Register successful!' };
+    return new ResponseCommon(200, 'SUCCESS', {
+      message: 'Register successful!',
+    });
   }
 
   /**
@@ -84,18 +98,20 @@ export class AuthService {
   async validateAccount(
     email: string,
     password: string,
-  ): Promise<Account | null> {
+  ): Promise<ResponseCommon<Account | null>> {
     const acc = await this.accountRepo.findOne({
       where: { email },
       relations: ['user'],
     });
-    if (!acc) return null;
+    if (!acc) return new ResponseCommon(200, 'SUCCESS', null);
     const match = await bcrypt.compare(password, acc.password);
-    if (!match) return null;
-    return acc;
+    if (!match) return new ResponseCommon(200, 'SUCCESS', null);
+    return new ResponseCommon(200, 'SUCCESS', acc);
   }
 
-  async login(dto: LoginDto) {
+  async login(
+    dto: LoginDto,
+  ): Promise<ResponseCommon<{ accessToken: string; account: any }>> {
     const acc = await this.accountRepo.findOne({
       where: { email: dto.email },
       relations: ['user'],
@@ -108,15 +124,20 @@ export class AuthService {
       email: acc.email,
       roles: acc.roles, // RoleEnum[]
     };
-    return {
+    return new ResponseCommon(200, 'SUCCESS', {
       accessToken: this.jwtService.sign(payload),
       account: {
         id: acc.id,
         email: acc.email,
         roles: acc.roles,
         isVerified: acc.isVerified,
-        user: acc.user, // Có thể custom chỉ trả về một số field
+        user: {
+          id: acc.user.id,
+          fullName: acc.user.fullName,
+          avatarUrl: acc.user.avatarUrl,
+          status: acc.user.status,
+        },
       },
-    };
+    });
   }
 }

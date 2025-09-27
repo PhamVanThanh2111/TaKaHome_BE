@@ -1,15 +1,21 @@
-import { PartialType } from '@nestjs/mapped-types';
-import { CreateBookingDto } from './create-booking.dto';
 import { ApiPropertyOptional } from '@nestjs/swagger/dist/decorators';
-import { StatusEnum } from 'src/modules/common/enums/status.enum';
+import { BookingStatus } from 'src/modules/common/enums/booking-status.enum';
+import { IsOptional, IsEnum, IsDateString } from 'class-validator';
 
-export class UpdateBookingDto extends PartialType(CreateBookingDto) {
+export class UpdateBookingDto {
   @ApiPropertyOptional({
-    example: 'cc7ee48b-dfb6-4890-9612-198dddfac3e1',
-    description: 'ID Booking',
+    example: BookingStatus.PENDING_LANDLORD,
+    enum: BookingStatus,
   })
-  id?: string;
+  @IsOptional()
+  @IsEnum(BookingStatus)
+  status?: BookingStatus;
 
-  @ApiPropertyOptional({ example: StatusEnum.APPROVED, enum: StatusEnum })
-  status?: StatusEnum;
+  @IsOptional()
+  @IsDateString()
+  escrowDepositDueAt?: string;
+
+  @IsOptional()
+  @IsDateString()
+  firstRentDueAt?: string;
 }

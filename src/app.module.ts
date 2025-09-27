@@ -20,31 +20,26 @@ import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
 import { AuthModule } from './modules/core/auth/auth.module';
 import { BlockchainModule } from './modules/blockchain/blockchain.module';
 import { SmartCAModule } from './modules/smartca/smartca.module';
+import AppDataSourcePromise from './modules/core/database/data-source';
 
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { ConfigModule } from '@nestjs/config';
 import * as Joi from 'joi';
 import vnpayConfig from './config/vnpay.config';
 import smartcaConfig from './config/smartca.config';
+import { WalletModule } from './modules/wallet/wallet.module';
+import { EscrowModule } from './modules/escrow/escrow.module';
+import { InvoiceModule } from './modules/invoice/invoice.module';
+import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 
 @Module({
   imports: [
     TypeOrmModule.forRootAsync({
-      useFactory: () => ({
-        type: process.env.DB_TYPE as 'postgres',
-        host: process.env.DB_HOST,
-        port: parseInt(process.env.DB_PORT ?? '5432'),
-        username: process.env.DB_USER || 'neondb_owner',
-        password: process.env.DB_PASS,
-        database: process.env.DB_NAME || 'rent_home',
-        autoLoadEntities: true,
-        synchronize: false, // OFF on production!
-        ssl: { require: true, rejectUnauthorized: false },
-      }),
+      useFactory: async () => (await AppDataSourcePromise).options,
     }),
     ConfigModule.forRoot({
       isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
-      load: [vnpayConfig, smartcaConfig], // <— nạp file config/vnpay.config.ts và smartca.config.ts
+      load: [vnpayConfig, smartcaConfig], // <— nạp file config/vnpay.config.ts
       validationSchema: Joi.object({
         VNP_TMN_CODE: Joi.string().required(),
         VNP_HASH_SECRET: Joi.string().required(),
@@ -75,6 +70,10 @@ import smartcaConfig from './config/smartca.config';
     PropertyUtilityModule,
     ChatRoomModule,
     ChatMessageModule,
+    WalletModule,
+    EscrowModule,
+    InvoiceModule,
+    MaintenanceModule,
   ],
 })
 export class AppModule implements NestModule {
