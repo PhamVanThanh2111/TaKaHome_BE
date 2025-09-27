@@ -8,15 +8,28 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Res,
+  UploadedFile,
+  UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
 import { ContractService } from './contract.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
-import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { ContractResponseDto } from './dto/contract-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Response } from 'express';
+import { PreparePDFDto } from './dto/prepare-pdf.dto';
 
 @Controller('contracts')
 @ApiBearerAuth()
@@ -100,5 +113,85 @@ export class ContractController {
   @Roles('ADMIN')
   terminate(@Param('id') id: string) {
     return this.contractService.terminate(id);
+  }
+
+  @UseInterceptors(FileInterceptor('pdf'))
+  @Post('prepare')
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Chuẩn bị PDF: thêm placeholder chữ ký (2 vị trí)',
+  })
+  @ApiBody({
+    type: PreparePDFDto,
+  })
+  async prepare(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: PreparePDFDto,
+    @Res() res: Response,
+  ) {
+    if (!file?.buffer?.length)
+      throw new BadRequestException('Missing file "pdf"');
+
+    // helper parse rect JSON -> tuple
+    const parseRect = (raw?: string) => {
+      if (!raw) return undefined;
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (
+          Array.isArray(parsed) &&
+          parsed.length === 4 &&
+          parsed.every((n) => typeof n === 'number' && Number.isFinite(n))
+        ) {
+          return parsed as [number, number, number, number];
+        }
+      } catch {
+        // ignore
+      }
+      return undefined;
+    };
+
+    const places: {
+      page?: number;
+      rect?: [number, number, number, number];
+      signatureLength?: number;
+    }[] = [];
+
+    // placeholder #1 (giữ nguyên như cũ)
+    places.push({
+      page: body.page !== undefined ? Number(body.page) : undefined,
+      rect: parseRect(body.rect),
+      signatureLength:
+        body.signatureLength !== undefined
+          ? Number(body.signatureLength)
+          : undefined,
+    });
+
+    // placeholder #2 (nếu có)
+    const hasSecond =
+      body.page2 !== undefined ||
+      body.rect2 !== undefined ||
+      body.signatureLength2 !== undefined;
+
+    if (hasSecond) {
+      places.push({
+        page: body.page2 !== undefined ? Number(body.page2) : undefined,
+        rect: parseRect(body.rect2),
+        signatureLength:
+          body.signatureLength2 !== undefined
+            ? Number(body.signatureLength2)
+            : undefined,
+      });
+    }
+
+    const prepared = await this.contractService.preparePlaceholder(
+      file.buffer,
+      {
+        places,
+      },
+    );
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="prepared.pdf"');
+    return res.send(prepared);
   }
 }

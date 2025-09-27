@@ -24,9 +24,12 @@ export class BookingService {
     private contractService: ContractService,
   ) {}
 
-  async create(dto: CreateBookingDto): Promise<ResponseCommon<Booking>> {
+  async create(
+    dto: CreateBookingDto,
+    tenantId: string,
+  ): Promise<ResponseCommon<Booking>> {
     const booking = this.bookingRepository.create({
-      tenant: { id: dto.tenantId },
+      tenant: { id: tenantId },
       property: { id: dto.propertyId },
       status: BookingStatus.PENDING_LANDLORD,
       firstRentDueAt: this.parseOptionalInput(dto.firstRentDueAt),
@@ -219,7 +222,7 @@ export class BookingService {
   private async loadBookingOrThrow(id: string): Promise<Booking> {
     const booking = await this.bookingRepository.findOne({
       where: { id },
-      relations: ['tenant', 'property'],
+      relations: ['tenant', 'property', 'property.landlord'],
     });
     if (!booking) throw new NotFoundException('Booking not found');
     return booking;
