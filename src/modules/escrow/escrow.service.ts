@@ -189,7 +189,10 @@ export class EscrowService {
     party: EscrowBalanceParty,
     note?: string,
   ): Promise<ResponseCommon<Escrow>> {
-    const acc = await this.accountRepo.findOne({ where: { id: accountId } });
+    const acc = await this.accountRepo.findOne({
+      where: { id: accountId },
+      relations: ['contract', 'contract.landlord'],
+    });
     if (!acc) throw new Error('Escrow not found');
     const amount = BigInt(amountVnd);
     const current =

@@ -60,8 +60,7 @@ export class EscrowController {
   }
 
   @Post(':id/refund')
-  @Roles(RoleEnum.ADMIN)
-  @ApiOperation({ summary: 'Hoàn trả tiền cọc cho người thuê' })
+  @ApiOperation({ summary: 'Hoàn trả tiền cọc cho (người thuê + chủ nhà)' })
   @ApiResponse({ status: 200, description: 'Hoàn cọc thành công' })
   async refund(@Param('id') accountId: string, @Body() dto: EscrowAdjustDto) {
     const result = await this.escrowService.refund(
