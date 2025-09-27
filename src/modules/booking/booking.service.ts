@@ -24,9 +24,12 @@ export class BookingService {
     private contractService: ContractService,
   ) {}
 
-  async create(dto: CreateBookingDto): Promise<ResponseCommon<Booking>> {
+  async create(
+    dto: CreateBookingDto,
+    tenantId: string,
+  ): Promise<ResponseCommon<Booking>> {
     const booking = this.bookingRepository.create({
-      tenant: { id: dto.tenantId },
+      tenant: { id: tenantId },
       property: { id: dto.propertyId },
       status: BookingStatus.PENDING_LANDLORD,
       firstRentDueAt: this.parseOptionalInput(dto.firstRentDueAt),
