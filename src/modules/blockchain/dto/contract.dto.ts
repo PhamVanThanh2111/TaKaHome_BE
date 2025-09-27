@@ -1,16 +1,17 @@
-import { IsNotEmpty, IsString, IsNumber, IsOptional, IsDateString, IsEnum, Min } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional, IsDateString, IsEnum } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
 
 export enum ContractStatus {
-  CREATED = 'CREATED',
+  WAIT_TENANT_SIGNATURE = 'WAIT_TENANT_SIGNATURE',
+  WAIT_DEPOSIT = 'WAIT_DEPOSIT',
+  WAIT_FIRST_PAYMENT = 'WAIT_FIRST_PAYMENT',
   ACTIVE = 'ACTIVE',
   TERMINATED = 'TERMINATED'
 }
 
 export enum SignatureParty {
-  LESSOR = 'lessor',
-  LESSEE = 'lessee'
+  LANDLORD = 'landlord',
+  TENANT = 'tenant'
 }
 
 export class CreateBlockchainContractDto {
@@ -19,65 +20,209 @@ export class CreateBlockchainContractDto {
   @IsString()
   contractId: string;
 
-  @ApiProperty({ description: 'Lessor (landlord) identifier' })
+  @ApiProperty({ description: 'Landlord identifier' })
   @IsNotEmpty()
   @IsString()
-  lessorId: string;
+  landlordId: string;
 
-  @ApiProperty({ description: 'Lessee (tenant) identifier' })
+  @ApiProperty({ description: 'Tenant identifier' })
   @IsNotEmpty()
   @IsString()
-  lesseeId: string;
+  tenantId: string;
 
-  @ApiPropertyOptional({ description: 'Document hash for verification' })
-  @IsOptional()
+  @ApiProperty({ description: 'Landlord MSP', default: 'OrgLandlordMSP' })
+  @IsNotEmpty()
   @IsString()
-  docHash?: string;
+  landlordMSP: string;
 
-  @ApiProperty({ description: 'Monthly rent amount', minimum: 1 })
-  @IsNumber()
-  @Type(() => Number)
-  @Min(1)
-  rentAmount: number;
-
-  @ApiPropertyOptional({ description: 'Security deposit amount', minimum: 0 })
-  @IsOptional()
-  @IsNumber()
-  @Type(() => Number)
-  @Min(0)
-  depositAmount?: number;
-
-  @ApiPropertyOptional({ description: 'Currency code', default: 'VND' })
-  @IsOptional()
+  @ApiProperty({ description: 'Tenant MSP', default: 'OrgTenantMSP' })
+  @IsNotEmpty()
   @IsString()
-  currency?: string;
+  tenantMSP: string;
 
-  @ApiProperty({ description: 'Contract start date (ISO format)' })
+  @ApiProperty({ description: 'Landlord certificate ID' })
+  @IsNotEmpty()
+  @IsString()
+  landlordCertId: string;
+
+  @ApiProperty({ description: 'Tenant certificate ID' })
+  @IsNotEmpty()
+  @IsString()
+  tenantCertId: string;
+
+  @ApiProperty({ description: 'Hash of landlord-signed contract file' })
+  @IsNotEmpty()
+  @IsString()
+  signedContractFileHash: string;
+
+  @ApiProperty({ description: 'JSON metadata about landlord signature' })
+  @IsNotEmpty()
+  @IsString()
+  landlordSignatureMeta: string;
+
+  @ApiProperty({ description: 'Monthly rent amount (will be converted to cents/đồng)' })
+  @IsNotEmpty()
+  @IsString()
+  rentAmount: string;
+
+  @ApiProperty({ description: 'Security deposit amount (will be converted to cents/đồng)' })
+  @IsNotEmpty()
+  @IsString()
+  depositAmount: string;
+
+  @ApiProperty({ description: 'Currency code', enum: ['VND', 'USD', 'EUR', 'SGD'] })
+  @IsNotEmpty()
+  @IsString()
+  currency: string;
+
+  @ApiProperty({ description: 'Contract start date (ISO 8601 format)' })
   @IsNotEmpty()
   @IsDateString()
   startDate: string;
 
-  @ApiProperty({ description: 'Contract end date (ISO format)' })
+  @ApiProperty({ description: 'Contract end date (ISO 8601 format)' })
   @IsNotEmpty()
   @IsDateString()
   endDate: string;
 }
 
-export class AddSignatureDto {
-  @ApiProperty({ enum: SignatureParty, description: 'Signing party' })
-  @IsNotEmpty()
-  @IsEnum(SignatureParty)
-  party: SignatureParty;
-
-  @ApiProperty({ description: 'Certificate serial number' })
+export class TenantSignContractDto {
+  @ApiProperty({ description: 'Unique contract identifier' })
   @IsNotEmpty()
   @IsString()
-  certSerial: string;
+  contractId: string;
 
-  @ApiProperty({ description: 'Signature metadata as JSON string' })
+  @ApiProperty({ description: 'Hash of fully-signed contract file' })
   @IsNotEmpty()
   @IsString()
-  sigMetaJson: string;
+  fullySignedContractFileHash: string;
+
+  @ApiProperty({ description: 'JSON metadata about tenant signature' })
+  @IsNotEmpty()
+  @IsString()
+  tenantSignatureMeta: string;
+}
+
+export class RecordDepositDto {
+  @ApiProperty({ description: 'Unique contract identifier' })
+  @IsNotEmpty()
+  @IsString()
+  contractId: string;
+
+  @ApiProperty({ description: 'Party making deposit', enum: ['landlord', 'tenant'] })
+  @IsNotEmpty()
+  @IsString()
+  party: string;
+
+  @ApiProperty({ description: 'Deposit amount (will be converted to cents/đồng)' })
+  @IsNotEmpty()
+  @IsString()
+  amount: string;
+
+  @ApiProperty({ description: 'Transaction reference' })
+  @IsNotEmpty()
+  @IsString()
+  depositTxRef: string;
+}
+
+export class RecordFirstPaymentDto {
+  @ApiProperty({ description: 'Unique contract identifier' })
+  @IsNotEmpty()
+  @IsString()
+  contractId: string;
+
+  @ApiProperty({ description: 'Payment amount (must match rent amount)' })
+  @IsNotEmpty()
+  @IsString()
+  amount: string;
+
+  @ApiProperty({ description: 'Transaction reference' })
+  @IsNotEmpty()
+  @IsString()
+  paymentTxRef: string;
+}
+
+export class RecordPaymentDto {
+  @ApiProperty({ description: 'Unique contract identifier' })
+  @IsNotEmpty()
+  @IsString()
+  contractId: string;
+
+  @ApiProperty({ description: 'Payment period number (2, 3, 4, etc.)' })
+  @IsNotEmpty()
+  @IsString()
+  period: string;
+
+  @ApiProperty({ description: 'Payment amount' })
+  @IsNotEmpty()
+  @IsString()
+  amount: string;
+
+  @ApiPropertyOptional({ description: 'Unique order reference' })
+  @IsOptional()
+  @IsString()
+  orderRef?: string;
+}
+
+export class ApplyPenaltyDto {
+  @ApiProperty({ description: 'Unique contract identifier' })
+  @IsNotEmpty()
+  @IsString()
+  contractId: string;
+
+  @ApiProperty({ description: 'Payment period number' })
+  @IsNotEmpty()
+  @IsString()
+  period: string;
+
+  @ApiProperty({ description: 'Penalty amount' })
+  @IsNotEmpty()
+  @IsString()
+  amount: string;
+
+  @ApiPropertyOptional({ description: 'Policy reference' })
+  @IsOptional()
+  @IsString()
+  policyRef?: string;
+
+  @ApiProperty({ description: 'Penalty reason' })
+  @IsNotEmpty()
+  @IsString()
+  reason: string;
+}
+
+export class RecordPenaltyDto {
+  @ApiProperty({ description: 'Unique contract identifier' })
+  @IsNotEmpty()
+  @IsString()
+  contractId: string;
+
+  @ApiProperty({ description: 'Party being penalized', enum: ['landlord', 'tenant'] })
+  @IsNotEmpty()
+  @IsString()
+  party: string;
+
+  @ApiProperty({ description: 'Penalty amount' })
+  @IsNotEmpty()
+  @IsString()
+  amount: string;
+
+  @ApiProperty({ description: 'Penalty reason' })
+  @IsNotEmpty()
+  @IsString()
+  reason: string;
+}
+
+export class StorePrivateDetailsDto {
+  @ApiProperty({ description: 'Unique contract identifier' })
+  @IsNotEmpty()
+  @IsString()
+  contractId: string;
+
+  @ApiProperty({ description: 'Private data as JSON string' })
+  @IsNotEmpty()
+  @IsString()
+  privateDataJson: string;
 }
 
 export class QueryContractsDto {
@@ -86,17 +231,17 @@ export class QueryContractsDto {
   @IsEnum(ContractStatus)
   status?: ContractStatus;
 
-  @ApiPropertyOptional({ description: 'Filter by party ID (lessor or lessee)' })
+  @ApiPropertyOptional({ description: 'Filter by party ID (landlord or tenant)' })
   @IsOptional()
   @IsString()
   party?: string;
 
-  @ApiPropertyOptional({ description: 'Start date for date range query' })
+  @ApiPropertyOptional({ description: 'Start date for date range query (ISO 8601)' })
   @IsOptional()
   @IsDateString()
   startDate?: string;
 
-  @ApiPropertyOptional({ description: 'End date for date range query' })
+  @ApiPropertyOptional({ description: 'End date for date range query (ISO 8601)' })
   @IsOptional()
   @IsDateString()
   endDate?: string;

@@ -1,7 +1,10 @@
 /**
  * Blockchain Payment Interface
  * Defines the structure of payments and payment schedules on the blockchain
+ * Updated for Smart Contract v2.0.0 compatibility
  */
+
+import { PenaltyRecord } from './contract.interface';
 
 export interface PaymentScheduleEntry {
   period: number;
@@ -26,27 +29,33 @@ export interface Payment {
   paymentId: string;
   contractId: string;
   period: number;
-  amount: number;
+  amount: number;            // Integer (cents/đồng)
   status: 'SCHEDULED' | 'PAID' | 'OVERDUE';
-  orderRef: string;
-  paidAt?: string;
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
+  dueDate?: string;          // ISO 8601
+  orderRef?: string;
+  paidAmount?: number;       // Integer (cents/đồng)
+  paidBy?: string;
+  paidAt?: string;           // ISO 8601
+  overdueAt?: string;        // ISO 8601
+  penalties?: PenaltyRecord[];
+  createdAt: string;         // ISO 8601
+  updatedAt: string;         // ISO 8601
 }
+
+
 
 export interface Penalty {
   objectType: 'penalty';
-  penaltyId: string;
+  penaltyId?: string;
   contractId: string;
-  penaltyType: 'LATE_PAYMENT' | 'DAMAGE' | 'OTHER';
-  amount: number;
+  party?: "landlord" | "tenant";
+  amount: number;            // Integer (cents/đồng)
   reason: string;
-  status: 'PENDING' | 'PAID' | 'WAIVED';
-  dueDate: string;
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
+  policyRef?: string;
+  appliedBy?: string;
+  appliedAt?: string;        // ISO 8601
+  timestamp?: string;        // ISO 8601
+  status?: 'PENDING' | 'PAID' | 'WAIVED';
 }
 
 export interface OverduePayment extends Payment {

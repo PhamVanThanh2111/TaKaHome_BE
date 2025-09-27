@@ -9,14 +9,13 @@ import {
   UseGuards,
   Logger,
   HttpStatus,
-  HttpCode,
-  UnauthorizedException
+  HttpCode
 } from '@nestjs/common';
 import { 
   ApiTags, 
   ApiOperation, 
   ApiResponse, 
-  ApiParam, 
+  ApiParam,
   ApiQuery,
   ApiHeader,
   ApiBearerAuth 
@@ -26,16 +25,18 @@ import { BlockchainService } from './blockchain.service';
 import { JwtBlockchainAuthGuard, BlockchainUser } from './guards/jwt-blockchain-auth.guard';
 import { 
   CreateBlockchainContractDto, 
-  AddSignatureDto, 
+  TenantSignContractDto,
+  RecordDepositDto,
+  RecordFirstPaymentDto,
   QueryContractsDto, 
-  TerminateContractDto 
+  TerminateContractDto,
+  StorePrivateDetailsDto
 } from './dto/contract.dto';
 import { FabricUser } from './interfaces/fabric.interface';
-import { CurrentUser } from '../../common/decorators/user.decorator';
 
 /**
- * Contracts Controller
- * Handles all blockchain contract operations
+ * Contracts Controller - Updated for Chaincode v2.0.0
+ * Handles all blockchain contract operations with new workflow
  */
 @Controller('api/blockchain/contracts')
 @ApiTags('Blockchain Contracts')
@@ -45,13 +46,13 @@ import { CurrentUser } from '../../common/decorators/user.decorator';
   name: 'orgName',
   description: 'Organization name (OrgProp, OrgTenant, OrgLandlord)',
   required: true,
-  example: 'OrgProp'
+  example: 'OrgLandlord'
 })
 @ApiHeader({
   name: 'userId',
   description: 'User identity (optional, uses default if not provided)',
   required: false,
-  example: 'admin-OrgProp'
+  example: 'admin-OrgLandlord'
 })
 export class ContractsController {
   private readonly logger = new Logger(ContractsController.name);
@@ -59,115 +60,133 @@ export class ContractsController {
   constructor(private readonly blockchainService: BlockchainService) {}
 
   /**
-   * Create a new rental contract
+   * Create a new rental contract (landlord initiates)
    */
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ 
-    summary: 'Create a new rental contract',
-    description: 'Creates a new rental contract on the blockchain with the specified details. Must be called by landlord/property owner using OrgProp or OrgLandlord organization.'
+    summary: 'Create new rental contract (Landlord)',
+    description: 'Creates a new rental contract on blockchain. Must be called by landlord. Status will be WAIT_TENANT_SIGNATURE.'
   })
   @ApiResponse({ 
     status: 201, 
     description: 'Contract created successfully',
-    schema: {
-      example: {
-        success: true,
-        data: {
-          objectType: "contract",
-          contractId: "CONTRACT_001",
-          lessorId: "LANDLORD_001",
-          lesseeId: "TENANT_001",
-          rentAmount: 15000000,
-          depositAmount: 30000000,
-          currency: "VND",
-          startDate: "2025-01-01T00:00:00.000Z",
-          endDate: "2025-12-31T23:59:59.999Z",
-          status: "CREATED",
-          signatures: {},
-          createdAt: "2025-08-28T07:00:00.000Z"
-        },
-        message: "Operation createContract completed successfully"
+    example: {
+      success: true,
+      data: {
+        objectType: "contract",
+        contractId: "contract-001", 
+        landlordId: "landlord001",
+        tenantId: "tenant001",
+        status: "WAIT_TENANT_SIGNATURE",
+        rentAmount: 1500000000,
+        depositAmount: 3000000000,
+        currency: "VND"
       }
     }
   })
-  @ApiResponse({ status: 400, description: 'Invalid input data' })
-  @ApiResponse({ status: 409, description: 'Contract already exists' })
-  @ApiResponse({ status: 500, description: 'Blockchain network error' })
   async createContract(
     @Body() createContractDto: CreateBlockchainContractDto,
-    @BlockchainUser() blockchainUser: FabricUser,
-    @CurrentUser() jwtUser: any
+    @BlockchainUser() blockchainUser: FabricUser
   ) {
-    this.logger.log(
-      `Creating contract: ${createContractDto.contractId} for org: ${blockchainUser.orgName} by user: ${jwtUser.email || jwtUser.id}`
+    this.logger.log(`Creating contract ${createContractDto.contractId} for landlord ${createContractDto.landlordId}`);
+    
+    return this.blockchainService.createContract(createContractDto, blockchainUser);
+  }
+
+  /**
+   * Tenant signs the contract
+   */
+  @Put(':contractId/tenant-sign')
+  @ApiOperation({ 
+    summary: 'Tenant signs contract',
+    description: 'Tenant signs the contract. Must be called from OrgTenantMSP. Changes status to WAIT_DEPOSIT.'
+  })
+  @ApiParam({ name: 'contractId', description: 'Contract ID' })
+  @ApiResponse({ status: 200, description: 'Contract signed by tenant successfully' })
+  async tenantSignContract(
+    @Param('contractId') contractId: string,
+    @Body() tenantSignDto: TenantSignContractDto,
+    @BlockchainUser() blockchainUser: FabricUser
+  ) {
+    this.logger.log(`Tenant signing contract ${contractId}`);
+    
+    return this.blockchainService.tenantSignContract(
+      contractId,
+      tenantSignDto.fullySignedContractFileHash,
+      tenantSignDto.tenantSignatureMeta,
+      blockchainUser
     );
-    
-    // Verify user authorization (additional business logic)
-    this.verifyContractCreationPermission(createContractDto, jwtUser, blockchainUser);
-    
-    const result = await this.blockchainService.createContract(createContractDto, blockchainUser);
-    
-    if (!result.success) {
-      this.logger.error(`Failed to create contract: ${result.error}`);
-    } else {
-      this.logger.log(`Contract created successfully by ${jwtUser.email || jwtUser.id}`);
-    }
-    
-    return result;
   }
 
   /**
-   * Verify if user has permission to create contract
+   * Record security deposits
    */
-  private verifyContractCreationPermission(
-    contractDto: CreateBlockchainContractDto, 
-    jwtUser: any, 
-    blockchainUser: FabricUser
+  @Put(':contractId/deposit')
+  @ApiOperation({ 
+    summary: 'Record deposit payment',
+    description: 'Record deposit from landlord or tenant. Both deposits needed to progress to WAIT_FIRST_PAYMENT.'
+  })
+  @ApiParam({ name: 'contractId', description: 'Contract ID' })
+  @ApiResponse({ status: 200, description: 'Deposit recorded successfully' })
+  async recordDeposit(
+    @Param('contractId') contractId: string,
+    @Body() depositDto: RecordDepositDto,
+    @BlockchainUser() blockchainUser: FabricUser
   ) {
-    // Get user roles
-    const userRoles = this.getUserRoles(jwtUser);
+    this.logger.log(`Recording ${depositDto.party} deposit for contract ${contractId}`);
     
-    // Only landlords/property owners can create contracts
-    if (!userRoles.includes('LANDLORD') && !userRoles.includes('PROPERTY_OWNER') && !userRoles.includes('ADMIN')) {
-      throw new UnauthorizedException(
-        `Only landlords or property owners can create contracts. User roles: ${userRoles.join(', ')}`
-      );
-    }
-
-    // Must use OrgProp or OrgLandlord organization for contract creation
-    const allowedOrgs = ['OrgProp', 'OrgLandlord'];
-    if (!allowedOrgs.includes(blockchainUser.orgName)) {
-      throw new UnauthorizedException(
-        `Contracts can only be created in ${allowedOrgs.join(' or ')} organizations, not ${blockchainUser.orgName}`
-      );
-    }
-    
-    // Verify user is the lessor in the contract
-    if (contractDto.lessorId !== jwtUser.id.toString() && contractDto.lessorId !== jwtUser.sub) {
-      throw new UnauthorizedException(
-        `User ${jwtUser.id || jwtUser.sub} cannot create contract for lessor ${contractDto.lessorId}`
-      );
-    }
+    return this.blockchainService.recordDeposit(
+      contractId,
+      depositDto.party,
+      depositDto.amount,
+      depositDto.depositTxRef,
+      blockchainUser
+    );
   }
 
   /**
-   * Extract user roles from JWT user object (handle different formats)
+   * Record first month rent payment
    */
-  private getUserRoles(user: any): string[] {
-    if (!user) return [];
+  @Put(':contractId/first-payment')
+  @ApiOperation({ 
+    summary: 'Record first payment',
+    description: 'Record first month rent payment. Must be called from OrgTenantMSP. Changes status to ACTIVE.'
+  })
+  @ApiParam({ name: 'contractId', description: 'Contract ID' })
+  @ApiResponse({ status: 200, description: 'First payment recorded successfully' })
+  async recordFirstPayment(
+    @Param('contractId') contractId: string,
+    @Body() firstPaymentDto: RecordFirstPaymentDto,
+    @BlockchainUser() blockchainUser: FabricUser
+  ) {
+    this.logger.log(`Recording first payment for contract ${contractId}`);
     
-    // Handle roles array (new format)
-    if (user.roles && Array.isArray(user.roles)) {
-      return user.roles.map(role => role.toString().toUpperCase());
-    }
+    return this.blockchainService.recordFirstPayment(
+      contractId,
+      firstPaymentDto.amount,
+      firstPaymentDto.paymentTxRef,
+      blockchainUser
+    );
+  }
+
+  /**
+   * Generate monthly payment schedule
+   */
+  @Post(':contractId/schedule')
+  @ApiOperation({ 
+    summary: 'Create monthly payment schedule',
+    description: 'Generate payment schedule based on first payment date with EOM-safe calculations.'
+  })
+  @ApiParam({ name: 'contractId', description: 'Contract ID' })
+  @ApiResponse({ status: 200, description: 'Payment schedule created successfully' })
+  async createMonthlyPaymentSchedule(
+    @Param('contractId') contractId: string,
+    @BlockchainUser() blockchainUser: FabricUser
+  ) {
+    this.logger.log(`Creating payment schedule for contract ${contractId}`);
     
-    // Handle single role field (legacy format)
-    if (user.role) {
-      return [user.role.toString().toUpperCase()];
-    }
-    
-    return [];
+    return this.blockchainService.createMonthlyPaymentSchedule(contractId, blockchainUser);
   }
 
   /**
@@ -175,33 +194,17 @@ export class ContractsController {
    */
   @Get(':contractId')
   @ApiOperation({ 
-    summary: 'Get contract by ID',
-    description: 'Retrieves contract details from the blockchain by contract ID'
+    summary: 'Get contract details',
+    description: 'Retrieve contract information by ID'
   })
-  @ApiParam({ 
-    name: 'contractId', 
-    description: 'Unique contract identifier',
-    example: 'CONTRACT_001'
-  })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Contract retrieved successfully'
-  })
+  @ApiParam({ name: 'contractId', description: 'Contract ID' })
+  @ApiResponse({ status: 200, description: 'Contract details retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Contract not found' })
-  @ApiResponse({ status: 500, description: 'Blockchain network error' })
   async getContract(
     @Param('contractId') contractId: string,
-    @BlockchainUser() user: FabricUser
+    @BlockchainUser() blockchainUser: FabricUser
   ) {
-    this.logger.log(`Getting contract: ${contractId} for org: ${user.orgName}`);
-    
-    const result = await this.blockchainService.getContract(contractId, user);
-    
-    if (!result.success) {
-      this.logger.error(`Failed to get contract: ${result.error}`);
-    }
-    
-    return result;
+    return this.blockchainService.getContract(contractId, blockchainUser);
   }
 
   /**
@@ -210,90 +213,36 @@ export class ContractsController {
   @Get()
   @ApiOperation({ 
     summary: 'Query contracts',
-    description: 'Query contracts with various filters like status, party, date range'
+    description: 'Query contracts with various filters'
   })
-  @ApiQuery({ 
-    name: 'status', 
-    required: false, 
-    enum: ['CREATED', 'ACTIVE', 'TERMINATED'],
-    description: 'Filter by contract status'
-  })
-  @ApiQuery({ 
-    name: 'party', 
-    required: false, 
-    description: 'Filter by party ID (lessor or lessee)'
-  })
-  @ApiQuery({ 
-    name: 'startDate', 
-    required: false, 
-    description: 'Start date for date range query (ISO format)'
-  })
-  @ApiQuery({ 
-    name: 'endDate', 
-    required: false, 
-    description: 'End date for date range query (ISO format)'
-  })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Contracts retrieved successfully'
-  })
-  @ApiResponse({ status: 500, description: 'Blockchain network error' })
+  @ApiQuery({ name: 'status', required: false, description: 'Filter by status' })
+  @ApiQuery({ name: 'partyId', required: false, description: 'Filter by party ID' })
+  @ApiQuery({ name: 'startDate', required: false, description: 'Start date for range query' })
+  @ApiQuery({ name: 'endDate', required: false, description: 'End date for range query' })
+  @ApiResponse({ status: 200, description: 'Contracts retrieved successfully' })
   async queryContracts(
-    @Query() queryParams: QueryContractsDto,
-    @BlockchainUser() user: FabricUser
+    @Query() queryDto: QueryContractsDto,
+    @BlockchainUser() blockchainUser: FabricUser
   ) {
-    this.logger.log(`Querying contracts with params: ${JSON.stringify(queryParams)} for org: ${user.orgName}`);
+    if (queryDto.status) {
+      return this.blockchainService.queryContractsByStatus(queryDto.status, blockchainUser);
+    }
     
-    // Handle different query types
-    if (queryParams.status) {
-      return await this.blockchainService.queryContractsByStatus(queryParams.status, user);
-    } else if (queryParams.party) {
-      return await this.blockchainService.queryContractsByParty(queryParams.party, user);
-    } else if (queryParams.startDate && queryParams.endDate) {
-      return await this.blockchainService.queryContractsByDateRange(
-        queryParams.startDate, 
-        queryParams.endDate, 
-        user
+    if (queryDto.party) {
+      return this.blockchainService.queryContractsByParty(queryDto.party, blockchainUser);
+    }
+    
+    if (queryDto.startDate && queryDto.endDate) {
+      return this.blockchainService.queryContractsByDateRange(
+        queryDto.startDate, 
+        queryDto.endDate, 
+        blockchainUser
       );
-    } else {
-      // Default: query all active contracts
-      return await this.blockchainService.queryContractsByStatus('ACTIVE', user);
-    }
-  }
-
-  /**
-   * Activate contract (requires both signatures)
-   */
-  @Put(':contractId/activate')
-  @ApiOperation({ 
-    summary: 'Activate contract',
-    description: 'Activates a contract that has been signed by both lessor and lessee'
-  })
-  @ApiParam({ 
-    name: 'contractId', 
-    description: 'Unique contract identifier',
-    example: 'CONTRACT_001'
-  })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Contract activated successfully'
-  })
-  @ApiResponse({ status: 400, description: 'Contract cannot be activated (missing signatures)' })
-  @ApiResponse({ status: 404, description: 'Contract not found' })
-  @ApiResponse({ status: 500, description: 'Blockchain network error' })
-  async activateContract(
-    @Param('contractId') contractId: string,
-    @BlockchainUser() user: FabricUser
-  ) {
-    this.logger.log(`Activating contract: ${contractId} for org: ${user.orgName}`);
-    
-    const result = await this.blockchainService.activateContract(contractId, user);
-    
-    if (!result.success) {
-      this.logger.error(`Failed to activate contract: ${result.error}`);
     }
     
-    return result;
+    // Default: return contracts by current user's party
+    const partyId = blockchainUser.userId || 'default';
+    return this.blockchainService.queryContractsByParty(partyId, blockchainUser);
   }
 
   /**
@@ -302,78 +251,18 @@ export class ContractsController {
   @Put(':contractId/terminate')
   @ApiOperation({ 
     summary: 'Terminate contract',
-    description: 'Terminates an active contract with specified reason'
+    description: 'Terminate an active contract with reason'
   })
-  @ApiParam({ 
-    name: 'contractId', 
-    description: 'Unique contract identifier',
-    example: 'CONTRACT_001'
-  })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Contract terminated successfully'
-  })
-  @ApiResponse({ status: 400, description: 'Contract cannot be terminated' })
-  @ApiResponse({ status: 404, description: 'Contract not found' })
-  @ApiResponse({ status: 500, description: 'Blockchain network error' })
+  @ApiParam({ name: 'contractId', description: 'Contract ID' })
+  @ApiResponse({ status: 200, description: 'Contract terminated successfully' })
   async terminateContract(
     @Param('contractId') contractId: string,
     @Body() terminateDto: TerminateContractDto,
-    @BlockchainUser() user: FabricUser
+    @BlockchainUser() blockchainUser: FabricUser
   ) {
-    this.logger.log(`Terminating contract: ${contractId} for org: ${user.orgName}`);
+    this.logger.log(`Terminating contract ${contractId} with reason: ${terminateDto.reason}`);
     
-    const result = await this.blockchainService.terminateContract(contractId, terminateDto.reason, user);
-    
-    if (!result.success) {
-      this.logger.error(`Failed to terminate contract: ${result.error}`);
-    }
-    
-    return result;
-  }
-
-  /**
-   * Add signature to contract
-   */
-  @Post(':contractId/signatures')
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ 
-    summary: 'Add signature to contract',
-    description: 'Adds a digital signature from lessor or lessee to the contract'
-  })
-  @ApiParam({ 
-    name: 'contractId', 
-    description: 'Unique contract identifier',
-    example: 'CONTRACT_001'
-  })
-  @ApiResponse({ 
-    status: 201, 
-    description: 'Signature added successfully'
-  })
-  @ApiResponse({ status: 400, description: 'Invalid signature data' })
-  @ApiResponse({ status: 404, description: 'Contract not found' })
-  @ApiResponse({ status: 409, description: 'Signature already exists' })
-  @ApiResponse({ status: 500, description: 'Blockchain network error' })
-  async addSignature(
-    @Param('contractId') contractId: string,
-    @Body() addSignatureDto: AddSignatureDto,
-    @BlockchainUser() user: FabricUser
-  ) {
-    this.logger.log(`Adding signature to contract: ${contractId} from party: ${addSignatureDto.party} for org: ${user.orgName}`);
-    
-    const result = await this.blockchainService.addSignature(
-      contractId,
-      addSignatureDto.party,
-      addSignatureDto.certSerial,
-      addSignatureDto.sigMetaJson,
-      user
-    );
-    
-    if (!result.success) {
-      this.logger.error(`Failed to add signature: ${result.error}`);
-    }
-    
-    return result;
+    return this.blockchainService.terminateContract(contractId, terminateDto.reason, blockchainUser);
   }
 
   /**
@@ -382,31 +271,55 @@ export class ContractsController {
   @Get(':contractId/history')
   @ApiOperation({ 
     summary: 'Get contract history',
-    description: 'Retrieves the complete transaction history of a contract'
+    description: 'Retrieve complete transaction history for a contract'
   })
-  @ApiParam({ 
-    name: 'contractId', 
-    description: 'Unique contract identifier',
-    example: 'CONTRACT_001'
-  })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Contract history retrieved successfully'
-  })
-  @ApiResponse({ status: 404, description: 'Contract not found' })
-  @ApiResponse({ status: 500, description: 'Blockchain network error' })
+  @ApiParam({ name: 'contractId', description: 'Contract ID' })
+  @ApiResponse({ status: 200, description: 'Contract history retrieved successfully' })
   async getContractHistory(
     @Param('contractId') contractId: string,
-    @BlockchainUser() user: FabricUser
+    @BlockchainUser() blockchainUser: FabricUser
   ) {
-    this.logger.log(`Getting contract history: ${contractId} for org: ${user.orgName}`);
+    return this.blockchainService.getContractHistory(contractId, blockchainUser);
+  }
+
+  /**
+   * Store private contract details
+   */
+  @Post(':contractId/private')
+  @ApiOperation({ 
+    summary: 'Store private contract details',
+    description: 'Store sensitive contract information in private data collection'
+  })
+  @ApiParam({ name: 'contractId', description: 'Contract ID' })
+  @ApiResponse({ status: 200, description: 'Private details stored successfully' })
+  async storePrivateDetails(
+    @Param('contractId') contractId: string,
+    @Body() privateDetailsDto: StorePrivateDetailsDto,
+    @BlockchainUser() blockchainUser: FabricUser
+  ) {
+    this.logger.log(`Storing private details for contract ${contractId}`);
     
-    const result = await this.blockchainService.getContractHistory(contractId, user);
-    
-    if (!result.success) {
-      this.logger.error(`Failed to get contract history: ${result.error}`);
-    }
-    
-    return result;
+    return this.blockchainService.storeContractPrivateDetails(
+      contractId,
+      privateDetailsDto.privateDataJson,
+      blockchainUser
+    );
+  }
+
+  /**
+   * Get private contract details
+   */
+  @Get(':contractId/private')
+  @ApiOperation({ 
+    summary: 'Get private contract details',
+    description: 'Retrieve private contract information from private data collection'
+  })
+  @ApiParam({ name: 'contractId', description: 'Contract ID' })
+  @ApiResponse({ status: 200, description: 'Private details retrieved successfully' })
+  async getPrivateDetails(
+    @Param('contractId') contractId: string,
+    @BlockchainUser() blockchainUser: FabricUser
+  ) {
+    return this.blockchainService.getContractPrivateDetails(contractId, blockchainUser);
   }
 }

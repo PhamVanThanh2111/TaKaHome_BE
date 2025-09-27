@@ -5,11 +5,14 @@ import { PassportModule } from '@nestjs/passport';
 // Services
 import { BlockchainService } from './blockchain.service';
 import { BlockchainConfigService } from './blockchain-config.service';
+import { BlockchainEventService } from './blockchain-event.service';
+import { BlockchainEventHandlerService } from './blockchain-event-handler.service';
 
 // Controllers
 import { ContractsController } from './contracts.controller';
 import { PaymentsController } from './payments.controller';
 import { BlockchainUtilityController } from './blockchain-utility.controller';
+import { BlockchainEventsController } from './blockchain-events.controller';
 
 // Guards
 import { BlockchainAuthGuard } from './guards/blockchain-auth.guard';
@@ -31,17 +34,21 @@ import { AuthModule } from '../core/auth/auth.module';
   providers: [
     BlockchainService,
     BlockchainConfigService,
+    BlockchainEventService,
+    BlockchainEventHandlerService,
     BlockchainAuthGuard,
     JwtBlockchainAuthGuard
   ],
   controllers: [
     ContractsController,
     PaymentsController,
-    BlockchainUtilityController
+    BlockchainUtilityController,
+    BlockchainEventsController
   ],
   exports: [
     BlockchainService,
-    BlockchainConfigService
+    BlockchainConfigService,
+    BlockchainEventService
   ]
 })
 export class BlockchainModule {}

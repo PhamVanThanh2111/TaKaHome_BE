@@ -1,8 +1,8 @@
 import { 
   Controller, 
-  Get, 
   Post, 
   Put, 
+  Get,
   Body, 
   Param, 
   Query, 
@@ -18,22 +18,25 @@ import {
   ApiParam, 
   ApiQuery,
   ApiHeader,
-  ApiBearerAuth
+  ApiBearerAuth 
 } from '@nestjs/swagger';
 
 import { BlockchainService } from './blockchain.service';
 import { JwtBlockchainAuthGuard, BlockchainUser } from './guards/jwt-blockchain-auth.guard';
 import { 
-  CreatePaymentScheduleDto,
-  RecordPaymentDto, 
-  ApplyPenaltyDto, 
+  RecordPaymentDto,
+  ApplyPenaltyDto,
+  RecordPenaltyDto
+} from './dto/contract.dto';
+import { 
+  RecordContractPenaltyDto,
   QueryPaymentsDto,
   MarkOverdueDto
 } from './dto/payment.dto';
 import { FabricUser } from './interfaces/fabric.interface';
 
 /**
- * Payments Controller
+ * Payments Controller - Updated for Chaincode v2.0.0
  * Handles all blockchain payment operations
  */
 @Controller('api/blockchain/payments')
@@ -42,15 +45,9 @@ import { FabricUser } from './interfaces/fabric.interface';
 @ApiBearerAuth()
 @ApiHeader({
   name: 'orgName',
-  description: 'Organization name (OrgProp, OrgTenant, OrgLandlord)',
+  description: 'Organization name (OrgTenant for payments)',
   required: true,
-  example: 'OrgProp'
-})
-@ApiHeader({
-  name: 'userId',
-  description: 'User identity (optional, uses default if not provided)',
-  required: false,
-  example: 'admin-OrgProp'
+  example: 'OrgTenant'
 })
 export class PaymentsController {
   private readonly logger = new Logger(PaymentsController.name);
@@ -58,288 +55,172 @@ export class PaymentsController {
   constructor(private readonly blockchainService: BlockchainService) {}
 
   /**
-   * Create payment schedule for contract
+   * Record monthly rent payment
    */
-  @Post('contracts/:contractId/schedules')
+  @Post(':contractId')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ 
-    summary: 'Create payment schedule',
-    description: 'Creates a payment schedule for a contract with multiple payment periods'
+    summary: 'Record monthly payment',
+    description: 'Record monthly rent payment. Must be called from OrgTenantMSP.'
   })
-  @ApiParam({ 
-    name: 'contractId', 
-    description: 'Unique contract identifier',
-    example: 'CONTRACT_001'
-  })
-  @ApiResponse({ 
-    status: 201, 
-    description: 'Payment schedule created successfully'
-  })
-  @ApiResponse({ status: 400, description: 'Invalid schedule data' })
-  @ApiResponse({ status: 404, description: 'Contract not found' })
-  @ApiResponse({ status: 500, description: 'Blockchain network error' })
-  async createPaymentSchedule(
-    @Param('contractId') contractId: string,
-    @Body() scheduleDto: CreatePaymentScheduleDto,
-    @BlockchainUser() user: FabricUser
-  ) {
-    this.logger.log(`Creating payment schedule for contract: ${contractId} for org: ${user.orgName}`);
-    
-    const result = await this.blockchainService.createPaymentSchedule(contractId, scheduleDto, user);
-    
-    if (!result.success) {
-      this.logger.error(`Failed to create payment schedule: ${result.error}`);
-    }
-    
-    return result;
-  }
-
-  /**
-   * Record a payment
-   */
-  @Post('contracts/:contractId/payments')
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ 
-    summary: 'Record payment',
-    description: 'Records a payment made for a specific contract period'
-  })
-  @ApiParam({ 
-    name: 'contractId', 
-    description: 'Unique contract identifier',
-    example: 'CONTRACT_001'
-  })
+  @ApiParam({ name: 'contractId', description: 'Contract ID' })
   @ApiResponse({ 
     status: 201, 
     description: 'Payment recorded successfully',
-    schema: {
-      example: {
-        success: true,
-        data: {
-          objectType: "payment",
-          paymentId: "PAY_CONTRACT_001_2025-01",
-          contractId: "CONTRACT_001",
-          period: "2025-01",
-          amount: 15000000,
-          status: "PAID",
-          orderRef: "ORDER_001",
-          paidAt: "2025-08-28T07:00:00.000Z"
-        },
-        message: "Operation recordPayment completed successfully"
+    example: {
+      success: true,
+      data: {
+        objectType: "payment",
+        paymentId: "payment-contract001-2",
+        contractId: "contract-001",
+        period: 2,
+        amount: 1500000000,
+        status: "PAID"
       }
     }
   })
-  @ApiResponse({ status: 400, description: 'Invalid payment data' })
-  @ApiResponse({ status: 404, description: 'Contract not found' })
-  @ApiResponse({ status: 409, description: 'Payment already recorded' })
-  @ApiResponse({ status: 500, description: 'Blockchain network error' })
   async recordPayment(
     @Param('contractId') contractId: string,
     @Body() paymentDto: RecordPaymentDto,
-    @BlockchainUser() user: FabricUser
+    @BlockchainUser() blockchainUser: FabricUser
   ) {
-    this.logger.log(`Recording payment for contract: ${contractId}, period: ${paymentDto.period} for org: ${user.orgName}`);
+    this.logger.log(`Recording payment for contract ${contractId}, period ${paymentDto.period}`);
     
-    const result = await this.blockchainService.recordPayment(
+    return this.blockchainService.recordPayment(
       contractId,
       paymentDto.period,
       paymentDto.amount,
-      paymentDto.orderRef,
-      user
+      blockchainUser,
+      paymentDto.orderRef
     );
-    
-    if (!result.success) {
-      this.logger.error(`Failed to record payment: ${result.error}`);
-    }
-    
-    return result;
   }
 
   /**
    * Mark payment as overdue
    */
-  @Put('contracts/:contractId/payments/:period/overdue')
+  @Put(':contractId/:period/overdue')
   @ApiOperation({ 
-    summary: 'Mark payment as overdue',
-    description: 'Marks a specific payment period as overdue'
+    summary: 'Mark payment overdue',
+    description: 'Mark a scheduled payment as overdue based on due date'
   })
-  @ApiParam({ 
-    name: 'contractId', 
-    description: 'Unique contract identifier',
-    example: 'CONTRACT_001'
-  })
-  @ApiParam({ 
-    name: 'period', 
-    description: 'Payment period identifier',
-    example: '2025-01'
-  })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Payment marked as overdue successfully'
-  })
-  @ApiResponse({ status: 400, description: 'Payment cannot be marked as overdue' })
-  @ApiResponse({ status: 404, description: 'Payment not found' })
-  @ApiResponse({ status: 500, description: 'Blockchain network error' })
-  async markPaymentOverdue(
+  @ApiParam({ name: 'contractId', description: 'Contract ID' })
+  @ApiParam({ name: 'period', description: 'Payment period' })
+  @ApiResponse({ status: 200, description: 'Payment marked as overdue' })
+  async markOverdue(
     @Param('contractId') contractId: string,
     @Param('period') period: string,
-    @Body() overdueDto: MarkOverdueDto,
-    @BlockchainUser() user: FabricUser
+    @BlockchainUser() blockchainUser: FabricUser
   ) {
-    this.logger.log(`Marking payment as overdue for contract: ${contractId}, period: ${period} for org: ${user.orgName}`);
+    this.logger.log(`Marking payment overdue for contract ${contractId}, period ${period}`);
     
-    const result = await this.blockchainService.markPaymentOverdue(contractId, period, user);
-    
-    if (!result.success) {
-      this.logger.error(`Failed to mark payment as overdue: ${result.error}`);
-    }
-    
-    return result;
+    return this.blockchainService.markOverdue(contractId, period, blockchainUser);
   }
 
   /**
-   * Apply penalty to contract
+   * Apply penalty to payment
    */
-  @Post('contracts/:contractId/penalties')
-  @HttpCode(HttpStatus.CREATED)
+  @Put(':contractId/:period/penalty')
   @ApiOperation({ 
-    summary: 'Apply penalty',
-    description: 'Applies a penalty to a contract for various reasons (late payment, damage, etc.)'
+    summary: 'Apply penalty to payment',
+    description: 'Apply penalty to a specific payment period'
   })
-  @ApiParam({ 
-    name: 'contractId', 
-    description: 'Unique contract identifier',
-    example: 'CONTRACT_001'
-  })
-  @ApiResponse({ 
-    status: 201, 
-    description: 'Penalty applied successfully'
-  })
-  @ApiResponse({ status: 400, description: 'Invalid penalty data' })
-  @ApiResponse({ status: 404, description: 'Contract not found' })
-  @ApiResponse({ status: 500, description: 'Blockchain network error' })
-  async applyPenalty(
+  @ApiParam({ name: 'contractId', description: 'Contract ID' })
+  @ApiParam({ name: 'period', description: 'Payment period' })
+  @ApiResponse({ status: 200, description: 'Penalty applied successfully' })
+  async applyPaymentPenalty(
     @Param('contractId') contractId: string,
+    @Param('period') period: string,
     @Body() penaltyDto: ApplyPenaltyDto,
-    @BlockchainUser() user: FabricUser
+    @BlockchainUser() blockchainUser: FabricUser
   ) {
-    this.logger.log(`Applying penalty to contract: ${contractId}, period: ${penaltyDto.period}, type: ${penaltyDto.penaltyType} for org: ${user.orgName}`);
+    this.logger.log(`Applying penalty to contract ${contractId}, period ${period}`);
     
-    const result = await this.blockchainService.applyPenalty(
+    return this.blockchainService.applyPenalty(
       contractId,
-      penaltyDto.period,
+      period,
+      penaltyDto.amount,
+      penaltyDto.policyRef || '',
+      penaltyDto.reason,
+      blockchainUser
+    );
+  }
+
+  /**
+   * Record contract-level penalty
+   */
+  @Post(':contractId/penalties')
+  @ApiOperation({ 
+    summary: 'Record contract penalty',
+    description: 'Record a contract-level penalty for landlord or tenant'
+  })
+  @ApiParam({ name: 'contractId', description: 'Contract ID' })
+  @ApiResponse({ status: 201, description: 'Contract penalty recorded successfully' })
+  async recordContractPenalty(
+    @Param('contractId') contractId: string,
+    @Body() penaltyDto: RecordContractPenaltyDto,
+    @BlockchainUser() blockchainUser: FabricUser
+  ) {
+    this.logger.log(`Recording contract penalty for ${penaltyDto.party} in contract ${contractId}`);
+    
+    return this.blockchainService.recordPenalty(
+      contractId,
+      penaltyDto.party,
       penaltyDto.amount,
       penaltyDto.reason,
-      user
+      blockchainUser
     );
-    
-    if (!result.success) {
-      this.logger.error(`Failed to apply penalty: ${result.error}`);
-    }
-    
-    return result;
   }
 
   /**
-   * Query payments with filters
+   * Query payments by status
    */
   @Get()
   @ApiOperation({ 
     summary: 'Query payments',
-    description: 'Query payments with various filters like status, contract ID, period'
+    description: 'Query payments with status filter'
   })
-  @ApiQuery({ 
-    name: 'status', 
-    required: false, 
-    enum: ['SCHEDULED', 'PAID', 'OVERDUE'],
-    description: 'Filter by payment status'
-  })
-  @ApiQuery({ 
-    name: 'contractId', 
-    required: false, 
-    description: 'Filter by contract ID'
-  })
-  @ApiQuery({ 
-    name: 'period', 
-    required: false, 
-    description: 'Filter by period'
-  })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Payments retrieved successfully'
-  })
-  @ApiResponse({ status: 500, description: 'Blockchain network error' })
+  @ApiQuery({ name: 'status', required: false, description: 'Payment status filter' })
+  @ApiResponse({ status: 200, description: 'Payments retrieved successfully' })
   async queryPayments(
-    @Query() queryParams: QueryPaymentsDto,
-    @BlockchainUser() user: FabricUser
+    @Query() queryDto: QueryPaymentsDto,
+    @BlockchainUser() blockchainUser: FabricUser
   ) {
-    this.logger.log(`Querying payments with params: ${JSON.stringify(queryParams)} for org: ${user.orgName}`);
-    
-    if (queryParams.status) {
-      return await this.blockchainService.queryPaymentsByStatus(queryParams.status, user);
-    } else {
-      // Default: query all payments
-      return await this.blockchainService.queryPaymentsByStatus('PAID', user);
+    if (queryDto.status) {
+      return this.blockchainService.queryPaymentsByStatus(queryDto.status, blockchainUser);
     }
+    
+    // Default: query scheduled payments
+    return this.blockchainService.queryPaymentsByStatus('SCHEDULED', blockchainUser);
   }
 
   /**
-   * Get overdue payments
+   * Query overdue payments
    */
   @Get('overdue')
   @ApiOperation({ 
-    summary: 'Get overdue payments',
-    description: 'Retrieves all overdue payments across all contracts'
+    summary: 'Query overdue payments',
+    description: 'Get all overdue payments across contracts'
   })
   @ApiResponse({ 
     status: 200, 
-    description: 'Overdue payments retrieved successfully'
-  })
-  @ApiResponse({ status: 500, description: 'Blockchain network error' })
-  async getOverduePayments(
-    @BlockchainUser() user: FabricUser
-  ) {
-    this.logger.log(`Getting overdue payments for org: ${user.orgName}`);
-    
-    const result = await this.blockchainService.queryOverduePayments(user);
-    
-    if (!result.success) {
-      this.logger.error(`Failed to get overdue payments: ${result.error}`);
+    description: 'Overdue payments retrieved successfully',
+    example: {
+      success: true,
+      data: [{
+        objectType: "payment",
+        contractId: "contract-001",
+        period: 3,
+        status: "OVERDUE",
+        daysPastDue: 5,
+        penaltyAmount: 50000000
+      }]
     }
-    
-    return result;
-  }
-
-  /**
-   * Get penalties for contract
-   */
-  @Get('contracts/:contractId/penalties')
-  @ApiOperation({ 
-    summary: 'Get contract penalties',
-    description: 'Retrieves all penalties applied to a specific contract'
   })
-  @ApiParam({ 
-    name: 'contractId', 
-    description: 'Unique contract identifier',
-    example: 'CONTRACT_001'
-  })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Contract penalties retrieved successfully'
-  })
-  @ApiResponse({ status: 404, description: 'Contract not found' })
-  @ApiResponse({ status: 500, description: 'Blockchain network error' })
-  async getContractPenalties(
-    @Param('contractId') contractId: string,
-    @BlockchainUser() user: FabricUser
+  async queryOverduePayments(
+    @BlockchainUser() blockchainUser: FabricUser
   ) {
-    this.logger.log(`Getting penalties for contract: ${contractId} for org: ${user.orgName}`);
+    this.logger.log('Querying overdue payments');
     
-    const result = await this.blockchainService.getContractPenalties(contractId, user);
-    
-    if (!result.success) {
-      this.logger.error(`Failed to get contract penalties: ${result.error}`);
-    }
-    
-    return result;
+    return this.blockchainService.queryOverduePayments(blockchainUser);
   }
 }

@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit, InternalServerErrorException, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { BlockchainConfigService } from './blockchain-config.service';
+import { BlockchainEventService } from './blockchain-event.service';
 import { 
   BlockchainContract, 
   ContractHistory, 
@@ -39,9 +40,11 @@ export class BlockchainService implements OnModuleInit {
   private isInitialized = false;
   private currentOrgName: string | null = null;
   private currentUserId: string | null = null;
+  private eventListenersStarted = false;
 
   constructor(
-    private blockchainConfig: BlockchainConfigService
+    private blockchainConfig: BlockchainConfigService,
+    private eventService: BlockchainEventService
   ) {}
 
   /**
@@ -148,11 +151,39 @@ export class BlockchainService implements OnModuleInit {
       this.network = await this.gateway.getNetwork(channelName);
       this.contract = this.network.getContract(chaincodeName);
 
+      // Initialize event service with network and contract
+      await this.eventService.initialize(this.network, this.contract);
+      
+      // Start listening for blockchain events only if not already started
+      if (!this.eventListenersStarted) {
+        await this.startEventListeners();
+        this.eventListenersStarted = true;
+      }
+
       this.logger.log(`Connected to Fabric network as ${identityLabel}`);
       return true;
     } catch (error) {
       this.logger.error(`Failed to initialize Fabric connection: ${error.message}`);
       return false;
+    }
+  }
+
+  /**
+   * Start blockchain event listeners
+   */
+  private async startEventListeners(): Promise<void> {
+    try {
+      // Subscribe to contract events
+      const contractListeners = await this.eventService.subscribeToContractEvents();
+      this.logger.log(`✅ Started ${contractListeners.length} contract event listeners`);
+
+      // Subscribe to block events (optional)
+      // const blockListener = await this.eventService.subscribeToBlockEvents();
+      // this.logger.log(`✅ Started block event listener: ${blockListener.listenerId}`);
+
+    } catch (error) {
+      this.logger.error('Failed to start event listeners:', error);
+      // Don't throw error here to avoid blocking the connection initialization
     }
   }
 
@@ -168,6 +199,8 @@ export class BlockchainService implements OnModuleInit {
         this.isInitialized = false;
         this.currentOrgName = null;
         this.currentUserId = null;
+        // Note: Keep event listeners running if they were started
+        // They will be reinitialized with the new connection
       }
       
       const success = await this.initializeFabricConnection(orgName, userId);
@@ -185,6 +218,10 @@ export class BlockchainService implements OnModuleInit {
    * Disconnect from Fabric gateway
    */
   async disconnect(): Promise<void> {
+    // Stop event listeners first
+    await this.eventService.stopListening();
+    this.eventListenersStarted = false;
+    
     if (this.gateway) {
       this.gateway.disconnect();
       this.logger.log('Disconnected from Fabric gateway');
@@ -508,17 +545,22 @@ export class BlockchainService implements OnModuleInit {
   // ========== CONTRACT OPERATIONS ==========
 
   /**
-   * Create a new rental contract
+   * Create a new rental contract (landlord initiates)
    */
   async createContract(
     contractData: {
       contractId: string;
-      lessorId: string;
-      lesseeId: string;
-      docHash?: string;
-      rentAmount: number;
-      depositAmount?: number;
-      currency?: string;
+      landlordId: string;
+      tenantId: string;
+      landlordMSP: string;
+      tenantMSP: string;
+      landlordCertId: string;
+      tenantCertId: string;
+      signedContractFileHash: string;
+      landlordSignatureMeta: string;
+      rentAmount: string;
+      depositAmount: string;
+      currency: string;
       startDate: string;
       endDate: string;
     },
@@ -530,12 +572,17 @@ export class BlockchainService implements OnModuleInit {
         const result = await this.contract.submitTransaction(
           'CreateContract',
           contractData.contractId,
-          contractData.lessorId,
-          contractData.lesseeId,
-          contractData.docHash || '',
-          (contractData.rentAmount || 0).toString(),
-          (contractData.depositAmount || 0).toString(),
-          contractData.currency || 'VND',
+          contractData.landlordId,
+          contractData.tenantId,
+          contractData.landlordMSP,
+          contractData.tenantMSP,
+          contractData.landlordCertId,
+          contractData.tenantCertId,
+          contractData.signedContractFileHash,
+          contractData.landlordSignatureMeta,
+          contractData.rentAmount,
+          contractData.depositAmount,
+          contractData.currency,
           contractData.startDate,
           contractData.endDate
         );
@@ -544,7 +591,7 @@ export class BlockchainService implements OnModuleInit {
       },
       'createContract',
       user.orgName,
-      user.userId // Truyền userId để sử dụng identity cụ thể
+      user.userId
     );
   }
 
@@ -594,7 +641,105 @@ export class BlockchainService implements OnModuleInit {
   }
 
   /**
-   * Add signature to contract
+   * Tenant signs the contract
+   */
+  async tenantSignContract(
+    contractId: string,
+    fullySignedContractFileHash: string,
+    tenantSignatureMeta: string,
+    user: FabricUser
+  ): Promise<BlockchainResponse<BlockchainContract>> {
+    return this.executeBlockchainOperation(
+      async () => {
+        const result = await this.contract.submitTransaction(
+          'TenantSignContract',
+          contractId,
+          fullySignedContractFileHash,
+          tenantSignatureMeta
+        );
+        return JSON.parse(result.toString());
+      },
+      'tenantSignContract',
+      user.orgName,
+      user.userId
+    );
+  }
+
+  /**
+   * Record security deposits from both parties
+   */
+  async recordDeposit(
+    contractId: string,
+    party: string,
+    amount: string,
+    depositTxRef: string,
+    user: FabricUser
+  ): Promise<BlockchainResponse<BlockchainContract>> {
+    return this.executeBlockchainOperation(
+      async () => {
+        const result = await this.contract.submitTransaction(
+          'RecordDeposit',
+          contractId,
+          party,
+          amount,
+          depositTxRef
+        );
+        return JSON.parse(result.toString());
+      },
+      'recordDeposit',
+      user.orgName,
+      user.userId
+    );
+  }
+
+  /**
+   * Record the first month's rent payment
+   */
+  async recordFirstPayment(
+    contractId: string,
+    amount: string,
+    paymentTxRef: string,
+    user: FabricUser
+  ): Promise<BlockchainResponse<BlockchainContract>> {
+    return this.executeBlockchainOperation(
+      async () => {
+        const result = await this.contract.submitTransaction(
+          'RecordFirstPayment',
+          contractId,
+          amount,
+          paymentTxRef
+        );
+        return JSON.parse(result.toString());
+      },
+      'recordFirstPayment',
+      user.orgName,
+      user.userId
+    );
+  }
+
+  /**
+   * Generate monthly payment schedule based on first payment date
+   */
+  async createMonthlyPaymentSchedule(
+    contractId: string,
+    user: FabricUser
+  ): Promise<BlockchainResponse<any[]>> {
+    return this.executeBlockchainOperation(
+      async () => {
+        const result = await this.contract.submitTransaction(
+          'CreateMonthlyPaymentSchedule',
+          contractId
+        );
+        return JSON.parse(result.toString());
+      },
+      'createMonthlyPaymentSchedule',
+      user.orgName,
+      user.userId
+    );
+  }
+
+  /**
+   * Add signature to contract (legacy function - deprecated)
    */
   async addSignature(
     contractId: string,
@@ -723,18 +868,18 @@ export class BlockchainService implements OnModuleInit {
   }
 
   /**
-   * Record payment
+   * Record monthly rent payment
    */
   async recordPayment(
     contractId: string,
     period: string,
-    amount: number,
-    orderRef: string,
-    user: FabricUser
+    amount: string,
+    user: FabricUser,
+    orderRef?: string
   ): Promise<BlockchainResponse<Payment>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction('RecordPayment', contractId, period, amount.toString(), orderRef || '');
+        const result = await this.contract.submitTransaction('RecordPayment', contractId, period, amount, orderRef || '');
         return JSON.parse(result.toString());
       },
       'recordPayment',
@@ -744,37 +889,58 @@ export class BlockchainService implements OnModuleInit {
   }
 
   /**
-   * Mark payment as overdue
+   * Mark payment as overdue (automatic based on due date)
    */
-  async markPaymentOverdue(contractId: string, period: string, user: FabricUser): Promise<BlockchainResponse<Payment>> {
+  async markOverdue(contractId: string, period: string, user: FabricUser): Promise<BlockchainResponse<Payment>> {
     return this.executeBlockchainOperation(
       async () => {
         const result = await this.contract.submitTransaction('MarkOverdue', contractId, period);
         return JSON.parse(result.toString());
       },
-      'markPaymentOverdue',
+      'markOverdue',
       user.orgName,
       user.userId
     );
   }
 
   /**
-   * Apply penalty
+   * Apply penalty to a specific payment
    */
   async applyPenalty(
     contractId: string,
     period: string,
-    amount: number,
+    amount: string,
+    policyRef: string,
     reason: string,
     user: FabricUser
   ): Promise<BlockchainResponse<Penalty>> {
     return this.executeBlockchainOperation(
       async () => {
-        // Chaincode ApplyPenalty expects: contractId, period, amount, policyRef
-        const result = await this.contract.submitTransaction('ApplyPenalty', contractId, period, amount.toString(), reason || '');
+        const result = await this.contract.submitTransaction('ApplyPenalty', contractId, period, amount, policyRef || '', reason);
         return JSON.parse(result.toString());
       },
       'applyPenalty',
+      user.orgName,
+      user.userId
+    );
+  }
+
+  /**
+   * Record contract-level penalty
+   */
+  async recordPenalty(
+    contractId: string,
+    party: string,
+    amount: string,
+    reason: string,
+    user: FabricUser
+  ): Promise<BlockchainResponse<Penalty>> {
+    return this.executeBlockchainOperation(
+      async () => {
+        const result = await this.contract.submitTransaction('RecordPenalty', contractId, party, amount, reason);
+        return JSON.parse(result.toString());
+      },
+      'recordPenalty',
       user.orgName,
       user.userId
     );
@@ -805,6 +971,45 @@ export class BlockchainService implements OnModuleInit {
         return JSON.parse(result.toString());
       },
       'queryOverduePayments',
+      user.orgName,
+      user.userId
+    );
+  }
+
+  // ========== PRIVATE DATA OPERATIONS ==========
+
+  /**
+   * Store sensitive contract details in private data collection
+   */
+  async storeContractPrivateDetails(
+    contractId: string,
+    privateDataJson: string,
+    user: FabricUser
+  ): Promise<BlockchainResponse<any>> {
+    return this.executeBlockchainOperation(
+      async () => {
+        const result = await this.contract.submitTransaction('StoreContractPrivateDetails', contractId, privateDataJson);
+        return JSON.parse(result.toString());
+      },
+      'storeContractPrivateDetails',
+      user.orgName,
+      user.userId
+    );
+  }
+
+  /**
+   * Retrieve private contract details
+   */
+  async getContractPrivateDetails(
+    contractId: string,
+    user: FabricUser
+  ): Promise<BlockchainResponse<any>> {
+    return this.executeBlockchainOperation(
+      async () => {
+        const result = await this.contract.evaluateTransaction('GetContractPrivateDetails', contractId);
+        return JSON.parse(result.toString());
+      },
+      'getContractPrivateDetails',
       user.orgName,
       user.userId
     );
