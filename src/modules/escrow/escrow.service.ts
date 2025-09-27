@@ -127,7 +127,10 @@ export class EscrowService {
     party: EscrowBalanceParty,
     note?: string,
   ): Promise<ResponseCommon<Escrow>> {
-    const acc = await this.accountRepo.findOne({ where: { id: accountId } });
+    const acc = await this.accountRepo.findOne({
+      where: { id: accountId },
+      relations: ['contract', 'contract.landlord'],
+    });
     if (!acc) throw new Error('Escrow not found');
     const amount = BigInt(amountVnd);
     const current =
@@ -193,6 +196,7 @@ export class EscrowService {
       where: { id: accountId },
       relations: ['contract', 'contract.landlord'],
     });
+    console.log('Refund escrow:', acc);
     if (!acc) throw new Error('Escrow not found');
     const amount = BigInt(amountVnd);
     const current =
@@ -200,6 +204,7 @@ export class EscrowService {
         ? BigInt(acc.currentBalanceTenant || '0')
         : BigInt(acc.currentBalanceLandlord || '0');
     const next = current - amount;
+    console.log({ current, amount, next });
     if (next < BigInt(0)) throw new Error('Insufficient escrow balance');
 
     // 1. Ghi giao dịch escrow
