@@ -239,4 +239,45 @@ export class ContractController {
     // trả json
     return res.json(result);
   }
+
+  @Post('mock-cms')
+  @UseInterceptors(FileInterceptor('pdf'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary:
+      'Tạo CMS (PKCS#7) mock (detached, SHA-256) cho placeholder chỉ định',
+    description:
+      'Dùng để test nhúng chữ ký khi chưa có SmartCA. Nhận PDF + signatureIndex, trả về cmsBase64 & cmsHex.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['pdf'],
+      properties: {
+        pdf: { type: 'string', format: 'binary' },
+        signatureIndex: {
+          type: 'string',
+          example: '0',
+          description: 'Index placeholder (0-based), mặc định 0.',
+        },
+      },
+    },
+  })
+  createMockCms(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: { signatureIndex?: string },
+    @Res() res: Response,
+  ) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Missing file "pdf"');
+    }
+    const idx =
+      body.signatureIndex !== undefined ? Number(body.signatureIndex) : 5;
+    if (!Number.isFinite(idx) || idx < 0) {
+      throw new BadRequestException('Invalid signatureIndex');
+    }
+
+    const result = this.contractService.generateMockCmsForPdf(file.buffer, idx);
+    return res.json(result);
+  }
 }

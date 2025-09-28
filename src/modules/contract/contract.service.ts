@@ -11,6 +11,7 @@ import { ResponseCommon } from 'src/common/dto/response.dto';
 import { VN_TZ, formatVN, vnNow } from '../../common/datetime';
 import { plainAddPlaceholder } from '@signpdf/placeholder-plain';
 import * as crypto from 'crypto';
+import * as forge from 'node-forge';
 
 type Place = {
   page?: number;
@@ -214,6 +215,89 @@ export class ContractService {
     });
   }
 
+  computeHashForSignature(pdfBuffer: Buffer, signatureIndex = 0) {
+    if (!Buffer.isBuffer(pdfBuffer)) {
+      throw new BadRequestException('pdfBuffer must be a Buffer');
+    }
+
+    // 1) Thử cách 1: /ByteRange đã có số
+    const numericRanges = this.extractAllNumericByteRanges(pdfBuffer);
+    if (
+      numericRanges.length &&
+      signatureIndex >= 0 &&
+      signatureIndex < numericRanges.length
+    ) {
+      const [a, b, c, d] = numericRanges[signatureIndex];
+      const len = pdfBuffer.length;
+      if (a < 0 || b < 0 || c < 0 || d < 0 || a + b > len || c + d > len) {
+        throw new BadRequestException('Invalid ByteRange values');
+      }
+      const part1 = pdfBuffer.slice(a, a + b);
+      const part2 = pdfBuffer.slice(c, c + d);
+      const toHash = Buffer.concat([part1, part2]);
+      const digestHex = crypto
+        .createHash('sha256')
+        .update(toHash)
+        .digest('hex');
+      const digestBase64 = Buffer.from(digestHex, 'hex').toString('base64');
+
+      return {
+        mode: 'numeric-ByteRange',
+        byteRange: [a, b, c, d],
+        digestHex,
+        digestBase64,
+        algorithm: 'SHA-256',
+        signatureCount: numericRanges.length,
+        signatureIndex,
+        pdfLength: len,
+      };
+    }
+
+    // 2) Fallback: /ByteRange là placeholder (*) → tính từ vị trí /Contents
+    const contentRanges = this.findAllContentsValueRanges(pdfBuffer);
+    if (!contentRanges.length) {
+      throw new BadRequestException(
+        'No /ByteRange or /Contents found (no signature placeholder?)',
+      );
+    }
+    if (signatureIndex < 0 || signatureIndex >= contentRanges.length) {
+      throw new BadRequestException(
+        `signatureIndex out of range (0..${contentRanges.length - 1})`,
+      );
+    }
+
+    const { start, end } = contentRanges[signatureIndex];
+    const len = pdfBuffer.length;
+
+    // Chuẩn: loại trừ chỉ bytes bên trong <...>, tức:
+    // part1 = [0 .. start)
+    // part2 = [end .. EOF]
+    const part1 = pdfBuffer.slice(0, start);
+    const part2 = pdfBuffer.slice(end, len);
+    const toHash = Buffer.concat([part1, part2]);
+
+    const digestHex = crypto.createHash('sha256').update(toHash).digest('hex');
+    const digestBase64 = Buffer.from(digestHex, 'hex').toString('base64');
+
+    // Tính ByteRange tương đương (a,b,c,d) cho reference (không bắt buộc phải trả, nhưng hữu ích):
+    const a = 0;
+    const b = start - a;
+    const c = end;
+    const d = len - c;
+
+    return {
+      mode: 'computed-from-Contents', // thông báo đang ở nhánh placeholder
+      byteRange: [a, b, c, d],
+      digestHex,
+      digestBase64,
+      algorithm: 'SHA-256',
+      signatureCount: contentRanges.length,
+      signatureIndex,
+      pdfLength: len,
+      contentsValueRange: { start, end }, // để debug
+    };
+  }
+
   // --- Helpers ---
   private toDate(value: Date | string): Date {
     if (value instanceof Date) {
@@ -357,86 +441,184 @@ export class ContractService {
     return ranges;
   }
 
-  computeHashForSignature(pdfBuffer: Buffer, signatureIndex = 0) {
-    if (!Buffer.isBuffer(pdfBuffer)) {
-      throw new BadRequestException('pdfBuffer must be a Buffer');
+  // Tìm tất cả “ô” /ByteRange [ ... ] để biết vị trí phần bên trong [ .. ] cần ghi đè.
+  private findAllByteRangeBrackets(pdfBuffer: Buffer) {
+    const s = pdfBuffer.toString('latin1');
+    const re = /\/ByteRange\s*\[/g;
+    const out: { innerStart: number; innerEnd: number }[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(s)) !== null) {
+      const bracketStart = s.indexOf('[', m.index);
+      if (bracketStart === -1) continue;
+      const bracketEnd = s.indexOf(']', bracketStart + 1);
+      if (bracketEnd === -1) continue;
+      out.push({ innerStart: bracketStart + 1, innerEnd: bracketEnd }); // vùng giữa [ ... ]
     }
+    return out;
+  }
 
-    // 1) Thử cách 1: /ByteRange đã có số
+  // Ghi chuỗi (latin1) vào buffer trong khoảng [start, end), pad bằng padChar nếu thiếu
+  private writeStringIntoBuffer(
+    buf: Buffer,
+    start: number,
+    end: number,
+    value: string,
+    padChar = ' ',
+  ) {
+    const slot = end - start;
+    if (value.length > slot) {
+      throw new BadRequestException('Replacement longer than reserved slot');
+    }
+    const s = value + padChar.repeat(slot - value.length);
+    for (let i = 0; i < slot; i++) {
+      buf[start + i] = s.charCodeAt(i) & 0xff; // latin1
+    }
+  }
+
+  /** Lấy bytes "to be signed" cho placeholder: toàn bộ PDF trừ phần bên trong <...> của /Contents tương ứng */
+  private getToBeSignedBytes(pdfBuffer: Buffer, signatureIndex = 0): Buffer {
+    // ưu tiên dùng ByteRange có số (nếu đã có), nếu không thì lấy theo vị trí /Contents
     const numericRanges = this.extractAllNumericByteRanges(pdfBuffer);
-    if (
-      numericRanges.length &&
-      signatureIndex >= 0 &&
-      signatureIndex < numericRanges.length
-    ) {
+    if (numericRanges.length) {
+      if (signatureIndex < 0 || signatureIndex >= numericRanges.length) {
+        throw new BadRequestException(
+          `signatureIndex out of range (0..${numericRanges.length - 1})`,
+        );
+      }
       const [a, b, c, d] = numericRanges[signatureIndex];
       const len = pdfBuffer.length;
       if (a < 0 || b < 0 || c < 0 || d < 0 || a + b > len || c + d > len) {
         throw new BadRequestException('Invalid ByteRange values');
       }
-      const part1 = pdfBuffer.slice(a, a + b);
-      const part2 = pdfBuffer.slice(c, c + d);
-      const toHash = Buffer.concat([part1, part2]);
-      const digestHex = crypto
-        .createHash('sha256')
-        .update(toHash)
-        .digest('hex');
-      const digestBase64 = Buffer.from(digestHex, 'hex').toString('base64');
-
-      return {
-        mode: 'numeric-ByteRange',
-        byteRange: [a, b, c, d],
-        digestHex,
-        digestBase64,
-        algorithm: 'SHA-256',
-        signatureCount: numericRanges.length,
-        signatureIndex,
-        pdfLength: len,
-      };
+      const p1 = pdfBuffer.slice(a, a + b);
+      const p2 = pdfBuffer.slice(c, c + d);
+      return Buffer.concat([p1, p2]);
     }
 
-    // 2) Fallback: /ByteRange là placeholder (*) → tính từ vị trí /Contents
-    const contentRanges = this.findAllContentsValueRanges(pdfBuffer);
-    if (!contentRanges.length) {
+    // Fallback: placeholder còn '*', xác định theo /Contents <...>
+    const contents = this.findAllContentsValueRanges(pdfBuffer);
+    if (!contents.length)
+      throw new BadRequestException('No /ByteRange or /Contents found');
+    if (signatureIndex < 0 || signatureIndex >= contents.length) {
       throw new BadRequestException(
-        'No /ByteRange or /Contents found (no signature placeholder?)',
+        `signatureIndex out of range (0..${contents.length - 1})`,
       );
     }
-    if (signatureIndex < 0 || signatureIndex >= contentRanges.length) {
-      throw new BadRequestException(
-        `signatureIndex out of range (0..${contentRanges.length - 1})`,
-      );
+    const { start, end } = contents[signatureIndex];
+    const p1 = pdfBuffer.slice(0, start);
+    const p2 = pdfBuffer.slice(end);
+    return Buffer.concat([p1, p2]);
+  }
+
+  /** Tạo keypair + self-signed cert RSA-2048 (dùng tạm để ký mock) */
+  private generateSelfSignedCert() {
+    const pki = forge.pki;
+    const keys = pki.rsa.generateKeyPair(2048);
+
+    const cert = pki.createCertificate();
+    cert.publicKey = keys.publicKey;
+    cert.serialNumber = '01';
+    const now = new Date();
+    cert.validity.notBefore = new Date(now.getTime() - 5 * 60 * 1000);
+    cert.validity.notAfter = new Date(now.getTime() + 365 * 24 * 3600 * 1000);
+
+    const attrs = [
+      { name: 'commonName', value: 'Mock Signer' },
+      { name: 'organizationName', value: 'Demo Org' },
+      { shortName: 'OU', value: 'Dev' },
+      { shortName: 'C', value: 'VN' },
+    ];
+    cert.setSubject(attrs);
+    cert.setIssuer(attrs);
+
+    cert.setExtensions([
+      { name: 'basicConstraints', cA: false },
+      { name: 'keyUsage', digitalSignature: true, keyEncipherment: true },
+      { name: 'extKeyUsage', codeSigning: true, emailProtection: true },
+      { name: 'nsCertType', client: true, email: true, objsign: true },
+      { name: 'subjectKeyIdentifier' },
+    ]);
+
+    cert.sign(keys.privateKey, forge.md.sha256.create());
+
+    const certPem = pki.certificateToPem(cert);
+    const keyPem = pki.privateKeyToPem(keys.privateKey);
+    return { keys, cert, certPem, keyPem };
+  }
+
+  /** Tạo CMS (PKCS#7) detached SHA-256 cho dữ liệu cần ký */
+  private createDetachedCmsSha256(
+    toBeSigned: Buffer,
+    keys: forge.pki.KeyPair,
+    cert: forge.pki.Certificate,
+  ) {
+    const p7 = forge.pkcs7.createSignedData();
+    // put content for computing messageDigest; although detached, we still set content
+    p7.content = forge.util.createBuffer(toBeSigned.toString('binary'));
+    p7.addCertificate(cert);
+    p7.addSigner({
+      key: keys.privateKey,
+      certificate: cert,
+      // OID SHA-256
+      digestAlgorithm: forge.pki.oids.sha256,
+      authenticatedAttributes: [
+        { type: forge.pki.oids.contentType, value: forge.pki.oids.data },
+        { type: forge.pki.oids.messageDigest }, // will be auto-computed from content with the selected digest
+        { type: forge.pki.oids.signingTime, value: new Date() },
+      ],
+    });
+    // detached signedData
+    p7.sign({ detached: true });
+
+    const asn1 = p7.toAsn1();
+    const derBytes = forge.asn1.toDer(asn1).getBytes();
+    const derBuf = Buffer.from(derBytes, 'binary');
+    return {
+      cmsBase64: derBuf.toString('base64'),
+      cmsHex: derBuf.toString('hex').toUpperCase(),
+      cmsDer: derBuf,
+    };
+  }
+
+  /**
+   * Public API trong service: tạo CMS mock cho đúng placeholder
+   * Trả về cmsBase64 + cmsHex + thumbprint cert để debug.
+   */
+  generateMockCmsForPdf(pdfBuffer: Buffer, signatureIndex = 0) {
+    if (!Buffer.isBuffer(pdfBuffer)) {
+      throw new BadRequestException('pdfBuffer must be a Buffer');
     }
+    const toBeSigned = this.getToBeSignedBytes(pdfBuffer, signatureIndex);
 
-    const { start, end } = contentRanges[signatureIndex];
-    const len = pdfBuffer.length;
+    const { keys, cert, certPem, keyPem } = this.generateSelfSignedCert();
+    const { cmsBase64, cmsHex } = this.createDetachedCmsSha256(
+      toBeSigned,
+      keys,
+      cert,
+    );
 
-    // Chuẩn: loại trừ chỉ bytes bên trong <...>, tức:
-    // part1 = [0 .. start)
-    // part2 = [end .. EOF]
-    const part1 = pdfBuffer.slice(0, start);
-    const part2 = pdfBuffer.slice(end, len);
-    const toHash = Buffer.concat([part1, part2]);
-
-    const digestHex = crypto.createHash('sha256').update(toHash).digest('hex');
-    const digestBase64 = Buffer.from(digestHex, 'hex').toString('base64');
-
-    // Tính ByteRange tương đương (a,b,c,d) cho reference (không bắt buộc phải trả, nhưng hữu ích):
-    const a = 0;
-    const b = start - a;
-    const c = end;
-    const d = len - c;
+    // Thumbprint (SHA-256) của cert để tham chiếu
+    const certDer = Buffer.from(
+      forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes(),
+      'binary',
+    );
+    const certThumbHex = crypto
+      .createHash('sha256')
+      .update(certDer)
+      .digest('hex');
 
     return {
-      mode: 'computed-from-Contents', // thông báo đang ở nhánh placeholder
-      byteRange: [a, b, c, d],
-      digestHex,
-      digestBase64,
-      algorithm: 'SHA-256',
-      signatureCount: contentRanges.length,
       signatureIndex,
-      pdfLength: len,
-      contentsValueRange: { start, end }, // để debug
+      algorithm: 'sha256WithRSAEncryption',
+      cmsBase64,
+      cmsHex,
+      certificate: {
+        subjectCN: 'Mock Signer',
+        pem: certPem,
+        thumbprintSha256Hex: certThumbHex,
+      },
+      // Bạn có thể bỏ keyPem khi deploy thực tế (chỉ để demo):
+      privateKeyPem: keyPem,
     };
   }
 }
