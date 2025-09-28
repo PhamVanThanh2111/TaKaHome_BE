@@ -298,6 +298,113 @@ export class ContractService {
     };
   }
 
+  /**
+   * Nhúng CMS signature vào đúng placeholder (theo signatureIndex).
+   * - Hỗ trợ nhiều /Contents trong PDF.
+   * - Chỉ thay /ByteRange + /Contents ở index chỉ định.
+   */
+  async embedCmsIntoPlaceholder(
+    pdfBuffer: Buffer,
+    {
+      cmsBase64,
+      cmsHex,
+      signatureIndex = 0,
+    }: { cmsBase64?: string; cmsHex?: string; signatureIndex?: number },
+  ): Promise<Buffer> {
+    if (!Buffer.isBuffer(pdfBuffer)) {
+      throw new BadRequestException('pdfBuffer must be a Buffer');
+    }
+    if (!cmsBase64 && !cmsHex) {
+      throw new BadRequestException('Must provide cmsBase64 or cmsHex');
+    }
+
+    // Convert CMS
+    let cmsBuf: Buffer;
+    if (cmsHex) {
+      cmsBuf = Buffer.from(cmsHex, 'hex');
+    } else {
+      cmsBuf = Buffer.from(cmsBase64!, 'base64');
+    }
+
+    // Tìm tất cả /ByteRange
+    const pdfStr = pdfBuffer.toString('latin1');
+    const byteRangeRegex =
+      /\/ByteRange\s*\[\s*([0-9]+|\/\*+)\s+([0-9]+|\/\*+)\s+([0-9]+|\/\*+)\s+([0-9]+|\/\*+)\s*\]/g;
+
+    const byteRanges: { match: RegExpExecArray; index: number }[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = byteRangeRegex.exec(pdfStr)) !== null) {
+      byteRanges.push({ match: m, index: m.index });
+    }
+    if (byteRanges.length === 0) {
+      throw new BadRequestException('No /ByteRange found in PDF');
+    }
+    if (signatureIndex >= byteRanges.length) {
+      throw new BadRequestException(
+        `Signature index ${signatureIndex} out of range (found ${byteRanges.length})`,
+      );
+    }
+
+    // Tìm tất cả /Contents <...>
+    const contentsRegex = /\/Contents\s*<([0-9A-Fa-f\s]+)>/g;
+    const contentsMatches: { match: RegExpExecArray; index: number }[] = [];
+    while ((m = contentsRegex.exec(pdfStr)) !== null) {
+      contentsMatches.push({ match: m, index: m.index });
+    }
+    if (contentsMatches.length !== byteRanges.length) {
+      throw new BadRequestException(
+        `Mismatch /ByteRange (${byteRanges.length}) vs /Contents (${contentsMatches.length}) occurrences`,
+      );
+    }
+
+    // Lấy cặp target
+    const br = byteRanges[signatureIndex];
+    const ct = contentsMatches[signatureIndex];
+
+    // Độ dài placeholder (số byte thật, từ hex string /Contents)
+    const placeholderHex = ct.match[1].replace(/\s+/g, '');
+    const placeholderLength = placeholderHex.length / 2;
+
+    if (cmsBuf.length > placeholderLength) {
+      throw new BadRequestException(
+        `CMS length ${cmsBuf.length} exceeds placeholder length ${placeholderLength}`,
+      );
+    }
+
+    // Pad CMS nếu ngắn hơn placeholder
+    const padded = Buffer.concat([
+      cmsBuf,
+      Buffer.alloc(placeholderLength - cmsBuf.length, 0),
+    ]);
+    const cmsHexFull = padded.toString('hex').toUpperCase();
+
+    // Tính byteRange thực sự
+    const start1 = 0;
+    const len1 = ct.index + ct.match[0].indexOf('<') + 1; // từ đầu file tới ngay trước nội dung hex
+    const start2 = len1 + cmsHexFull.length;
+    const len2 = pdfBuffer.length - start2;
+    const newByteRange = [start1, len1, start2, len2];
+
+    // Replace target /Contents
+    const updatedStr =
+      pdfStr.substring(0, ct.match.index) +
+      pdfStr
+        .substring(ct.match.index, ct.match.index + ct.match[0].length)
+        .replace(placeholderHex, cmsHexFull) +
+      pdfStr.substring(ct.match.index + ct.match[0].length);
+
+    // Replace target /ByteRange
+    const updatedStr2 =
+      updatedStr.substring(0, br.index) +
+      updatedStr
+        .substring(br.index, br.index + br.match[0].length)
+        .replace(br.match[0], `/ByteRange [${newByteRange.join(' ')}]`) +
+      updatedStr.substring(br.index + br.match[0].length);
+
+    return Promise.resolve(Buffer.from(updatedStr2, 'latin1'));
+    // return Buffer.from(updatedStr2, 'latin1');
+  }
+
   // --- Helpers ---
   private toDate(value: Date | string): Date {
     if (value instanceof Date) {

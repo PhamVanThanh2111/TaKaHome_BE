@@ -280,4 +280,86 @@ export class ContractController {
     const result = this.contractService.generateMockCmsForPdf(file.buffer, idx);
     return res.json(result);
   }
+
+  @Post('embed-cms')
+  @UseInterceptors(FileInterceptor('pdf'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Nhúng CMS (PKCS#7) vào placeholder và hoàn thiện /ByteRange',
+    description:
+      'Nhận CMS (base64 hoặc hex) từ CA và ghi vào /Contents của placeholder chỉ định (signatureIndex).',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['pdf'],
+      properties: {
+        pdf: {
+          type: 'string',
+          format: 'binary',
+          description: 'File PDF đã có placeholder',
+        },
+        signatureIndex: {
+          type: 'string',
+          example: '0',
+          description: 'Index placeholder (0-based). Mặc định 0.',
+        },
+        cmsBase64: {
+          type: 'string',
+          description: 'CMS/PKCS#7 dạng base64 (ưu tiên dùng)',
+          example: 'MIIG...==',
+        },
+        cmsHex: {
+          type: 'string',
+          description: 'CMS/PKCS#7 dạng hex (nếu không dùng base64)',
+          example: '3082...A0F',
+        },
+      },
+    },
+  })
+  async embedCms(
+    @UploadedFile() file: Express.Multer.File,
+    @Body()
+    body: {
+      signatureIndex?: string;
+      cmsBase64?: string;
+      cmsHex?: string;
+    },
+    @Res() res: Response,
+  ) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Missing file "pdf"');
+    }
+
+    const signatureIndex =
+      body.signatureIndex !== undefined ? Number(body.signatureIndex) : 0;
+    if (!Number.isFinite(signatureIndex) || signatureIndex < 0) {
+      throw new BadRequestException('Invalid signatureIndex');
+    }
+
+    const cmsBase64 = (body.cmsBase64 || '').trim();
+    const cmsHex = (body.cmsHex || '').trim();
+
+    if (!cmsBase64 && !cmsHex) {
+      throw new BadRequestException('Missing CMS: provide cmsBase64 or cmsHex');
+    }
+    if (cmsBase64 && cmsHex) {
+      throw new BadRequestException('Provide only one of cmsBase64 or cmsHex');
+    }
+
+    // Gọi service với object inputs
+    const signed = await this.contractService.embedCmsIntoPlaceholder(
+      Buffer.from(file.buffer),
+      {
+        cmsBase64: cmsBase64 || undefined,
+        cmsHex: cmsHex || undefined,
+        signatureIndex,
+      },
+    );
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="signed.pdf"');
+    res.setHeader('Content-Length', String(signed.length));
+    return res.end(signed);
+  }
 }
