@@ -10,6 +10,7 @@ import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { VN_TZ, formatVN, vnNow } from '../../common/datetime';
 import { plainAddPlaceholder } from '@signpdf/placeholder-plain';
+import * as crypto from 'crypto';
 
 type Place = {
   page?: number;
@@ -316,5 +317,126 @@ export class ContractService {
     });
 
     return out;
+  }
+
+  // Tìm tất cả ByteRange có số
+  private extractAllNumericByteRanges(pdfBuffer: Buffer): number[][] {
+    const s = pdfBuffer.toString('latin1');
+    const re = /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/g;
+    const out: number[][] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(s)) !== null) {
+      out.push([Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]);
+    }
+    return out;
+  }
+
+  // Tìm tất cả vị trí <start, end> của giá trị /Contents (chỉ phần bên trong <...>)
+  private findAllContentsValueRanges(
+    pdfBuffer: Buffer,
+  ): Array<{ start: number; end: number }> {
+    const s = pdfBuffer.toString('latin1');
+    const ranges: Array<{ start: number; end: number }> = [];
+
+    // Duyệt tất cả occurrences của "/Contents"
+    const re = /\/Contents\s*/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(s)) !== null) {
+      const after = m.index + m[0].length;
+      // Tìm dấu < đầu tiên sau /Contents
+      const lt = s.indexOf('<', after);
+      if (lt === -1) continue;
+      // Tìm dấu > tương ứng sau dấu <
+      const gt = s.indexOf('>', lt + 1);
+      if (gt === -1) continue;
+
+      // Giá trị /Contents nằm trong (lt+1 .. gt) theo index byte
+      ranges.push({ start: lt + 1, end: gt }); // [start, end): end không bao gồm '>'
+      // Tiếp tục tìm các /Contents tiếp theo
+    }
+    return ranges;
+  }
+
+  computeHashForSignature(pdfBuffer: Buffer, signatureIndex = 0) {
+    if (!Buffer.isBuffer(pdfBuffer)) {
+      throw new BadRequestException('pdfBuffer must be a Buffer');
+    }
+
+    // 1) Thử cách 1: /ByteRange đã có số
+    const numericRanges = this.extractAllNumericByteRanges(pdfBuffer);
+    if (
+      numericRanges.length &&
+      signatureIndex >= 0 &&
+      signatureIndex < numericRanges.length
+    ) {
+      const [a, b, c, d] = numericRanges[signatureIndex];
+      const len = pdfBuffer.length;
+      if (a < 0 || b < 0 || c < 0 || d < 0 || a + b > len || c + d > len) {
+        throw new BadRequestException('Invalid ByteRange values');
+      }
+      const part1 = pdfBuffer.slice(a, a + b);
+      const part2 = pdfBuffer.slice(c, c + d);
+      const toHash = Buffer.concat([part1, part2]);
+      const digestHex = crypto
+        .createHash('sha256')
+        .update(toHash)
+        .digest('hex');
+      const digestBase64 = Buffer.from(digestHex, 'hex').toString('base64');
+
+      return {
+        mode: 'numeric-ByteRange',
+        byteRange: [a, b, c, d],
+        digestHex,
+        digestBase64,
+        algorithm: 'SHA-256',
+        signatureCount: numericRanges.length,
+        signatureIndex,
+        pdfLength: len,
+      };
+    }
+
+    // 2) Fallback: /ByteRange là placeholder (*) → tính từ vị trí /Contents
+    const contentRanges = this.findAllContentsValueRanges(pdfBuffer);
+    if (!contentRanges.length) {
+      throw new BadRequestException(
+        'No /ByteRange or /Contents found (no signature placeholder?)',
+      );
+    }
+    if (signatureIndex < 0 || signatureIndex >= contentRanges.length) {
+      throw new BadRequestException(
+        `signatureIndex out of range (0..${contentRanges.length - 1})`,
+      );
+    }
+
+    const { start, end } = contentRanges[signatureIndex];
+    const len = pdfBuffer.length;
+
+    // Chuẩn: loại trừ chỉ bytes bên trong <...>, tức:
+    // part1 = [0 .. start)
+    // part2 = [end .. EOF]
+    const part1 = pdfBuffer.slice(0, start);
+    const part2 = pdfBuffer.slice(end, len);
+    const toHash = Buffer.concat([part1, part2]);
+
+    const digestHex = crypto.createHash('sha256').update(toHash).digest('hex');
+    const digestBase64 = Buffer.from(digestHex, 'hex').toString('base64');
+
+    // Tính ByteRange tương đương (a,b,c,d) cho reference (không bắt buộc phải trả, nhưng hữu ích):
+    const a = 0;
+    const b = start - a;
+    const c = end;
+    const d = len - c;
+
+    return {
+      mode: 'computed-from-Contents', // thông báo đang ở nhánh placeholder
+      byteRange: [a, b, c, d],
+      digestHex,
+      digestBase64,
+      algorithm: 'SHA-256',
+      signatureCount: contentRanges.length,
+      signatureIndex,
+      pdfLength: len,
+      contentsValueRange: { start, end }, // để debug
+    };
   }
 }
