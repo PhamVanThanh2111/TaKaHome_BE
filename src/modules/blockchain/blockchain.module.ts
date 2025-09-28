@@ -48,7 +48,8 @@ import { AuthModule } from '../core/auth/auth.module';
   exports: [
     BlockchainService,
     BlockchainConfigService,
-    BlockchainEventService
+    BlockchainEventService,
+    BlockchainEventHandlerService
   ]
 })
 export class BlockchainModule {}

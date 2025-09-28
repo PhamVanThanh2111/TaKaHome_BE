@@ -31,6 +31,9 @@ import { WalletModule } from './modules/wallet/wallet.module';
 import { EscrowModule } from './modules/escrow/escrow.module';
 import { InvoiceModule } from './modules/invoice/invoice.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
+import { CronModule } from './cron/cron.module';
+import { PenaltyModule } from './modules/penalty/penalty.module';
+import { AutomationModule } from './modules/automation/automation.module';
 
 @Module({
   imports: [
@@ -74,6 +77,9 @@ import { MaintenanceModule } from './modules/maintenance/maintenance.module';
     EscrowModule,
     InvoiceModule,
     MaintenanceModule,
+    CronModule,
+    PenaltyModule,
+    AutomationModule,
   ],
 })
 export class AppModule implements NestModule {
