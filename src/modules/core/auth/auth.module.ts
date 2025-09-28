@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { User } from '../../user/entities/user.entity';
 import { Account } from '../../account/entities/account.entity';
+import { BlockchainModule } from '../../blockchain/blockchain.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 @Module({
@@ -21,6 +22,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
         signOptions: { expiresIn: '7d' },
       }),
     }),
+    forwardRef(() => BlockchainModule),
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],
