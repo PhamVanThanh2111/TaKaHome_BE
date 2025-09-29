@@ -412,6 +412,7 @@ export class BookingService {
   private async activateContractIfPossible(booking: Booking) {
     if (!booking.contractId) return;
     try {
+      // Sử dụng activateFromFirstPayment vì recordFirstPayment đã activate blockchain
       await this.contractService.activate(booking.contractId);
     } catch (error) {
       this.logWorkflowError(

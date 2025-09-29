@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { PaymentReminderCron } from './payment-reminder.cron';
 import { ContractManagementCron } from './contract-management.cron';
 import { SystemMaintenanceCron } from './system-maintenance.cron';
+import { AutomatedPenaltyCron } from './automated-penalty.cron';
 
 import { BookingModule } from '../modules/booking/booking.module';
 import { ContractModule } from '../modules/contract/contract.module';
@@ -32,11 +33,13 @@ import { Notification } from '../modules/notification/entities/notification.enti
     PaymentReminderCron,
     ContractManagementCron,
     SystemMaintenanceCron,
+    AutomatedPenaltyCron,
   ],
   exports: [
     PaymentReminderCron,
     ContractManagementCron,
     SystemMaintenanceCron,
+    AutomatedPenaltyCron,
   ],
 })
 export class CronModule {}

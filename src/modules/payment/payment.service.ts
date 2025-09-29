@@ -15,6 +15,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { PaymentPurpose } from '../common/enums/payment-purpose.enum';
 import { EscrowService } from '../escrow/escrow.service';
 import { BookingService } from '../booking/booking.service';
+import { BlockchainService } from '../blockchain/blockchain.service';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import {
   addMinutesVN,
@@ -36,6 +37,7 @@ export class PaymentService {
     private readonly walletService: WalletService,
     private readonly escrowService: EscrowService,
     private readonly bookingService: BookingService,
+    private readonly blockchainService: BlockchainService,
   ) {}
 
   /** API chính để khởi tạo thanh toán */
@@ -519,6 +521,15 @@ export class PaymentService {
 
     if (payment.purpose === PaymentPurpose.FIRST_MONTH_RENT) {
       await this.creditFirstMonthRentToLandlord(payment);
+      
+      // Sync first payment to blockchain
+      try {
+        await this.recordFirstPaymentOnBlockchain(payment);
+      } catch (error) {
+        console.error('Failed to record first payment on blockchain:', error);
+        // Continue execution - blockchain sync failure shouldn't block payment processing
+      }
+      
       const tenantId = payment.contract.tenant?.id;
       const propertyId = payment.contract.property?.id;
       if (tenantId && propertyId) {
@@ -531,6 +542,13 @@ export class PaymentService {
           console.error('Failed to sync booking first rent state', error);
         }
       }
+      return;
+    }
+    
+    // Xử lý MONTHLY_RENT payment
+    if (payment.purpose === PaymentPurpose.MONTHLY_RENT) {
+      await this.processMonthlyRentPayment(payment);
+      return;
     }
   }
 
@@ -563,6 +581,128 @@ export class PaymentService {
         'Failed to credit landlord wallet for first month rent',
         error,
       );
+      throw error;
+    }
+  }
+
+  /**
+   * Record first payment on blockchain
+   * NOTE: blockchainService.recordFirstPayment() tự động activate contract trên blockchain
+   */
+  private async recordFirstPaymentOnBlockchain(payment: Payment): Promise<void> {
+    try {
+      const contract = payment.contract;
+      if (!contract?.contractCode) {
+        console.warn('Cannot record first payment: missing contract code');
+        return;
+      }
+
+      // Create FabricUser for tenant (who made the payment)
+      const fabricUser = {
+        userId: contract.tenant.id,
+        orgName: 'OrgTenant',
+        mspId: 'OrgTenantMSP',
+      };
+
+      // Gọi recordFirstPayment - method này tự động activate contract trên blockchain
+      await this.blockchainService.recordFirstPayment(
+        contract.contractCode,
+        payment.amount.toString(),
+        payment.id, // Use payment ID as transaction reference
+        fabricUser
+      );
+
+      console.log(`✅ First payment recorded on blockchain for contract ${contract.contractCode} (contract auto-activated)`);
+    } catch (error) {
+      console.error('❌ Failed to record first payment on blockchain:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Process monthly rent payment
+   */
+  private async processMonthlyRentPayment(payment: Payment): Promise<void> {
+    try {
+      // 1. Credit landlord wallet
+      await this.creditMonthlyRentToLandlord(payment);
+
+      // 2. Record payment on blockchain
+      await this.recordMonthlyPaymentOnBlockchain(payment);
+
+      console.log(`✅ Monthly rent payment processed for contract ${payment.contract?.contractCode}`);
+    } catch (error) {
+      console.error('❌ Failed to process monthly rent payment:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Credit monthly rent to landlord wallet
+   */
+  private async creditMonthlyRentToLandlord(payment: Payment): Promise<void> {
+    const landlordId = payment.contract?.landlord?.id;
+
+    if (!landlordId) {
+      console.warn('Missing landlord information for monthly rent payment', {
+        paymentId: payment.id,
+        contractId: payment.contract?.id,
+      });
+      return;
+    }
+
+    const contractCode =
+      payment.contract?.contractCode ?? payment.contract?.id ?? undefined;
+    const note = contractCode
+      ? `Monthly rent for contract ${contractCode}`
+      : 'Monthly rent payout';
+
+    try {
+      await this.walletService.credit(landlordId, {
+        amount: Number(payment.amount),
+        type: WalletTxnType.CONTRACT_PAYMENT,
+        refId: payment.id,
+        note,
+      });
+    } catch (error) {
+      console.error('Failed to credit landlord wallet for monthly rent', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Record monthly payment on blockchain
+   */
+  private async recordMonthlyPaymentOnBlockchain(payment: Payment): Promise<void> {
+    try {
+      const contract = payment.contract;
+      if (!contract?.contractCode) {
+        console.warn('Cannot record monthly payment: missing contract code');
+        return;
+      }
+
+      // Create FabricUser for tenant (who made the payment)
+      const fabricUser = {
+        userId: contract.tenant.id,
+        orgName: 'OrgTenant',
+        mspId: 'OrgTenantMSP',
+      };
+
+      // Generate period string (e.g., "2025-01" for January 2025)
+      const paymentDate = new Date();
+      const period = `${paymentDate.getFullYear()}-${(paymentDate.getMonth() + 1).toString().padStart(2, '0')}`;
+
+      await this.blockchainService.recordPayment(
+        contract.contractCode,
+        period,
+        payment.amount.toString(),
+        fabricUser,
+        payment.id // orderRef
+      );
+
+      console.log(`✅ Monthly payment recorded on blockchain for contract ${contract.contractCode}, period ${period}`);
+    } catch (error) {
+      console.error('❌ Failed to record monthly payment on blockchain:', error);
       throw error;
     }
   }

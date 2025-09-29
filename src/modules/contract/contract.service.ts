@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { addMonths as addMonthsFn } from 'date-fns';
@@ -10,6 +10,8 @@ import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { VN_TZ, formatVN, vnNow } from '../../common/datetime';
 import { plainAddPlaceholder } from '@signpdf/placeholder-plain';
+import { BlockchainService } from '../blockchain/blockchain.service';
+import { FabricUser } from '../blockchain/interfaces/fabric.interface';
 
 type Place = {
   page?: number;
@@ -25,9 +27,12 @@ type PrepareOptions = Place | { places: Place[] };
 
 @Injectable()
 export class ContractService {
+  private readonly logger = new Logger(ContractService.name);
+
   constructor(
     @InjectRepository(Contract)
     private contractRepository: Repository<Contract>,
+    private blockchainService: BlockchainService 
   ) {}
 
   async create(
@@ -112,7 +117,20 @@ export class ContractService {
       status: ContractStatusEnum.PENDING_SIGNATURE,
       contractFileUrl: input.contractFileUrl,
     });
-    return this.contractRepository.save(contract);
+    
+    const savedContract = await this.contractRepository.save(contract);
+
+    // Tích hợp với blockchain: Tạo contract trên blockchain
+    try {
+      await this.createContractOnBlockchain(savedContract);
+      this.logger.log(`Contract ${savedContract.contractCode} created on blockchain successfully`);
+    } catch (error) {
+      this.logger.error(`Failed to create contract ${savedContract.contractCode} on blockchain:`, error);
+      // Đánh dấu contract cần đồng bộ lại với blockchain
+      await this.markForBlockchainSync(savedContract.id, 'CREATE_CONTRACT');
+    }
+
+    return savedContract;
   }
 
   async update(
@@ -164,6 +182,16 @@ export class ContractService {
     this.ensureStatus(contract, [ContractStatusEnum.PENDING_SIGNATURE]);
     contract.status = ContractStatusEnum.SIGNED;
     const saved = await this.contractRepository.save(contract);
+    
+    // Tích hợp với blockchain: Tenant ký hợp đồng
+    try {
+      await this.tenantSignContractOnBlockchain(saved);
+      this.logger.log(`Contract ${saved.contractCode} signed by tenant on blockchain successfully`);
+    } catch (error) {
+      this.logger.error(`Failed to sign contract ${saved.contractCode} on blockchain:`, error);
+      await this.markForBlockchainSync(saved.id, 'TENANT_SIGN_CONTRACT');
+    }
+    
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
@@ -175,14 +203,63 @@ export class ContractService {
     ]);
     contract.status = ContractStatusEnum.ACTIVE;
     const saved = await this.contractRepository.save(contract);
+    
+    // Tích hợp với blockchain: Kích hoạt hợp đồng
+    // try {
+    //   await this.activateContractOnBlockchain(saved);
+    //   this.logger.log(`Contract ${saved.contractCode} activated on blockchain successfully`);
+    // } catch (error) {
+    //   this.logger.error(`Failed to activate contract ${saved.contractCode} on blockchain:`, error);
+    //   await this.markForBlockchainSync(saved.id, 'ACTIVATE_CONTRACT');
+    // }
+
+    // Tự động tạo payment schedule sau khi activate
+    try {
+      await this.createPaymentScheduleOnBlockchain(saved);
+      this.logger.log(`Payment schedule created for contract ${saved.contractCode}`);
+    } catch (error) {
+      this.logger.error(`Failed to create payment schedule for contract ${saved.contractCode}:`, error);
+      await this.markForBlockchainSync(saved.id, 'CREATE_PAYMENT_SCHEDULE');
+    }
+    
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
+
+  /**
+   * Activate contract without any blockchain calls (used when first payment already activated it)
+   * Only updates database status - blockchain is already handled by recordFirstPayment
+   */
+  // async activateFromFirstPayment(id: string): Promise<ResponseCommon<Contract>> {
+  //   const contract = await this.loadContractOrThrow(id);
+  //   this.ensureStatus(contract, [
+  //     ContractStatusEnum.PENDING_SIGNATURE,
+  //     ContractStatusEnum.SIGNED,
+  //   ]);
+  //   contract.status = ContractStatusEnum.ACTIVE;
+  //   const saved = await this.contractRepository.save(contract);
+    
+  //   // CHỈ cập nhật database - blockchain đã được xử lý bởi recordFirstPayment
+  //   // recordFirstPayment tự động: activate contract + create payment schedule
+  //   this.logger.log(`Contract ${saved.contractCode} activated from first payment (blockchain sync completed by recordFirstPayment)`);
+    
+  //   return new ResponseCommon(200, 'SUCCESS', saved);
+  // }
 
   async complete(id: string): Promise<ResponseCommon<Contract>> {
     const contract = await this.loadContractOrThrow(id);
     this.ensureStatus(contract, [ContractStatusEnum.ACTIVE]);
     contract.status = ContractStatusEnum.COMPLETED;
     const saved = await this.contractRepository.save(contract);
+    
+    // Tích hợp với blockchain: Hoàn thành hợp đồng
+    try {
+      await this.completeContractOnBlockchain(saved);
+      this.logger.log(`Contract ${saved.contractCode} completed on blockchain successfully`);
+    } catch (error) {
+      this.logger.error(`Failed to complete contract ${saved.contractCode} on blockchain:`, error);
+      await this.markForBlockchainSync(saved.id, 'COMPLETE_CONTRACT');
+    }
+    
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
@@ -316,5 +393,197 @@ export class ContractService {
     });
 
     return out;
+  }
+
+  // ================================
+  // Blockchain Integration Methods
+  // ================================
+
+  /**
+   * Tạo contract trên blockchain
+   */
+  private async createContractOnBlockchain(contract: Contract): Promise<void> {
+    try {
+      // Load thông tin đầy đủ từ DB
+      const fullContract = await this.contractRepository.findOne({
+        where: { id: contract.id },
+        relations: ['tenant', 'landlord', 'property'],
+      });
+
+      if (!fullContract) {
+        throw new Error('Contract not found for blockchain sync');
+      }
+      const property = fullContract.property;
+      if (!property) {
+        throw new Error('Property info missing for blockchain sync');
+      }
+      // Tạo document hash và signature metadata
+      const documentHash = await this.generateDocumentHash(fullContract);
+      const landlordSignatureMeta = JSON.stringify({ algorithm: 'RSA-SHA256' });
+
+      // Tạo FabricUser cho landlord (người tạo contract)
+      const fabricUser = this.createFabricUser(fullContract.landlord.id, 'OrgLandlordMSP');
+
+      const contractData = {
+        contractId: fullContract.contractCode,
+        landlordId: fullContract.landlord.id,
+        tenantId: fullContract.tenant.id,
+        landlordMSP: 'OrgLandlordMSP',
+        tenantMSP: 'OrgTenantMSP',
+        landlordCertId: `${fullContract.landlord.id}-cert`,
+        tenantCertId: `${fullContract.tenant.id}-cert`,
+        signedContractFileHash: documentHash,
+        landlordSignatureMeta,
+        rentAmount: property.price.toString(), // Default rent amount - should come from property
+        depositAmount: property.price.toString(), // Default deposit amount - should come from property
+        currency: 'VND',
+        startDate: fullContract.startDate.toISOString(),
+        endDate: fullContract.endDate.toISOString(),
+      };
+
+      await this.blockchainService.createContract(contractData, fabricUser);
+
+      this.logger.log(`✅ Contract ${fullContract.contractCode} created on blockchain`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to create contract on blockchain:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Tenant ký contract trên blockchain
+   */
+  private async tenantSignContractOnBlockchain(contract: Contract): Promise<void> {
+    try {
+      const documentHash = await this.generateDocumentHash(contract);
+      const tenantSignatureMeta = JSON.stringify({ algorithm: 'RSA-SHA256' });
+
+      // Tạo FabricUser cho tenant
+      const fabricUser = this.createFabricUser(contract.tenant.id, 'OrgTenantMSP');
+
+      await this.blockchainService.tenantSignContract(
+        contract.contractCode,
+        `full_${documentHash}`,
+        tenantSignatureMeta,
+        fabricUser
+      );
+
+      this.logger.log(`✅ Contract ${contract.contractCode} signed by tenant on blockchain`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to sign contract on blockchain:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Kích hoạt contract trên blockchain (sau khi deposit được funding)
+   */
+  private async activateContractOnBlockchain(contract: Contract): Promise<void> {
+    try {
+      // Tạo FabricUser cho landlord (người kích hoạt)
+      const fabricUser = this.createFabricUser(contract.landlord.id, 'OrgLandlordMSP');
+
+      await this.blockchainService.activateContract(contract.contractCode, fabricUser);
+
+      this.logger.log(`✅ Contract ${contract.contractCode} activated on blockchain`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to activate contract on blockchain:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Hoàn thành contract trên blockchain
+   */
+  private async completeContractOnBlockchain(contract: Contract): Promise<void> {
+    try {
+      // Tạo FabricUser cho landlord
+      const fabricUser = this.createFabricUser(contract.landlord.id, 'OrgLandlordMSP');
+
+      // Sử dụng terminateContract với reason là "COMPLETED"
+      await this.blockchainService.terminateContract(
+        contract.contractCode, 
+        'COMPLETED', 
+        fabricUser
+      );
+
+      this.logger.log(`✅ Contract ${contract.contractCode} completed on blockchain`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to complete contract on blockchain:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Tạo payment schedule trên blockchain sau khi contract active
+   */
+  private async createPaymentScheduleOnBlockchain(contract: Contract): Promise<void> {
+    try {
+      // Tạo FabricUser cho landlord (người quản lý contract)
+      const fabricUser = this.createFabricUser(contract.landlord.id, 'OrgLandlordMSP');
+
+      await this.blockchainService.createMonthlyPaymentSchedule(
+        contract.contractCode,
+        fabricUser
+      );
+
+      this.logger.log(`✅ Payment schedule created on blockchain for contract ${contract.contractCode}`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to create payment schedule on blockchain:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Đánh dấu contract cần đồng bộ lại với blockchain (compensation mechanism)
+   */
+  private async markForBlockchainSync(contractId: string, operation: string): Promise<void> {
+    try {
+      // TODO: Lưu vào queue hoặc bảng retry để xử lý sau
+      this.logger.warn(`🔄 Contract ${contractId} marked for blockchain sync: ${operation}`);
+      
+      // Có thể implement với Redis queue hoặc database table
+      // await this.retryQueueService.addRetryJob({
+      //   type: 'BLOCKCHAIN_SYNC',
+      //   contractId,
+      //   operation,
+      //   attempts: 0,
+      //   maxAttempts: 3,
+      //   createdAt: new Date()
+      // });
+    } catch (error) {
+      this.logger.error('Failed to mark contract for blockchain sync:', error);
+    }
+  }
+
+  /**
+   * Tạo document hash cho contract
+   */
+  private async generateDocumentHash(contract: Contract): Promise<string> {
+    const contractData = {
+      contractCode: contract.contractCode,
+      landlordId: contract.landlord?.id,
+      tenantId: contract.tenant?.id,
+      propertyId: contract.property?.id,
+      startDate: contract.startDate?.toISOString(),
+      endDate: contract.endDate?.toISOString(),
+      status: contract.status,
+    };
+    
+    const dataString = JSON.stringify(contractData);
+    const crypto = require('crypto');
+    return crypto.createHash('sha256').update(dataString).digest('hex');
+  }
+
+  /**
+   * Tạo FabricUser object cho blockchain operations
+   */
+  private createFabricUser(userId: string, orgMSP: string): FabricUser {
+    return {
+      userId: userId,
+      orgName: orgMSP === 'OrgLandlordMSP' ? 'OrgLandlord' : 
+               orgMSP === 'OrgTenantMSP' ? 'OrgTenant' : 'OrgProp',
+      mspId: orgMSP,
+    };
   }
 }

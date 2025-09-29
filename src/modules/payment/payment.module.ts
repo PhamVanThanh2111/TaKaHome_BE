@@ -6,6 +6,7 @@ import { PaymentController } from './payment.controller';
 import { WalletModule } from '../wallet/wallet.module';
 import { EscrowModule } from '../escrow/escrow.module';
 import { BookingModule } from '../booking/booking.module';
+import { BlockchainModule } from '../blockchain/blockchain.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { BookingModule } from '../booking/booking.module';
     WalletModule,
     EscrowModule,
     BookingModule,
+    BlockchainModule,
   ],
   controllers: [PaymentController],
   providers: [PaymentService],

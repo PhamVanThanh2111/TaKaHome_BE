@@ -3,11 +3,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { formatVN, vnNow } from '../../common/datetime';
 
-import { BlockchainEventHandlerService } from '../blockchain/blockchain-event-handler.service';
+import { BlockchainService } from '../blockchain/blockchain.service';
 import { Booking } from '../booking/entities/booking.entity';
+import { BookingStatus } from '../common/enums/booking-status.enum';
 import { Contract } from '../contract/entities/contract.entity';
 import { NotificationService } from '../notification/notification.service';
 import { NotificationTypeEnum } from '../common/enums/notification-type.enum';
+import { EscrowService } from '../escrow/escrow.service';
 
 export interface PenaltyApplication {
   contractId: string;
@@ -34,8 +36,9 @@ export class AutomatedPenaltyService {
     @InjectRepository(Contract)
     private contractRepository: Repository<Contract>,
     
-    private blockchainEventHandler: BlockchainEventHandlerService,
+    private blockchainService: BlockchainService,
     private notificationService: NotificationService,
+    private escrowService: EscrowService,
   ) {}
 
   /**
@@ -56,20 +59,20 @@ export class AutomatedPenaltyService {
       
       this.logger.log(`Applying ${penaltyInfo.rate}% penalty for booking ${booking.id} (${daysPastDue} days overdue)`);
 
-      // Create penalty record on blockchain
-      await this.blockchainEventHandler.handlePenaltyApplied({
-        eventName: 'PenaltyApplied',
-        blockNumber: 0, // Will be filled by actual blockchain call
-        transactionId: `penalty_${booking.id}_${Date.now()}`,
-        timestamp: formatVN(vnNow(), 'yyyy-MM-dd HH:mm:ss'),
-        contractId: booking.contractId,
-        party: 'tenant',
-        amount: penaltyInfo.amount,
-        reason: `Payment overdue by ${daysPastDue} days`,
-        policyRef: 'AUTO_PENALTY_OVERDUE_PAYMENT',
-        appliedBy: 'system',
-        appliedAt: formatVN(vnNow(), 'yyyy-MM-dd HH:mm:ss'),
-      });
+      // Record penalty on blockchain
+      await this.recordPenaltyOnBlockchain(
+        booking.contractId,
+        'tenant',
+        penaltyInfo.amount,
+        `Payment overdue by ${daysPastDue} days`
+      );
+
+      // Deduct penalty from tenant's escrow balance
+      await this.deductFromEscrow(
+        booking.contractId,
+        penaltyInfo.amount,
+        `Payment overdue by ${daysPastDue} days`
+      );
 
       // Send notifications
       await this.sendPenaltyNotifications(booking, penaltyInfo, daysPastDue);
@@ -111,19 +114,19 @@ export class AutomatedPenaltyService {
 
       const penaltyInfo = this.calculateDepositLatePenalty(hoursLate);
 
-      await this.blockchainEventHandler.handlePenaltyApplied({
-        eventName: 'PenaltyApplied',
-        blockNumber: 0,
-        transactionId: `deposit_penalty_${booking.id}_${Date.now()}`,
-        timestamp: formatVN(vnNow(), 'yyyy-MM-dd HH:mm:ss'),
-        contractId: booking.contractId,
-        party: 'tenant',
-        amount: penaltyInfo.amount,
-        reason: `Deposit payment late by ${hoursLate} hours`,
-        policyRef: 'AUTO_PENALTY_LATE_DEPOSIT',
-        appliedBy: 'system',
-        appliedAt: formatVN(vnNow(), 'yyyy-MM-dd HH:mm:ss'),
-      });
+      await this.recordPenaltyOnBlockchain(
+        booking.contractId,
+        'tenant',
+        penaltyInfo.amount,
+        `Deposit payment late by ${hoursLate} hours`
+      );
+
+      // Deduct penalty from tenant's escrow balance
+      await this.deductFromEscrow(
+        booking.contractId,
+        penaltyInfo.amount,
+        `Deposit payment late by ${hoursLate} hours`
+      );
 
       return {
         contractId: booking.contractId,
@@ -253,5 +256,113 @@ export class AutomatedPenaltyService {
       penaltyCount: 0,
       lastPenaltyDate: null,
     };
+  }
+
+  /**
+   * Deduct penalty amount from escrow balance
+   */
+  private async deductFromEscrow(
+    contractId: string,
+    penaltyAmount: number,
+    reason: string
+  ): Promise<void> {
+    try {
+      // Get escrow account for the contract
+      const escrowResponse = await this.escrowService.ensureAccountForContract(contractId);
+      const escrow = escrowResponse.data;
+
+      if (!escrow) {
+        this.logger.warn(`No escrow account found for contract ${contractId}`);
+        return;
+      }
+
+      // Deduct penalty amount from tenant's escrow balance
+      await this.escrowService.deduct(
+        escrow.id,
+        penaltyAmount,
+        'TENANT',
+        `Penalty deduction: ${reason}`
+      );
+
+      this.logger.log(`✅ Deducted ${penaltyAmount} VND from escrow for contract ${contractId}: ${reason}`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to deduct penalty from escrow for contract ${contractId}:`, error);
+      // Don't throw error to not break the penalty application process
+    }
+  }
+
+  /**
+   * Record penalty on blockchain
+   */
+  private async recordPenaltyOnBlockchain(
+    contractId: string,
+    party: string,
+    amount: number,
+    reason: string
+  ): Promise<void> {
+    try {
+      // Create FabricUser for system operations (use landlord MSP)
+      const fabricUser = {
+        userId: 'system',
+        orgName: 'OrgLandlord',
+        mspId: 'OrgLandlordMSP',
+      };
+
+      await this.blockchainService.recordPenalty(
+        contractId,
+        party,
+        amount.toString(),
+        reason,
+        fabricUser
+      );
+
+      this.logger.log(`✅ Penalty recorded on blockchain for contract ${contractId}: ${amount} VND`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to record penalty on blockchain:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check and apply automatic penalties for overdue payments
+   */
+  async processOverduePayments(): Promise<void> {
+    try {
+      this.logger.log('🔍 Processing overdue payments for penalty application...');
+
+      // Find active bookings with overdue first rent payments
+      const overdueBookings = await this.bookingRepository.find({
+        where: {
+          status: BookingStatus.DUAL_ESCROW_FUNDED, // Should have paid first rent by now
+        },
+        relations: ['tenant', 'contract'],
+      });
+
+      let penaltiesApplied = 0;
+
+      for (const booking of overdueBookings) {
+        if (!booking.firstRentDueAt || !booking.firstRentPaidAt) {
+          const now = vnNow();
+          const dueDate = booking.firstRentDueAt || now;
+          
+          if (now > dueDate) {
+            const daysPastDue = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+            
+            if (daysPastDue > 0) {
+              this.logger.log(`📅 Found overdue payment: booking ${booking.id}, ${daysPastDue} days past due`);
+              
+              const penalty = await this.applyPaymentOverduePenalty(booking, daysPastDue);
+              if (penalty) {
+                penaltiesApplied++;
+              }
+            }
+          }
+        }
+      }
+
+      this.logger.log(`✅ Processed overdue payments: ${penaltiesApplied} penalties applied`);
+    } catch (error) {
+      this.logger.error('❌ Failed to process overdue payments:', error);
+    }
   }
 }

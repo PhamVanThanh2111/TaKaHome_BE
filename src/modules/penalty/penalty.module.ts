@@ -6,12 +6,14 @@ import { Booking } from '../booking/entities/booking.entity';
 import { Contract } from '../contract/entities/contract.entity';
 import { BlockchainModule } from '../blockchain/blockchain.module';
 import { NotificationModule } from '../notification/notification.module';
+import { EscrowModule } from '../escrow/escrow.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Booking, Contract]),
     forwardRef(() => BlockchainModule),
     NotificationModule,
+    EscrowModule,
   ],
   providers: [AutomatedPenaltyService],
   exports: [AutomatedPenaltyService],
