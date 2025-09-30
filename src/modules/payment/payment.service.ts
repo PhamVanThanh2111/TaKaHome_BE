@@ -364,7 +364,7 @@ export class PaymentService {
       }
 
       if (vnpParams['vnp_TmnCode'] !== tmnCode) {
-        console.log('vnpParams[''] !== tmnCode');
+        console.log('!== tmnCode');
         return new ResponseCommon(
           200,
           'SUCCESS',
