@@ -355,6 +355,7 @@ export class PaymentService {
         .toLowerCase();
 
       if (signed !== receivedHash) {
+        console.log('signed !== receivedHash');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -363,6 +364,7 @@ export class PaymentService {
       }
 
       if (vnpParams['vnp_TmnCode'] !== tmnCode) {
+        console.log('vnpParams[''] !== tmnCode');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -372,6 +374,7 @@ export class PaymentService {
 
       const txnRef = vnpParams['vnp_TxnRef'];
       if (!txnRef) {
+        console.log('!txnRef');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -385,6 +388,7 @@ export class PaymentService {
       });
 
       if (!payment) {
+        console.log('!payment');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -394,6 +398,7 @@ export class PaymentService {
 
       const amountFromGateway = Number(vnpParams['vnp_Amount'] || 0);
       if (!Number.isFinite(amountFromGateway)) {
+        console.log('!Number.isFinite(amountFromGateway)');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -403,6 +408,7 @@ export class PaymentService {
 
       const expected = Math.round(Number(payment.amount) * 100);
       if (expected !== amountFromGateway) {
+        console.log('expected !== amountFromGateway');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -411,6 +417,7 @@ export class PaymentService {
       }
 
       if (payment.status === PaymentStatusEnum.PAID) {
+        console.log('PaymentStatusEnum.PAID');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -433,6 +440,7 @@ export class PaymentService {
 
         await this.onPaymentPaid(payment.id, payment);
 
+        console.log('onPaymentPaid chay xong');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -440,6 +448,7 @@ export class PaymentService {
         );
       }
 
+      console.log('failed');
       payment.status = PaymentStatusEnum.FAILED;
       await this.paymentRepository.save(payment);
 
