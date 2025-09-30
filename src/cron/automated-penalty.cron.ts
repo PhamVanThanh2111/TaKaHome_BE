@@ -35,6 +35,27 @@ export class AutomatedPenaltyCron {
   }
 
   /**
+   * Run every day at 10:00 AM to check for monthly payment overdue
+   */
+  @Cron('0 10 * * *', {
+    name: 'process-monthly-overdue-payments',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
+  async processMonthlyOverduePayments(): Promise<void> {
+    this.logger.log('🔍 [TEST MODE] Starting monthly overdue payment processing every 30 seconds...');
+
+    try {
+      const startTime = Date.now();
+      await this.penaltyService.processMonthlyOverduePayments();
+      const endTime = Date.now();
+      this.logger.log(`✅ [TEST MODE] Monthly overdue payment processing completed in ${endTime - startTime}ms`);
+    } catch (error) {
+      this.logger.error('❌ [TEST MODE] Failed to process monthly overdue payments:', error);
+      this.logger.error('Error stack:', error);
+    }
+  }
+
+  /**
    * Run every hour to mark payments as overdue on blockchain
    */
   @Cron(CronExpression.EVERY_HOUR, {
@@ -82,6 +103,23 @@ export class AutomatedPenaltyCron {
       return { processed: true };
     } catch (error) {
       this.logger.error('❌ Manual overdue processing failed:', error);
+      return { 
+        processed: false, 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      };
+    }
+  }
+
+  /**
+   * Manual trigger for monthly overdue payment processing (can be called via API if needed)
+   */
+  async triggerMonthlyOverdueProcessing(): Promise<{ processed: boolean; error?: string }> {
+    try {
+      this.logger.log('🔧 Manual monthly overdue payment processing triggered...');
+      await this.penaltyService.processMonthlyOverduePayments();
+      return { processed: true };
+    } catch (error) {
+      this.logger.error('❌ Manual monthly overdue processing failed:', error);
       return { 
         processed: false, 
         error: error instanceof Error ? error.message : 'Unknown error' 

@@ -610,6 +610,7 @@ export class ContractService {
         throw new Error('Property info missing for blockchain sync');
       }
       // Tạo document hash và signature metadata
+      // Là mã hash file pdf đã có chữ ký landlord
       const documentHash = await this.generateDocumentHash(fullContract);
       const landlordSignatureMeta = JSON.stringify({ algorithm: 'RSA-SHA256' });
 
@@ -647,6 +648,8 @@ export class ContractService {
    */
   private async tenantSignContractOnBlockchain(contract: Contract): Promise<void> {
     try {
+      // Tạo document hash và signature metadata
+      // Là mã hash file pdf đã có chữ ký landlord
       const documentHash = await this.generateDocumentHash(contract);
       const tenantSignatureMeta = JSON.stringify({ algorithm: 'RSA-SHA256' });
 

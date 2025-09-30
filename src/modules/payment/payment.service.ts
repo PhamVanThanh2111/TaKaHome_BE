@@ -466,6 +466,8 @@ export class PaymentService {
   }
 
   private async onPaymentPaid(paymentId: string, loaded?: Payment) {
+    console.log(`🔔 onPaymentPaid called for payment: ${paymentId}`);
+    
     const payment =
       loaded ??
       (await this.paymentRepository.findOne({
@@ -479,8 +481,17 @@ export class PaymentService {
       }));
 
     if (!payment || !payment.contract) {
+      console.log(`❌ Payment or contract not found`, { paymentId, hasPayment: !!payment, hasContract: !!payment?.contract });
       return;
     }
+
+    console.log(`📋 Payment details:`, {
+      id: payment.id,
+      purpose: payment.purpose,
+      amount: payment.amount,
+      contractId: payment.contract.id,
+      contractCode: payment.contract.contractCode,
+    });
 
     // Xử lý theo mục đích payment
     // Hiện có 3 mục đích chính:
@@ -493,7 +504,13 @@ export class PaymentService {
       payment.purpose === PaymentPurpose.TENANT_ESCROW_DEPOSIT ||
       payment.purpose === PaymentPurpose.LANDLORD_ESCROW_DEPOSIT
     ) {
-      await this.escrowService.creditDepositFromPayment(payment.id);
+     await this.escrowService.creditDepositFromPayment(payment.id);
+
+      try {
+        await this.recordDepositOnBlockchain(payment);
+      } catch (error) {
+        console.error('❌ Failed to record deposit on blockchain:', error);
+      }
 
       const tenantId = payment.contract.tenant?.id;
       const propertyId = payment.contract.property?.id;
@@ -703,6 +720,60 @@ export class PaymentService {
       console.log(`✅ Monthly payment recorded on blockchain for contract ${contract.contractCode}, period ${period}`);
     } catch (error) {
       console.error('❌ Failed to record monthly payment on blockchain:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Record deposit payment on blockchain
+   */
+  private async recordDepositOnBlockchain(payment: Payment): Promise<void> {
+    try {
+      const contract = payment.contract;
+      if (!contract?.contractCode) {
+        console.warn('❌ Cannot record deposit: missing contract code', {
+          paymentId: payment.id,
+          contractId: payment.contract?.id
+        });
+        return;
+      }
+
+
+      // Determine party based on payment purpose
+      let party: 'tenant' | 'landlord';
+      let fabricUser: any;
+
+      if (payment.purpose === PaymentPurpose.TENANT_ESCROW_DEPOSIT) {
+        party = 'tenant';
+        fabricUser = {
+          userId: contract.tenant.id,
+          orgName: 'OrgTenant',
+          mspId: 'OrgTenantMSP',
+        };
+        console.log(`👤 Tenant deposit detected, userId: ${contract.tenant.id}`);
+      } else if (payment.purpose === PaymentPurpose.LANDLORD_ESCROW_DEPOSIT) {
+        party = 'landlord';
+        fabricUser = {
+          userId: contract.landlord.id,
+          orgName: 'OrgLandlord',
+          mspId: 'OrgLandlordMSP',
+        };
+        console.log(`🏠 Landlord deposit detected, userId: ${contract.landlord.id}`);
+      } else {
+        console.warn('❌ Invalid payment purpose for deposit recording:', payment.purpose);
+        return;
+      }
+
+      await this.blockchainService.recordDeposit(
+        contract.contractCode,
+        party,
+        payment.amount.toString(),
+        payment.id, // Use payment ID as deposit transaction reference
+        fabricUser
+      );
+      console.log(`✅ ${party} deposit recorded on blockchain for contract ${contract.contractCode}`);
+    } catch (error) {
+      console.error('❌ Failed to record deposit on blockchain:', error);
       throw error;
     }
   }

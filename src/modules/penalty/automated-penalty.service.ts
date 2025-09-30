@@ -365,4 +365,169 @@ export class AutomatedPenaltyService {
       this.logger.error('❌ Failed to process overdue payments:', error);
     }
   }
+
+  /**
+   * Check and apply automatic penalties for overdue monthly payments from blockchain
+   */
+  async processMonthlyOverduePayments(): Promise<void> {
+    try {
+      this.logger.log('🔍 Processing monthly overdue payments from blockchain...');
+
+      // Create system user for blockchain queries
+      const systemUser = {
+        userId: 'system',
+        orgName: 'OrgLandlord',
+        mspId: 'OrgLandlordMSP',
+      };
+      // Query SCHEDULED payments from blockchain (not overdue yet)
+      const scheduledResponse = await this.blockchainService.queryPaymentsByStatus('SCHEDULED', systemUser);
+      if (!scheduledResponse.success || !scheduledResponse.data) {
+        return;
+      }
+
+      const scheduledPayments = scheduledResponse.data;
+      // Filter for overdue payments
+      const now = vnNow();
+      const overduePayments = scheduledPayments.filter(payment => {
+        const dueDate = new Date(payment.dueDate!);
+        return now > dueDate;
+      });
+      
+      let penaltiesApplied = 0;
+      for (const payment of overduePayments) {
+        try {
+          this.logger.log(`🔍 Processing payment: ${JSON.stringify({ contractId: payment.contractId, period: payment.period, status: payment.status, dueDate: payment.dueDate })}`);
+          // Skip first payment (period 1) as it's handled by processOverduePayments
+          if (payment.period <= 1) {
+            continue;
+          }
+
+          // Find corresponding contract in database
+          this.logger.log(`🔎 Looking for contract with contractCode: ${payment.contractId}`);
+          const contract = await this.contractRepository.findOne({
+            where: { contractCode: payment.contractId },
+            relations: ['tenant', 'landlord', 'property'],
+          });
+
+          if (!contract) {
+            continue;
+          }
+          // Calculate days overdue
+          const dueDate = new Date(payment.dueDate!);
+          const now = vnNow();
+          const daysPastDue = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+
+          if (daysPastDue > 0) {
+            // Step 1: Mark payment as overdue on blockchain
+            await this.blockchainService.markOverdue(payment.contractId, payment.period.toString(), systemUser);
+            
+            // Step 2: Apply penalty and deduct from escrow
+            const penalty = await this.applyMonthlyPaymentOverduePenalty(
+              contract,
+              payment.period.toString(),
+              daysPastDue,
+              payment.amount
+            );
+            
+            if (penalty) {
+              penaltiesApplied++;
+            } 
+          } 
+        } catch (error) {
+          this.logger.error(`❌ Failed to process overdue payment ${payment.contractId} period ${payment.period}:`, error);
+        }
+      }
+    } catch (error) {
+      this.logger.error('❌ Failed to process monthly overdue payments:', error);
+      this.logger.error('Error details:', error);
+    }
+  }
+
+  /**
+   * Apply penalty for overdue monthly payment
+   */
+  async applyMonthlyPaymentOverduePenalty(
+    contract: Contract,
+    period: string,
+    daysPastDue: number,
+    originalAmount: number
+  ): Promise<PenaltyApplication | null> {
+    try {
+      if (!contract.contractCode) {
+        return null;
+      }
+      // Calculate penalty based on business rules
+      const penaltyInfo = this.calculateOverduePenalty(daysPastDue);
+      // Create system user for blockchain operations
+      const systemUser = {
+        userId: 'system',
+        orgName: 'OrgLandlord',
+        mspId: 'OrgLandlordMSP',
+      };
+      await this.deductFromEscrow(
+        contract.id,
+        penaltyInfo.amount,
+        `Monthly payment period ${period} overdue by ${daysPastDue} days`
+      );
+      // Apply penalty to specific payment period on blockchain
+      await this.blockchainService.applyPenalty(
+        contract.contractCode,
+        period,
+        penaltyInfo.amount.toString(),
+        'MONTHLY_PAYMENT_OVERDUE',
+        `Monthly payment period ${period} overdue by ${daysPastDue} days`,
+        systemUser
+      );
+      // Send notifications
+      this.logger.log(`📨 Sending penalty notifications for contract ${contract.contractCode} period ${period}`);
+      await this.sendMonthlyPaymentPenaltyNotifications(
+        contract,
+        period,
+        penaltyInfo.amount,
+        daysPastDue
+      );
+      const penaltyApplication: PenaltyApplication = {
+        contractId: contract.id,
+        bookingId: '', // Monthly payments don't have booking reference
+        tenantId: contract.tenant.id,
+        daysPastDue,
+        originalAmount,
+        penaltyAmount: penaltyInfo.amount,
+        reason: `Monthly payment period ${period} overdue by ${daysPastDue} days`,
+        appliedAt: vnNow(),
+      };
+      return penaltyApplication;
+    } catch (error) {
+      this.logger.error(`❌ Failed to apply monthly payment penalty for contract ${contract.contractCode} period ${period}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Send penalty notifications for monthly payment overdue
+   */
+  private async sendMonthlyPaymentPenaltyNotifications(
+    contract: Contract,
+    period: string,
+    penaltyAmount: number,
+    daysPastDue: number
+  ): Promise<void> {
+    const periodDisplay = `tháng ${period}`;
+    
+    await this.notificationService.create({
+      userId: contract.tenant.id,
+      type: NotificationTypeEnum.PAYMENT,
+      title: '⚠️ Phí phạt thanh toán hàng tháng',
+      content: `Do thanh toán muộn ${daysPastDue} ngày cho ${periodDisplay} của căn hộ ${contract.property.title}, bạn đã bị áp dụng phí phạt ${penaltyAmount.toLocaleString('vi-VN')} VND. Vui lòng thanh toán sớm để tránh thêm phí phạt.`,
+    });
+
+    await this.notificationService.create({
+      userId: contract.landlord.id,
+      type: NotificationTypeEnum.PAYMENT,
+      title: '💰 Phí phạt thanh toán hàng tháng',
+      content: `Phí phạt ${penaltyAmount.toLocaleString('vi-VN')} VND đã được tự động áp dụng cho người thuê ${contract.tenant.fullName} do thanh toán muộn ${daysPastDue} ngày cho ${periodDisplay} của căn hộ ${contract.property.title}.`,
+    });
+
+    this.logger.log(`📨 Sent monthly payment penalty notifications for contract ${contract.contractCode} period ${period}`);
+  }
 }

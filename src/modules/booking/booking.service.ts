@@ -32,12 +32,11 @@ export class BookingService {
       tenant: { id: tenantId },
       property: { id: dto.propertyId },
       status: BookingStatus.PENDING_LANDLORD,
-      firstRentDueAt: this.parseOptionalInput(dto.firstRentDueAt),
     });
     const saved = await this.bookingRepository.save(booking);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
-
+  
   async landlordApprove(id: string): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.PENDING_LANDLORD]);
@@ -412,7 +411,6 @@ export class BookingService {
   private async activateContractIfPossible(booking: Booking) {
     if (!booking.contractId) return;
     try {
-      // Sử dụng activateFromFirstPayment vì recordFirstPayment đã activate blockchain
       await this.contractService.activate(booking.contractId);
     } catch (error) {
       this.logWorkflowError(
