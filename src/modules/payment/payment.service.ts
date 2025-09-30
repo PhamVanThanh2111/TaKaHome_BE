@@ -517,7 +517,9 @@ export class PaymentService {
       return;
     }
 
+    console.log('Truoc khi chay vao if FIRST_MONTH_RENT');
     if (payment.purpose === PaymentPurpose.FIRST_MONTH_RENT) {
+      console.log('Da chay vao if FIRST_MONTH_RENT');
       await this.creditFirstMonthRentToLandlord(payment);
       const tenantId = payment.contract.tenant?.id;
       const propertyId = payment.contract.property?.id;
