@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException, Inject, forwardRef, Logger ,ConflictException} from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -8,21 +12,16 @@ import { User } from '../../user/entities/user.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RoleEnum } from '../../common/enums/role.enum';
-import { BlockchainService } from '../../blockchain/blockchain.service';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger(AuthService.name);
-
   constructor(
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     private readonly jwtService: JwtService,
-    @Inject(forwardRef(() => BlockchainService))
-    private readonly blockchainService: BlockchainService,
   ) {}
 
   async register(
@@ -44,7 +43,7 @@ export class AuthService {
     });
     await this.userRepo.save(user);
 
-    // role mặc định cho account mới (TENANT), hoặc sử dụng role từ DTO
+    // role mặc định cho account mới (TENANT)
     const defaultRoles = [RoleEnum.TENANT];
 
     // check roles từ dto (nếu có)
@@ -65,34 +64,9 @@ export class AuthService {
     });
     await this.accountRepo.save(account);
 
-    // Enroll blockchain identity based on user role
-    const orgName = this.determineOrgFromRole(defaultRoles);
-    if (orgName) {
-      try {
-        await this.blockchainService.enrollUser({
-          userId: user.id.toString(),
-          orgName: orgName,
-          role: defaultRoles[0]
-        });
-      } catch (error) {
-        // Continue without failing registration - blockchain enrollment is optional
-        this.logger.warn(`Blockchain enrollment failed for user ${user.id}: ${error.message}`);
-      }
-    }
-
     return new ResponseCommon(200, 'SUCCESS', {
       message: 'Register successful!',
     });
-  }
-
-  /**
-   * Determine organization name from user roles
-   */
-  private determineOrgFromRole(roles: RoleEnum[]): string | null {
-    if (roles.includes(RoleEnum.LANDLORD)) return 'OrgLandlord';
-    if (roles.includes(RoleEnum.TENANT)) return 'OrgTenant';
-    if (roles.includes(RoleEnum.ADMIN)) return 'OrgProp';
-    return null;
   }
 
   async validateAccount(

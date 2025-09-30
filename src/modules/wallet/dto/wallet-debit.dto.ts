@@ -1,13 +1,13 @@
 import {
   IsInt,
   Min,
+  IsIn,
   IsUUID,
   IsOptional,
   IsString,
   MaxLength,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { WalletTxnType } from 'src/modules/common/enums/wallet-txn-type.enum';
 
 export class WalletDebitDto {
   @Transform(({ value }) => Number(value))
@@ -16,7 +16,11 @@ export class WalletDebitDto {
   amount: number; // VND
 
   // business: dùng khi trừ tiền trả hợp đồng
-  type: WalletTxnType;
+  @IsIn(['CONTRACT_PAYMENT'])
+  type: 'CONTRACT_PAYMENT';
+
+  @IsIn(['PAYMENT', 'CONTRACT'])
+  refType: 'PAYMENT' | 'CONTRACT';
 
   @IsUUID()
   refId: string;

@@ -2,12 +2,12 @@ import {
   IsInt,
   Min,
   IsOptional,
+  IsIn,
   IsUUID,
   IsString,
   MaxLength,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { WalletTxnType } from 'src/modules/common/enums/wallet-txn-type.enum';
 
 export class WalletCreditDto {
   @Transform(({ value }) => Number(value))
@@ -15,7 +15,12 @@ export class WalletCreditDto {
   @Min(1)
   amount: number; // VND
 
-  type: WalletTxnType;
+  @IsIn(['TOPUP', 'REFUND', 'ADJUSTMENT'])
+  type: 'TOPUP' | 'REFUND' | 'ADJUSTMENT';
+
+  @IsOptional()
+  @IsIn(['TOPUP', 'PAYMENT', 'CONTRACT'])
+  refType?: 'TOPUP' | 'PAYMENT' | 'CONTRACT';
 
   @IsOptional()
   @IsUUID()
