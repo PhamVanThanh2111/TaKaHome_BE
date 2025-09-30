@@ -318,91 +318,193 @@ export class ContractService {
       throw new BadRequestException('Must provide cmsBase64 or cmsHex');
     }
 
-    // Convert CMS
+    // 1) Chuẩn bị CMS bytes
     let cmsBuf: Buffer;
-    if (cmsHex) {
-      cmsBuf = Buffer.from(cmsHex, 'hex');
-    } else {
-      cmsBuf = Buffer.from(cmsBase64!, 'base64');
-    }
+    if (cmsHex) cmsBuf = Buffer.from(cmsHex, 'hex');
+    else cmsBuf = Buffer.from(cmsBase64!, 'base64');
 
-    // Tìm tất cả /ByteRange
+    // 2) Parse toàn bộ /ByteRange và /Contents (chỉ cặp chữ ký – KHÔNG tính /Contents của ảnh/stream)
     const pdfStr = pdfBuffer.toString('latin1');
-    const byteRangeRegex =
-      /\/ByteRange\s*\[\s*([0-9]+|\/\*+)\s+([0-9]+|\/\*+)\s+([0-9]+|\/\*+)\s+([0-9]+|\/\*+)\s*\]/g;
 
-    const byteRanges: { match: RegExpExecArray; index: number }[] = [];
-    let m: RegExpExecArray | null;
-    while ((m = byteRangeRegex.exec(pdfStr)) !== null) {
-      byteRanges.push({ match: m, index: m.index });
+    // /ByteRange: chấp nhận số hoặc "/****" ở mỗi thành phần
+    const byteRangeRe =
+      /\/ByteRange\s*\[\s*([0-9\/\*]+)\s+([0-9\/\*]+)\s+([0-9\/\*]+)\s+([0-9\/\*]+)\s*\]/g;
+
+    // /Contents <HEX...> : chỉ match dạng chữ ký (nội dung HEX trong dấu < >)
+    const contentsRe = /\/Contents\s*<([0-9A-Fa-f\s]+)>/g;
+
+    const byteRanges: { text: string; start: number }[] = [];
+    const contents: {
+      fullText: string; // "/Contents <...>"
+      start: number; // vị trí bắt đầu của "/Contents"
+      hexStart: number; // vị trí byte đầu tiên bên trong '<...>'
+      hexLenChars: number; // số ký tự hex hiện có (đã bỏ khoảng trắng)
+    }[] = [];
+
+    // Tìm các /ByteRange
+    for (let m = byteRangeRe.exec(pdfStr); m; m = byteRangeRe.exec(pdfStr)) {
+      byteRanges.push({ text: m[0], start: m.index });
     }
     if (byteRanges.length === 0) {
       throw new BadRequestException('No /ByteRange found in PDF');
     }
-    if (signatureIndex >= byteRanges.length) {
+
+    // Tìm các /Contents <...>
+    for (let m = contentsRe.exec(pdfStr); m; m = contentsRe.exec(pdfStr)) {
+      const full = m[0];
+      const start = m.index;
+      // Vị trí '<' trong full
+      const localOpen = full.indexOf('<');
+      if (localOpen < 0) continue;
+      const globalHexStart = start + localOpen + 1;
+
+      // Chuỗi hex bên trong (giữ để tính độ dài bytes placeholder)
+      const innerHex = m[1].replace(/\s+/g, '');
+      const hexLen = innerHex.length;
+
+      contents.push({
+        fullText: full,
+        start,
+        hexStart: globalHexStart,
+        hexLenChars: hexLen, // số ký tự HEX (2 ký tự = 1 byte)
+      });
+    }
+
+    // Lưu ý: chỉ các /Contents đi kèm placeholder mới đứng "song song" với /ByteRange.
+    // Số cặp hợp lệ = min(byteRanges.length, contents.length) theo thứ tự xuất hiện.
+    const pairCount = Math.min(byteRanges.length, contents.length);
+    if (pairCount === 0) {
+      throw new BadRequestException('No valid signature placeholders found');
+    }
+    if (signatureIndex < 0 || signatureIndex >= pairCount) {
       throw new BadRequestException(
-        `Signature index ${signatureIndex} out of range (found ${byteRanges.length})`,
+        `Signature index ${signatureIndex} out of range (found ${pairCount})`,
       );
     }
 
-    // Tìm tất cả /Contents <...>
-    const contentsRegex = /\/Contents\s*<([0-9A-Fa-f\s]+)>/g;
-    const contentsMatches: { match: RegExpExecArray; index: number }[] = [];
-    while ((m = contentsRegex.exec(pdfStr)) !== null) {
-      contentsMatches.push({ match: m, index: m.index });
-    }
-    if (contentsMatches.length !== byteRanges.length) {
-      throw new BadRequestException(
-        `Mismatch /ByteRange (${byteRanges.length}) vs /Contents (${contentsMatches.length}) occurrences`,
-      );
-    }
-
-    // Lấy cặp target
     const br = byteRanges[signatureIndex];
-    const ct = contentsMatches[signatureIndex];
+    const ct = contents[signatureIndex];
 
-    // Độ dài placeholder (số byte thật, từ hex string /Contents)
-    const placeholderHex = ct.match[1].replace(/\s+/g, '');
-    const placeholderLength = placeholderHex.length / 2;
-
-    if (cmsBuf.length > placeholderLength) {
+    // 3) Tính độ dài placeholder /Contents (bytes) và chuẩn bị CMS HEX đúng độ dài
+    const placeholderBytes = ct.hexLenChars / 2; // 2 ký tự HEX = 1 byte
+    if (!Number.isInteger(placeholderBytes)) {
       throw new BadRequestException(
-        `CMS length ${cmsBuf.length} exceeds placeholder length ${placeholderLength}`,
+        'Malformed /Contents placeholder (odd hex length)',
+      );
+    }
+    if (cmsBuf.length > placeholderBytes) {
+      throw new BadRequestException(
+        `CMS length ${cmsBuf.length} exceeds placeholder length ${placeholderBytes}`,
       );
     }
 
-    // Pad CMS nếu ngắn hơn placeholder
-    const padded = Buffer.concat([
+    // Pad bằng 0x00 cho đủ chiều dài placeholder
+    const paddedCms = Buffer.concat([
       cmsBuf,
-      Buffer.alloc(placeholderLength - cmsBuf.length, 0),
+      Buffer.alloc(placeholderBytes - cmsBuf.length, 0),
     ]);
-    const cmsHexFull = padded.toString('hex').toUpperCase();
+    const cmsHexUpper = paddedCms.toString('hex').toUpperCase(); // length = ct.hexLenChars (giữ nguyên)
 
-    // Tính byteRange thực sự
+    // 4) Ghi đè /Contents HEX IN-PLACE (không đổi tổng số byte)
+    const out = Buffer.from(pdfBuffer); // bản sao để sửa
+    // Ghi chuỗi HEX mới vào khoảng [hexStart, hexStart + hexLenChars)
+    out.write(cmsHexUpper, ct.hexStart, 'latin1');
+
+    // 5) Tính lại 4 số /ByteRange theo ABS positions (trên buffer "out" sau khi đã ghi CMS hex)
+    // start1 luôn = 0
     const start1 = 0;
-    const len1 = ct.index + ct.match[0].indexOf('<') + 1; // từ đầu file tới ngay trước nội dung hex
-    const start2 = len1 + cmsHexFull.length;
-    const len2 = pdfBuffer.length - start2;
-    const newByteRange = [start1, len1, start2, len2];
+    // len1 = số byte từ đầu file tới ngay trước KÝ TỰ HEX đầu tiên trong <...>
+    const len1 = ct.hexStart - start1;
+    // start2 = vị trí sau phần HEX (vì độ dài hex giữ nguyên ⇒ hexEnd như cũ)
+    const start2 = ct.hexStart + ct.hexLenChars;
+    // len2 = phần còn lại
+    const len2 = out.length - start2;
 
-    // Replace target /Contents
-    const updatedStr =
-      pdfStr.substring(0, ct.match.index) +
-      pdfStr
-        .substring(ct.match.index, ct.match.index + ct.match[0].length)
-        .replace(placeholderHex, cmsHexFull) +
-      pdfStr.substring(ct.match.index + ct.match[0].length);
+    const numbers = [start1, len1, start2, len2];
 
-    // Replace target /ByteRange
-    const updatedStr2 =
-      updatedStr.substring(0, br.index) +
-      updatedStr
-        .substring(br.index, br.index + br.match[0].length)
-        .replace(br.match[0], `/ByteRange [${newByteRange.join(' ')}]`) +
-      updatedStr.substring(br.index + br.match[0].length);
+    // 6) Ghi đè /ByteRange IN-PLACE VÀ CHỈ VÀO CÁC SLOT '*'
+    //    Giữ nguyên dấu '/' đứng trước dãy '*', giữ nguyên mọi khoảng trắng.
+    function padFixedWidth(num: number, width: number): string {
+      const s = String(num);
+      if (s.length > width) {
+        throw new BadRequestException(
+          `ByteRange number ${s} exceeds placeholder width ${width}`,
+        );
+      }
+      // Left-pad bằng SPACE để đủ bề rộng slot (không làm tăng/giảm số byte)
+      return ' '.repeat(width - s.length) + s;
+    }
 
-    return Promise.resolve(Buffer.from(updatedStr2, 'latin1'));
-    // return Buffer.from(updatedStr2, 'latin1');
+    /**
+     * Ghi số vào đúng 4 "slot *" trong chuỗi ByteRange (nếu slot là số cố định, bỏ qua).
+     * - brText: nguyên văn "/ByteRange [ ... ]"
+     * - brStart: vị trí bắt đầu brText trong buffer gốc
+     * - numbers: [b0, b1, b2, b3]
+     */
+    function writeByteRangeInPlace(
+      outBuf: Buffer,
+      brText: string,
+      brStart: number,
+      numbersArr: number[],
+    ) {
+      // Lấy phần bên trong dấu [ ... ] để biết token nào là '*' / có '/'
+      const openIdx = brText.indexOf('[');
+      const closeIdx = brText.indexOf(']');
+      if (openIdx < 0 || closeIdx < 0 || closeIdx <= openIdx) {
+        throw new BadRequestException('Malformed /ByteRange object');
+      }
+      const inside = brText.slice(openIdx + 1, closeIdx);
+
+      // Tìm lần lượt các dải '*' (có thể là "/****" hoặc "****"), theo thứ tự xuất hiện
+      const starRuns: { absPos: number; width: number }[] = [];
+      const starRe = /\/\*+|\*+/g; // match "/****" hoặc "****"
+      for (let m = starRe.exec(brText); m; m = starRe.exec(brText)) {
+        const full = m[0];
+        const hasSlash = full.startsWith('/');
+        const width = full.length - (hasSlash ? 1 : 0); // số lượng '*'
+        const localPos = m.index + (hasSlash ? 1 : 0); // vị trí ngay sau '/' nếu có
+        const absPos = brStart + localPos;
+        starRuns.push({ absPos, width });
+      }
+
+      // Xác định các token trong "inside" để biết slot nào thuộc thành phần thứ mấy (0..3)
+      // Sau đó map theo thứ tự: thành phần nào chứa '*' thì lấy 1 starRun tương ứng theo thứ tự.
+      const tokens = inside.trim().split(/\s+/); // 4 tokens
+      if (tokens.length < 4) {
+        throw new BadRequestException('Unexpected /ByteRange tokens');
+      }
+
+      // Xác định thành phần nào là slot (*)
+      const starredIdxs: number[] = [];
+      tokens.forEach((tk, idx) => {
+        if (tk.includes('*')) starredIdxs.push(idx);
+      });
+
+      if (starRuns.length !== starredIdxs.length) {
+        // Trong thực tế thường là 3 slot (*) cho các thành phần 1..3, b0 = "0"
+        // Nhưng nếu placeholder thay đổi hình dạng, cần đồng bộ số slot.
+        throw new BadRequestException('Unexpected ByteRange placeholder shape');
+      }
+
+      // Ghi số cho các slot theo thứ tự
+      for (let i = 0; i < starRuns.length; i++) {
+        const compIndex = starredIdxs[i]; // thành phần thứ mấy (0..3)
+        const run = starRuns[i];
+        const valStr = padFixedWidth(numbersArr[compIndex], run.width);
+        outBuf.write(valStr, run.absPos, 'latin1');
+      }
+    }
+
+    writeByteRangeInPlace(out, br.text, br.start, numbers);
+
+    // 7) Sanity check (không đổi tổng chiều dài)
+    if (out.length !== pdfBuffer.length) {
+      throw new BadRequestException(
+        `PDF length changed after embed (was ${pdfBuffer.length}, now ${out.length})`,
+      );
+    }
+
+    return out;
   }
 
   // --- Helpers ---
