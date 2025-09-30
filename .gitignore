@@ -42,6 +42,17 @@ lerna-debug.log*
 .env.production.local
 .env.local
 
+# Blockchain sensitive data
+assets/blockchain/wallet/*.id
+assets/blockchain/users/*/
+!assets/blockchain/users/.gitkeep
+*.pem
+*.key
+
+# Temp blockchain data
+fabric-client-kv-*
+hfc-key-store/
+
 # temp directory
 .temp
 .tmp

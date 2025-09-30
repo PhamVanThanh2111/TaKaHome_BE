@@ -1,0 +1,6 @@
+export enum WalletTxnType {
+  TOPUP = 'TOPUP',
+  CONTRACT_PAYMENT = 'CONTRACT_PAYMENT',
+  REFUND = 'REFUND',
+  ADJUSTMENT = 'ADJUSTMENT',
+}
