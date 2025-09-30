@@ -25,14 +25,19 @@ interface MulterFile {
 }
 
 import { SmartCAService } from "../services/smartca.service";
+import { SmartCAWebhookService } from "../services/smartca-webhook.service";
 import { SmartCAConfigDto } from "../dto/smartca-config.dto";
+import { SmartCAWebhookDto } from "../dto/webhook";
 import { ISignatureOptions, IXMLSignatureOptions, ISmartCATHConfig } from "../interfaces/smartca.interface";
 
 @ApiTags('SmartCA')
 @ApiBearerAuth()
 @Controller("smartca")
 export class SmartCAController {
-  constructor(private readonly smartcaService: SmartCAService) {}
+  constructor(
+    private readonly smartcaService: SmartCAService,
+    private readonly webhookService: SmartCAWebhookService
+  ) {}
 
   @Post("certificates")
   @ApiOperation({ summary: 'Get user certificates from SmartCA' })
@@ -321,6 +326,64 @@ export class SmartCAController {
         size: file.size,
         hash: hash,
       },
+    };
+  }
+
+  @Post("webhook")
+  @ApiOperation({ summary: 'Webhook endpoint to receive signed files from SmartCA' })
+  @ApiResponse({ status: 200, description: 'Webhook processed successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid webhook data' })
+  async handleWebhook(@Body() webhookData: SmartCAWebhookDto) {
+    const result = await this.webhookService.handleWebhook(webhookData);
+    
+    return {
+      success: result.success,
+      message: result.message,
+      data: {
+        processed_files: result.processed_files,
+        transaction_id: webhookData.transaction_id,
+        timestamp: new Date().toISOString()
+      }
+    };
+  }
+
+  @Get("signed-file/:docId")
+  @ApiOperation({ summary: 'Get signed file by document ID' })
+  @ApiResponse({ status: 200, description: 'Signed file retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Signed file not found' })
+  async getSignedFile(@Param("docId") docId: string, @Res() res: Response) {
+    const fileBuffer = await this.webhookService.getSignedFile(docId);
+    const fileInfo = await this.webhookService.getSignedFileInfo(docId);
+    
+    if (!fileBuffer || !fileInfo) {
+      throw new BadRequestException("Signed file not found");
+    }
+
+    const contentType = fileInfo.file_type === 'pdf' ? 'application/pdf' : 'application/xml';
+    
+    res.set({
+      "Content-Type": contentType,
+      "Content-Disposition": `attachment; filename="signed_${fileInfo.original_filename}"`,
+    });
+    
+    res.status(HttpStatus.OK).send(fileBuffer);
+  }
+
+  @Get("signed-file/:docId/info")
+  @ApiOperation({ summary: 'Get signed file metadata by document ID' })
+  @ApiResponse({ status: 200, description: 'Signed file info retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Signed file not found' })
+  async getSignedFileInfo(@Param("docId") docId: string) {
+    const fileInfo = await this.webhookService.getSignedFileInfo(docId);
+    
+    if (!fileInfo) {
+      throw new BadRequestException("Signed file not found");
+    }
+
+    return {
+      success: true,
+      message: "Signed file info retrieved successfully",
+      data: fileInfo
     };
   }
 }

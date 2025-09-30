@@ -2,6 +2,9 @@ import { Module } from "@nestjs/common";
 import { HttpModule } from "@nestjs/axios";
 import { MulterModule } from "@nestjs/platform-express";
 import { SmartCAService } from "./services/smartca.service";
+import { SmartCAWebhookService } from "./services/smartca-webhook.service";
+import { TemporaryFileService } from "./services/temporary-file.service";
+import { SmartCANotificationService } from "./services/smartca-notification.service";
 import { SmartCAController } from "./controllers/smartca.controller";
 
 @Module({
@@ -32,8 +35,8 @@ import { SmartCAController } from "./controllers/smartca.controller";
       },
     }),
   ],
-  providers: [SmartCAService],
+  providers: [SmartCAService, SmartCAWebhookService, TemporaryFileService, SmartCANotificationService],
   controllers: [SmartCAController],
-  exports: [SmartCAService],
+  exports: [SmartCAService, SmartCAWebhookService, TemporaryFileService, SmartCANotificationService],
 })
 export class SmartCAModule {}

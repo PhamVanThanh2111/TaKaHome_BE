@@ -16,6 +16,7 @@ import {
   UserCertificateDto,
 } from "../dto";
 import { ISignatureOptions, IXMLSignatureOptions, ISmartCATHConfig } from "../interfaces/smartca.interface";
+import { TemporaryFileService } from "./temporary-file.service";
 
 @Injectable()
 export class SmartCAService {
@@ -29,7 +30,8 @@ export class SmartCAService {
 
   constructor(
     private readonly httpService: HttpService,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    private readonly temporaryFileService: TemporaryFileService
   ) {
     // Determine which URL to use based on environment
     const environment = this.configService.get<string>('SMARTCA_ENVIRONMENT', 'production');
@@ -129,7 +131,17 @@ export class SmartCAService {
       // you would use a proper PDF signing library like node-signpdf)
       const hash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
 
-      this.logger.log(`Creating PDF signature for doc_id: ${options.docId || "default-doc-id"}`);
+      const docId = options.docId || "default-doc-id";
+      this.logger.log(`Creating PDF signature for doc_id: ${docId}`);
+
+      // Step 2.5: Store temporary file for webhook processing
+      await this.temporaryFileService.storeTemporaryFile(
+        fileBuffer,
+        docId,
+        options.originalFileName || `document_${Date.now()}.pdf`,
+        'pdf',
+        config.user_id
+      );
 
       // Step 3: Send sign request
       const signRequest: SignRequestDto = {
@@ -141,7 +153,7 @@ export class SmartCAService {
         sign_files: [
           {
             data_to_be_signed: hash,
-            doc_id: options.docId || "default-doc-id",
+            doc_id: docId,
             file_type: "pdf",
             sign_type: "hash",
           },
@@ -206,7 +218,18 @@ export class SmartCAService {
       // Create hash from XML content
       const hash = crypto.createHash("sha256").update(xmlContent).digest("hex");
 
-      this.logger.log(`Creating XML signature for doc_id: ${options.docId || "default-xml-doc-id"}`);
+      const docId = options.docId || "default-xml-doc-id";
+      this.logger.log(`Creating XML signature for doc_id: ${docId}`);
+
+      // Store temporary file for webhook processing
+      const xmlBuffer = Buffer.from(xmlContent, 'utf8');
+      await this.temporaryFileService.storeTemporaryFile(
+        xmlBuffer,
+        docId,
+        options.originalFileName || `document_${Date.now()}.xml`,
+        'xml',
+        config.user_id
+      );
 
       const signRequest: SignRequestDto = {
         sp_id: config.sp_id,

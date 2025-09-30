@@ -13,6 +13,7 @@ export interface ISignatureOptions {
   fontSize?: number;
   fontColor?: string;
   docId?: string;
+  originalFileName?: string;
 }
 
 export interface IXMLSignatureOptions {
@@ -23,6 +24,7 @@ export interface IXMLSignatureOptions {
   tagSigning?: string;
   tagSaveSignature?: string;
   docId?: string;
+  originalFileName?: string;
 }
 
 export interface ISmartCATHConfig extends ISmartCAConfig {
