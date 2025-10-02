@@ -1441,8 +1441,10 @@ export class ContractService {
   }) {
     const signatureIndex = options.signatureIndex ?? 0;
 
-    // 1) Hash PDF theo /ByteRange
+    // 1) Locate signature gap first (independent of ByteRange format)
     const gap = this.locateContentsGap(options.pdf, signatureIndex);
+    
+    // 2) Try to read declared ByteRange (might be corrupted)
     const decl = this.readDeclaredByteRange(options.pdf, signatureIndex);
 
     if (decl) {
@@ -1454,19 +1456,33 @@ export class ContractService {
 
       // Nếu lệch ở a/b/c => offset sai thật, phải chặn
       if (!aOk || !bOk || !cOk) {
-        throw new BadRequestException(
-          `BYTE_RANGE_MISMATCH: declared=[${decl.a},${decl.b},${decl.c},${decl.d}] should=[${should.join(',')}]`,
+        console.warn(
+          `ByteRange mismatch detected but will use calculated gap:`,
+          {
+            declared: [decl.a, decl.b, decl.c, decl.d],
+            calculated: should,
+          },
         );
+        // Optional: có thể log warning thay vì throw error
+        // throw new BadRequestException(
+        //   `BYTE_RANGE_MISMATCH: declared=[${decl.a},${decl.b},${decl.c},${decl.d}] should=[${should.join(',')}]`,
+        // );
       }
 
       // Nếu chỉ lệch ở d (thường do thêm vài byte sau '>'), KHÔNG ném lỗi.
       // Ta vẫn hash theo 'should' (gap) vì đó mới là chiều dài thực tế.
       if (!dOk) {
-        // optional: có thể log cảnh báo nội bộ tại đây nếu bạn muốn
-        // this.logger?.warn?.(`Auto-ignoring ByteRange.d mismatch: declared=${decl.d}, should=${should[3]}`);
+        console.warn(
+          `Auto-ignoring ByteRange.d mismatch: declared=${decl.d}, calculated=${should[3]}`,
+        );
       }
+    } else {
+      console.warn(
+        `No valid ByteRange found for signature ${signatureIndex}, using calculated gap`,
+      );
     }
 
+    // 3) Hash PDF theo gap được tính toán (an toàn hơn)
     const { digestHex: pdfDigestHex } = this.hashForSignatureByGap(
       options.pdf,
       gap,
@@ -1488,13 +1504,12 @@ export class ContractService {
     const signedAttrsDER = this.buildSignedAttrsDER(pdfDigestHex, signerPem);
 
     // 4) Hash DER (SHA-256) → gửi ký
-    const derHashBytes = forge.md.sha256
-      .create()
-      .update(signedAttrsDER.toString('binary'))
-      .digest()
-      .bytes();
-    const derHashHex = Buffer.from(derHashBytes, 'binary').toString('hex');
-    const derHashB64 = Buffer.from(derHashBytes, 'binary').toString('base64');
+    const derHashBytes = crypto
+      .createHash('sha256')
+      .update(signedAttrsDER)
+      .digest();
+    const derHashHex = derHashBytes.toString('hex');
+    const derHashB64 = derHashBytes.toString('base64');
 
     const transactionId = 'SP_CA_' + Date.now();
     const docId = 'doc-' + randomUUID();
@@ -1919,28 +1934,32 @@ export class ContractService {
   // Tìm phạm vi /Contents <...> và tính ByteRange đúng chuẩn
   private locateContentsGap(pdf: Buffer, signatureIndex = 0) {
     const pdfStr = pdf.toString('latin1'); // giữ nguyên byte
-    const reSig =
-      /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\][\s\S]*?\/Contents\s*<([0-9A-Fa-f]*)>/g;
-    // Nếu bạn không muốn dựa vào ByteRange sẵn có, dùng regex khác chỉ tìm /Contents <...>
-    // const reSig = /\/Contents\s*<([0-9A-Fa-f]*)>/g;
+    
+    // Tìm tất cả signature objects dựa vào /Contents pattern (không phụ thuộc ByteRange)
+    const reSig = /\/Contents\s*<([0-9A-Fa-f]*)>/g;
 
     let m: RegExpExecArray | null;
     let found = 0;
     while ((m = reSig.exec(pdfStr))) {
       if (found === signatureIndex) {
         const fullMatch = m[0];
-        const hexInside = m[5] ?? '';
-        // vị trí ký tự '<' mở
-        const ltPos = pdfStr.indexOf('<', m.index + fullMatch.indexOf('<'));
-        // vị trí ký tự '>' đóng tương ứng
+        const hexInside = m[1] ?? '';
+        
+        // Tìm vị trí chính xác của '<' và '>'
+        const contentsStart = m.index + fullMatch.indexOf('/Contents');
+        const ltPos = pdfStr.indexOf('<', contentsStart);
         const gtPos = pdfStr.indexOf('>', ltPos);
-        if (ltPos < 0 || gtPos < 0)
-          throw new Error('Cannot find <...> of /Contents');
+        
+        if (ltPos < 0 || gtPos < 0) {
+          throw new Error(
+            `Cannot find <...> brackets for signature ${signatureIndex}`,
+          );
+        }
 
         const start = ltPos; // offset bắt đầu gap (tại '<')
         const hexLen = hexInside.length; // số ký tự hex giữa < >
-        const gapLen = 2 + hexLen; // tính cả '<' và '>'
-        const end = start + gapLen; // vị trí sau dấu '>' (c = end)
+        const gapLen = gtPos - ltPos + 1; // từ '<' đến '>' (inclusive)
+        const end = gtPos + 1; // vị trí sau dấu '>' (c = end)
 
         return {
           start,
