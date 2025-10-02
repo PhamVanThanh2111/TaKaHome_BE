@@ -25,7 +25,7 @@ export class PreparePDFDto {
 
   @ApiPropertyOptional({
     description: 'Độ dài vùng Contents',
-    example: '12000',
+    example: '36864',
   })
   @IsOptional()
   @IsNumberString()
@@ -42,7 +42,7 @@ export class PreparePDFDto {
   @IsString()
   rect2?: string;
 
-  @ApiPropertyOptional({ example: '12000' })
+  @ApiPropertyOptional({ example: '36864' })
   @IsOptional()
   @IsNumberString()
   signatureLength2?: string;

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { addMonths as addMonthsFn } from 'date-fns';
@@ -12,6 +12,16 @@ import { VN_TZ, formatVN, vnNow } from '../../common/datetime';
 import { plainAddPlaceholder } from '@signpdf/placeholder-plain';
 import * as crypto from 'crypto';
 import * as forge from 'node-forge';
+import { randomUUID } from 'crypto';
+import axios from 'axios';
+import smartcaConfig from 'src/config/smartca.config';
+import { ConfigType } from '@nestjs/config';
+
+type PlainAddPlaceholderInput = Parameters<typeof plainAddPlaceholder>[0] & {
+  rect?: [number, number, number, number];
+  page?: number;
+  signatureLength?: number;
+};
 
 type Place = {
   page?: number;
@@ -25,11 +35,40 @@ type Place = {
 
 type PrepareOptions = Place | { places: Place[] };
 
+const OID_SHA256 = forge.pki.oids.sha256;
+const OID_RSA = forge.pki.oids.rsaEncryption;
+
+const BR_SLOT_WIDTH = 12;
+const MIN_SPACES_BETWEEN = 1;
+
+export type SmartCASignResponse = any;
+
+// time_stamp: YYYYMMDDhhmmssZ (UTC, không có 'T')
+function utcTimestamp(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
+}
+
+export interface SmartCAUserCertificate {
+  serial_number?: string;
+  cert_status_code?: string; // "VALID" ...
+  cert_status?: string; // "Đang hoạt động" ...
+  [k: string]: any;
+}
+export interface SmartCAGetCertResp {
+  message?: string;
+  data?: { user_certificates?: SmartCAUserCertificate[] };
+}
+
 @Injectable()
 export class ContractService {
   constructor(
     @InjectRepository(Contract)
     private contractRepository: Repository<Contract>,
+
+    @Inject(smartcaConfig.KEY)
+    private readonly smartca: ConfigType<typeof smartcaConfig>,
   ) {}
 
   async create(
@@ -328,7 +367,7 @@ export class ContractService {
 
     // /ByteRange: chấp nhận số hoặc "/****" ở mỗi thành phần
     const byteRangeRe =
-      /\/ByteRange\s*\[\s*([0-9\/\*]+)\s+([0-9\/\*]+)\s+([0-9\/\*]+)\s+([0-9\/\*]+)\s*\]/g;
+      /\/ByteRange\s*\[\s*([0-9/*]+)\s+([0-9/*]+)\s+([0-9/*]+)\s+([0-9/*]+)\s*\]/g;
 
     // /Contents <HEX...> : chỉ match dạng chữ ký (nội dung HEX trong dấu < >)
     const contentsRe = /\/Contents\s*<([0-9A-Fa-f\s]+)>/g;
@@ -443,56 +482,61 @@ export class ContractService {
      */
     function writeByteRangeInPlace(
       outBuf: Buffer,
-      brText: string,
-      brStart: number,
-      numbersArr: number[],
+      brText: string, // toàn bộ chuỗi "/ByteRange [ ... ]"
+      brStart: number, // vị trí bắt đầu "/ByteRange" trong outBuf
+      numbersArr: number[], // [off0, len0, off1, len1]
     ) {
-      // Lấy phần bên trong dấu [ ... ] để biết token nào là '*' / có '/'
       const openIdx = brText.indexOf('[');
       const closeIdx = brText.indexOf(']');
       if (openIdx < 0 || closeIdx < 0 || closeIdx <= openIdx) {
         throw new BadRequestException('Malformed /ByteRange object');
       }
+
       const inside = brText.slice(openIdx + 1, closeIdx);
+      const insideLen = inside.length;
 
-      // Tìm lần lượt các dải '*' (có thể là "/****" hoặc "****"), theo thứ tự xuất hiện
-      const starRuns: { absPos: number; width: number }[] = [];
-      const starRe = /\/\*+|\*+/g; // match "/****" hoặc "****"
-      for (let m = starRe.exec(brText); m; m = starRe.exec(brText)) {
-        const full = m[0];
-        const hasSlash = full.startsWith('/');
-        const width = full.length - (hasSlash ? 1 : 0); // số lượng '*'
-        const localPos = m.index + (hasSlash ? 1 : 0); // vị trí ngay sau '/' nếu có
-        const absPos = brStart + localPos;
-        starRuns.push({ absPos, width });
+      // Xây các số width cố định = BR_SLOT_WIDTH (căn phải, pad space)
+      const fmt = (n: number) => {
+        const s = String(n);
+        if (s.length > BR_SLOT_WIDTH) {
+          throw new BadRequestException(
+            `ByteRange number ${n} exceeds fixed width ${BR_SLOT_WIDTH}`,
+          );
+        }
+        return ' '.repeat(BR_SLOT_WIDTH - s.length) + s;
+      };
+
+      const parts = [
+        fmt(numbersArr[0]),
+        fmt(numbersArr[1]),
+        fmt(numbersArr[2]),
+        fmt(numbersArr[3]),
+      ];
+
+      // Chuỗi tối thiểu khi ghép bằng 1 space giữa các số
+      const MIN_SPACES_BETWEEN = 1;
+      const minNeeded =
+        parts.reduce((t, p) => t + p.length, 0) + 3 * MIN_SPACES_BETWEEN; // 4 numbers + 3 khoảng trắng
+
+      if (insideLen < minNeeded) {
+        throw new BadRequestException(
+          `Not enough room to widen /ByteRange to ${BR_SLOT_WIDTH}-char slots (need >= ${minNeeded}, have ${insideLen})`,
+        );
       }
 
-      // Xác định các token trong "inside" để biết slot nào thuộc thành phần thứ mấy (0..3)
-      // Sau đó map theo thứ tự: thành phần nào chứa '*' thì lấy 1 starRun tương ứng theo thứ tự.
-      const tokens = inside.trim().split(/\s+/); // 4 tokens
-      if (tokens.length < 4) {
-        throw new BadRequestException('Unexpected /ByteRange tokens');
-      }
+      // Phân bổ phần dư (extra spaces) để tổng độ dài KHÔNG đổi
+      const extra = insideLen - minNeeded;
+      // Chiến lược: dồn hết "extra" vào khoảng trắng cuối cùng trước số thứ 4
+      const sep1 = ' '.repeat(MIN_SPACES_BETWEEN);
+      const sep2 = ' '.repeat(MIN_SPACES_BETWEEN);
+      const sep3 = ' '.repeat(MIN_SPACES_BETWEEN + extra);
 
-      // Xác định thành phần nào là slot (*)
-      const starredIdxs: number[] = [];
-      tokens.forEach((tk, idx) => {
-        if (tk.includes('*')) starredIdxs.push(idx);
-      });
+      const rebuiltInside =
+        parts[0] + sep1 + parts[1] + sep2 + parts[2] + sep3 + parts[3];
 
-      if (starRuns.length !== starredIdxs.length) {
-        // Trong thực tế thường là 3 slot (*) cho các thành phần 1..3, b0 = "0"
-        // Nhưng nếu placeholder thay đổi hình dạng, cần đồng bộ số slot.
-        throw new BadRequestException('Unexpected ByteRange placeholder shape');
-      }
-
-      // Ghi số cho các slot theo thứ tự
-      for (let i = 0; i < starRuns.length; i++) {
-        const compIndex = starredIdxs[i]; // thành phần thứ mấy (0..3)
-        const run = starRuns[i];
-        const valStr = padFixedWidth(numbersArr[compIndex], run.width);
-        outBuf.write(valStr, run.absPos, 'latin1');
-      }
+      // Ghi đè phần inside (giữ nguyên tổng chiều dài vùng [ ... ])
+      const absInsideStart = brStart + openIdx + 1;
+      outBuf.write(rebuiltInside, absInsideStart, 'latin1');
     }
 
     writeByteRangeInPlace(out, br.text, br.start, numbers);
@@ -558,6 +602,12 @@ export class ContractService {
     return contract;
   }
 
+  // === BACKUP: Ensure ByteRange space bằng cách force expand ByteRange ===
+  // REMOVED: ensureByteRangeSpace - không cần thiết cho file nhỏ
+
+  // REMOVED: expandByteRangeAreas - gây lỗi và không cần thiết
+  // REMOVED: expandByteRangeAreas - không cần thiết
+
   async preparePlaceholder(
     pdfBuffer: Buffer,
     options: PrepareOptions,
@@ -567,49 +617,263 @@ export class ContractService {
     if (!Buffer.isBuffer(pdfBuffer)) {
       throw new Error('pdfBuffer must be a Buffer');
     }
-    if (!places.length) {
-      return Promise.resolve(pdfBuffer);
-    }
+    if (!places.length) return Buffer.from(pdfBuffer);
 
     const defaultRect: [number, number, number, number] = [50, 50, 250, 120];
 
-    // Gọi plainAddPlaceholder nhiều lần, lần nào cũng dùng buffer mới nhất
+    // 1) Add all placeholders (each call uses the latest buffer)
     let out = Buffer.from(pdfBuffer);
-
     places.forEach((p, idx) => {
       const rect = p.rect ?? defaultRect;
-
-      // Tên field cố định, tránh trùng
       const name = p.name?.trim() || `Signature${idx + 1}`;
-
-      // signatureLength nên đủ lớn cho CMS (thường 12k–16k là an toàn cho RSA)
       const signatureLength = Number.isFinite(p.signatureLength as number)
         ? Number(p.signatureLength)
-        : 12000;
+        : 12000; // đủ rộng cho CMS RSA thông dụng
 
-      // kiểm tra rect hợp lệ
       if (
-        !Array.isArray(rect) ||
         rect.length !== 4 ||
         rect.some((n) => typeof n !== 'number' || !Number.isFinite(n))
       ) {
-        throw new Error(`Invalid rect for placeholder #${idx + 1}`);
+        throw new BadRequestException('Invalid rect for placeholder');
+      }
+      if (signatureLength < 4096) {
+        throw new BadRequestException(
+          'signatureLength too small (>= 4096 recommended)',
+        );
       }
 
-      out = Buffer.from(
-        plainAddPlaceholder({
-          pdfBuffer: out,
-          name,
-          signatureLength,
-          // Các metadata tuỳ chọn
-          reason: p.reason ?? '',
-          contactInfo: p.contactInfo ?? '',
-          location: p.location ?? '',
-        }),
+      // FORCE larger signature length to ensure enough ByteRange space
+      const forceSignatureLength = Math.max(signatureLength, 65536); // Force 64KB minimum
+
+      const opts: PlainAddPlaceholderInput = {
+        pdfBuffer: out,
+        reason: p.reason ?? 'Digitally signed',
+        contactInfo: p.contactInfo ?? '',
+        location: p.location ?? '',
+        name,
+        signatureLength: forceSignatureLength, // Always use large size
+        rect,
+        page: p.page,
+      };
+
+      console.log(
+        `Creating placeholder with signatureLength: ${forceSignatureLength}`,
       );
+      out = Buffer.from(plainAddPlaceholder(opts));
     });
 
+    // 1.5) REMOVED: Không cần expand ByteRange cho file nhỏ (<500KB)
+    console.log(
+      '=== Using original ByteRange format (no expansion needed) ===',
+    );
+
+    // 2) Parse ALL /ByteRange (placeholders) & /Contents <...> for signatures only
+    const s = out.toString('latin1');
+
+    // Accept either numbers or "/****" in ByteRange slots
+    const brRe =
+      /\/ByteRange\s*\[\s*([0-9/*]+)\s+([0-9/*]+)\s+([0-9/*]+)\s+([0-9/*]+)\s*\]/g;
+    const ctRe = /\/Contents\s*<([0-9A-Fa-f\s]+)>/g;
+
+    const byteRanges: { text: string; start: number }[] = [];
+    for (let m = brRe.exec(s); m; m = brRe.exec(s)) {
+      byteRanges.push({ text: m[0], start: m.index });
+    }
+    if (!byteRanges.length) {
+      throw new BadRequestException('No /ByteRange found after placeholders');
+    }
+
+    // collect signature /Contents only: we take the hex region inside <...>
+    const contents: { hexStart: number; hexLenChars: number }[] = [];
+    for (let m = ctRe.exec(s); m; m = ctRe.exec(s)) {
+      const localStart = m.index;
+      const lt = s.indexOf('<', localStart);
+      const gt = s.indexOf('>', lt + 1);
+      if (lt < 0 || gt < 0) continue;
+      // skip images/streams: they usually aren’t in dictionaries with /ByteRange nearby,
+      // but we still only pair as many as byteRanges length later.
+      const hex = s.slice(lt + 1, gt).replace(/\s+/g, '');
+      if (!hex.length) continue;
+      contents.push({ hexStart: lt + 1, hexLenChars: hex.length });
+    }
+
+    // We only need as many /Contents as /ByteRange (pair in order of appearance)
+    if (contents.length < byteRanges.length) {
+      throw new BadRequestException(
+        `Found ${byteRanges.length} /ByteRange but only ${contents.length} /Contents`,
+      );
+    }
+
+    // Helpers to write numbers into "/****" slots without changing file size
+    function padFixedWidth(num: number, width: number): string {
+      const s = String(num);
+      if (s.length > width) {
+        throw new BadRequestException(
+          `ByteRange number ${s} exceeds placeholder width ${width}`,
+        );
+      }
+      return ' '.repeat(width - s.length) + s;
+    }
+    function writeByteRangeInPlace(
+      outBuf: Buffer,
+      brText: string,
+      brStart: number,
+      values: number[], // [a,b,c,d]
+    ) {
+      const starRe = /\/\*+|\*+/g; // "/****" or "****"
+      const runs: { absPos: number; width: number }[] = [];
+      for (let m = starRe.exec(brText); m; m = starRe.exec(brText)) {
+        const full = m[0];
+        const hasSlash = full.startsWith('/');
+        // RESTORED: Sử dụng dynamic width detection từ placeholder
+        const width = full.length - (hasSlash ? 1 : 0);
+        const absPos = brStart + m.index + (hasSlash ? 1 : 0);
+        runs.push({ absPos, width });
+      }
+      // Map star runs back to which component (0..3) they belong to
+      const inside = brText.slice(brText.indexOf('[') + 1, brText.indexOf(']'));
+      const tokens = inside.trim().split(/\s+/); // expect 4
+      if (tokens.length < 4) {
+        throw new BadRequestException('Unexpected /ByteRange tokens');
+      }
+      const starredIdxs: number[] = [];
+      tokens.forEach((tk, idx) => {
+        if (tk.includes('*')) starredIdxs.push(idx);
+      });
+      if (runs.length !== starredIdxs.length) {
+        throw new BadRequestException('Star slot count mismatch in /ByteRange');
+      }
+      for (let i = 0; i < runs.length; i += 1) {
+        const comp = starredIdxs[i];
+        const r = runs[i];
+        outBuf.write(padFixedWidth(values[comp], r.width), r.absPos, 'latin1');
+      }
+    }
+
+    // 3) For each signature placeholder: compute numbers and fill /ByteRange
+    for (let i = 0; i < byteRanges.length; i += 1) {
+      const br = byteRanges[i];
+      const ct = contents[i];
+
+      const start1 = 0;
+      const len1 = ct.hexStart - start1;
+      const start2 = ct.hexStart + ct.hexLenChars;
+      const len2 = out.length - start2;
+
+      writeByteRangeInPlace(out, br.text, br.start, [
+        start1,
+        len1,
+        start2,
+        len2,
+      ]);
+    }
+
     return out;
+  }
+
+  /**
+   * Tính hash theo /ByteRange có sẵn trong PDF (đã prepare).
+   * Trả về digestHex + meta (đã có sẵn trong file này).
+   */
+  public computePdfHashForIndex(pdfBuffer: Buffer, signatureIndex = 0) {
+    return this.computeHashForSignature(pdfBuffer, signatureIndex); // đã implement sẵn ở file này
+  }
+
+  /**
+   * Gửi yêu cầu ký hash tới VNPT SmartCA.
+   * data_to_be_signed = digestHex (lowercase, SHA-256)
+   */
+  public async requestSmartCASignByHash(options: {
+    digestHex: string;
+    digestBase64?: string;
+    transactionId?: string | null;
+    docId?: string | null;
+    serialNumber?: string | null; // nếu không có sẽ gọi getCertificates để lấy
+    userIdOverride?: string | null; // hiếm khi dùng, mặc định lấy env
+    signType?: 'hash';
+    fileType?: 'pdf';
+  }) {
+    const user_id = options.userIdOverride ?? this.smartca.smartcaUserId;
+    if (
+      !this.smartca.smartcaSpId ||
+      !this.smartca.smartcaSpPassword ||
+      !user_id
+    ) {
+      throw new BadRequestException(
+        'Missing SmartCA credentials (SMARTCA_SP_ID, SMARTCA_SP_PASSWORD, SMARTCA_USER_ID)',
+      );
+    }
+
+    // data_to_be_signed
+    const dataToBeSigned = options.digestHex;
+
+    const transaction_id =
+      options.transactionId && options.transactionId.trim()
+        ? options.transactionId.trim()
+        : 'SP_CA_' + Date.now();
+
+    const doc_id =
+      options.docId && options.docId.trim()
+        ? options.docId.trim()
+        : 'doc-' + randomUUID();
+
+    // lấy serial nếu thiếu
+    let serial_number = options.serialNumber?.trim();
+    if (!serial_number) {
+      const certResp = await this.getCertificates({ userId: user_id });
+      if (certResp.status !== 200) {
+        throw new BadRequestException(
+          `get_certificate failed (status ${certResp.status})`,
+        );
+      }
+      serial_number = this.pickActiveSerial(
+        certResp.certificates as SmartCAUserCertificate[],
+      );
+      if (!serial_number) {
+        throw new BadRequestException(
+          'No certificate/serial_number found for this user_id',
+        );
+      }
+    }
+
+    const payload: any = {
+      sp_id: this.smartca.smartcaSpId,
+      sp_password: this.smartca.smartcaSpPassword,
+      user_id,
+      transaction_id,
+      transaction_desc: 'Sign PDF via API',
+      time_stamp: utcTimestamp(),
+      serial_number, // BẮT BUỘC theo thực tế VNPT
+      sign_files: [
+        {
+          file_type: options.fileType ?? 'pdf',
+          data_to_be_signed: dataToBeSigned,
+          doc_id,
+          sign_type: options.signType ?? 'hash',
+          hash_alg: 'SHA-256',
+
+          // ====== các flag yêu cầu CMS (ví dụ, chọn 1 trong các tên họ hỗ trợ) ======
+          pkcs_type: 'p7_detached',
+          signature_format: 'CADES_BES',
+          return_type: 'pkcs7', // or "cms"
+          need_pkcs7: true,
+        },
+      ],
+    };
+
+    const url = `${this.smartca.smartcaBaseUrl}${this.smartca.smartcaSignPath}`;
+    const res = await axios.post(url, payload, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 30000,
+      validateStatus: () => true,
+    });
+
+    return {
+      status: res.status,
+      data: res.data,
+      requestUrl: url,
+      requestBody: payload,
+    };
   }
 
   // Tìm tất cả ByteRange có số
@@ -650,184 +914,1177 @@ export class ContractService {
     return ranges;
   }
 
-  // Tìm tất cả “ô” /ByteRange [ ... ] để biết vị trí phần bên trong [ .. ] cần ghi đè.
-  private findAllByteRangeBrackets(pdfBuffer: Buffer) {
-    const s = pdfBuffer.toString('latin1');
-    const re = /\/ByteRange\s*\[/g;
-    const out: { innerStart: number; innerEnd: number }[] = [];
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(s)) !== null) {
-      const bracketStart = s.indexOf('[', m.index);
-      if (bracketStart === -1) continue;
-      const bracketEnd = s.indexOf(']', bracketStart + 1);
-      if (bracketEnd === -1) continue;
-      out.push({ innerStart: bracketStart + 1, innerEnd: bracketEnd }); // vùng giữa [ ... ]
-    }
-    return out;
-  }
+  // Điền 4 số của 1 /ByteRange theo vị trí <...> của /Contents ngay sau đó.
+  // IMPROVED: Tự động expand /ByteRange area nếu cần thiết cho 12-char format
+  private fillOneByteRange(
+    pdf: Buffer,
+    brOpenIdx: number, // vị trí '['
+    brCloseIdx: number, // vị trí ']'
+    contentsStart: number, // vị trí '<' của /Contents
+    contentsEndExclusive: number, // ngay sau '>'
+  ): Buffer {
+    // SIMPLIFIED: Chỉ dùng dynamic width, không expand
+    const a = 0;
+    const b = contentsStart; // từ đầu đến ngay trước '<'
+    const c = contentsEndExclusive; // ngay sau '>'
+    const d = pdf.length - c;
 
-  // Ghi chuỗi (latin1) vào buffer trong khoảng [start, end), pad bằng padChar nếu thiếu
-  private writeStringIntoBuffer(
-    buf: Buffer,
-    start: number,
-    end: number,
-    value: string,
-    padChar = ' ',
-  ) {
-    const slot = end - start;
-    if (value.length > slot) {
-      throw new BadRequestException('Replacement longer than reserved slot');
-    }
-    const s = value + padChar.repeat(slot - value.length);
-    for (let i = 0; i < slot; i++) {
-      buf[start + i] = s.charCodeAt(i) & 0xff; // latin1
-    }
-  }
-
-  /** Lấy bytes "to be signed" cho placeholder: toàn bộ PDF trừ phần bên trong <...> của /Contents tương ứng */
-  private getToBeSignedBytes(pdfBuffer: Buffer, signatureIndex = 0): Buffer {
-    // ưu tiên dùng ByteRange có số (nếu đã có), nếu không thì lấy theo vị trí /Contents
-    const numericRanges = this.extractAllNumericByteRanges(pdfBuffer);
-    if (numericRanges.length) {
-      if (signatureIndex < 0 || signatureIndex >= numericRanges.length) {
-        throw new BadRequestException(
-          `signatureIndex out of range (0..${numericRanges.length - 1})`,
-        );
-      }
-      const [a, b, c, d] = numericRanges[signatureIndex];
-      const len = pdfBuffer.length;
-      if (a < 0 || b < 0 || c < 0 || d < 0 || a + b > len || c + d > len) {
-        throw new BadRequestException('Invalid ByteRange values');
-      }
-      const p1 = pdfBuffer.slice(a, a + b);
-      const p2 = pdfBuffer.slice(c, c + d);
-      return Buffer.concat([p1, p2]);
-    }
-
-    // Fallback: placeholder còn '*', xác định theo /Contents <...>
-    const contents = this.findAllContentsValueRanges(pdfBuffer);
-    if (!contents.length)
-      throw new BadRequestException('No /ByteRange or /Contents found');
-    if (signatureIndex < 0 || signatureIndex >= contents.length) {
-      throw new BadRequestException(
-        `signatureIndex out of range (0..${contents.length - 1})`,
-      );
-    }
-    const { start, end } = contents[signatureIndex];
-    const p1 = pdfBuffer.slice(0, start);
-    const p2 = pdfBuffer.slice(end);
-    return Buffer.concat([p1, p2]);
-  }
-
-  /** Tạo keypair + self-signed cert RSA-2048 (dùng tạm để ký mock) */
-  private generateSelfSignedCert() {
-    const pki = forge.pki;
-    const keys = pki.rsa.generateKeyPair(2048);
-
-    const cert = pki.createCertificate();
-    cert.publicKey = keys.publicKey;
-    cert.serialNumber = '01';
-    const now = new Date();
-    cert.validity.notBefore = new Date(now.getTime() - 5 * 60 * 1000);
-    cert.validity.notAfter = new Date(now.getTime() + 365 * 24 * 3600 * 1000);
-
-    const attrs = [
-      { name: 'commonName', value: 'Mock Signer' },
-      { name: 'organizationName', value: 'Demo Org' },
-      { shortName: 'OU', value: 'Dev' },
-      { shortName: 'C', value: 'VN' },
-    ];
-    cert.setSubject(attrs);
-    cert.setIssuer(attrs);
-
-    cert.setExtensions([
-      { name: 'basicConstraints', cA: false },
-      { name: 'keyUsage', digitalSignature: true, keyEncipherment: true },
-      { name: 'extKeyUsage', codeSigning: true, emailProtection: true },
-      { name: 'nsCertType', client: true, email: true, objsign: true },
-      { name: 'subjectKeyIdentifier' },
+    console.log('Using dynamic width ByteRange fill');
+    return this.fillMixedByteRangeDynamic(pdf, brOpenIdx, brCloseIdx, [
+      a,
+      b,
+      c,
+      d,
     ]);
-
-    cert.sign(keys.privateKey, forge.md.sha256.create());
-
-    const certPem = pki.certificateToPem(cert);
-    const keyPem = pki.privateKeyToPem(keys.privateKey);
-    return { keys, cert, certPem, keyPem };
   }
 
-  /** Tạo CMS (PKCS#7) detached SHA-256 cho dữ liệu cần ký */
-  private createDetachedCmsSha256(
-    toBeSigned: Buffer,
-    keys: forge.pki.KeyPair,
-    cert: forge.pki.Certificate,
-  ) {
-    const p7 = forge.pkcs7.createSignedData();
-    // put content for computing messageDigest; although detached, we still set content
-    p7.content = forge.util.createBuffer(toBeSigned.toString('binary'));
-    p7.addCertificate(cert);
-    p7.addSigner({
-      key: keys.privateKey,
-      certificate: cert,
-      // OID SHA-256
-      digestAlgorithm: forge.pki.oids.sha256,
-      authenticatedAttributes: [
-        { type: forge.pki.oids.contentType, value: forge.pki.oids.data },
-        { type: forge.pki.oids.messageDigest }, // will be auto-computed from content with the selected digest
-        { type: forge.pki.oids.signingTime, value: new Date() },
-      ],
-    });
-    // detached signedData
-    p7.sign({ detached: true });
+  // REMOVED: expandAndFillByteRange - không cần thiết
 
-    const asn1 = p7.toAsn1();
-    const derBytes = forge.asn1.toDer(asn1).getBytes();
-    const derBuf = Buffer.from(derBytes, 'binary');
-    return {
-      cmsBase64: derBuf.toString('base64'),
-      cmsHex: derBuf.toString('hex').toUpperCase(),
-      cmsDer: derBuf,
-    };
+  // === Helper: Fill mixed ByteRange với dynamic width detection ===
+  private fillMixedByteRangeDynamic(
+    pdf: Buffer,
+    brOpenIdx: number,
+    brCloseIdx: number,
+    values: number[],
+  ): Buffer {
+    const s = pdf.toString('latin1');
+    const insideStart = brOpenIdx + 1;
+    const insideEnd = brCloseIdx;
+    const insideText = s.slice(insideStart, insideEnd);
+    
+    // Parse tokens trong ByteRange
+    const tokens = insideText.trim().split(/\s+/);
+    if (tokens.length < 4) {
+      throw new BadRequestException('Invalid ByteRange format in mixed mode');
+    }
+    
+    // Replace mỗi token: nếu là placeholder (*) thì thay bằng số, nếu là số thì giữ nguyên
+    const newTokens = tokens.map((token, idx) => {
+      if (idx >= 4) return token; // chỉ process 4 tokens đầu
+      
+      if (token.includes('*')) {
+        // Placeholder: thay bằng số với width = length của placeholder
+        const hasSlash = token.startsWith('/');
+        const starCount = hasSlash ? token.length - 1 : token.length;
+        const numStr = String(values[idx]);
+        
+        if (numStr.length > starCount) {
+          throw new BadRequestException(
+            `ByteRange number ${numStr} exceeds placeholder width ${starCount}`,
+          );
+        }
+        
+        return ' '.repeat(starCount - numStr.length) + numStr;
+      } else {
+        // Số cố định: giữ nguyên
+        return token;
+      }
+    });
+    
+    // Rebuild inside text với original spacing
+    const newInside = newTokens.join(' ').padEnd(insideText.length, ' ');
+    
+    // Replace in-place
+    const result = s.slice(0, insideStart) + newInside + s.slice(insideEnd);
+    return Buffer.from(result, 'latin1');
   }
 
   /**
-   * Public API trong service: tạo CMS mock cho đúng placeholder
-   * Trả về cmsBase64 + cmsHex + thumbprint cert để debug.
+   * Quét lần lượt TẤT CẢ placeholder trong PDF:
+   * - Mỗi lần gặp "/ByteRange [ ... ]", tìm "/Contents <...>" ngay sau đó
+   * - Tính 4 số [0 len0 off1 len1] và ghi đè in-place (không thay đổi độ dài file)
+   * - Trả về Buffer đã finalize /ByteRange cho mọi placeholder
    */
-  generateMockCmsForPdf(pdfBuffer: Buffer, signatureIndex = 0) {
-    if (!Buffer.isBuffer(pdfBuffer)) {
-      throw new BadRequestException('pdfBuffer must be a Buffer');
+  public finalizeAllByteRanges(pdf: Buffer): Buffer {
+    let buf = Buffer.from(pdf); // làm việc trên copy
+    let searchFrom = 0;
+
+    const tokenBR = Buffer.from('/ByteRange', 'ascii');
+    const tokenOpenBracket = Buffer.from('[', 'ascii');
+    const tokenCloseBracket = Buffer.from(']', 'ascii');
+    const tokenCT = Buffer.from('/Contents', 'ascii');
+
+    while (true) {
+      // 1) Tìm /ByteRange
+      const brIdx = buf.indexOf(tokenBR, searchFrom);
+      if (brIdx === -1) break;
+
+      // '[' sau /ByteRange
+      const brOpen = buf.indexOf(tokenOpenBracket, brIdx);
+      if (brOpen === -1) break;
+
+      // ']' đóng mảng ByteRange — phải xuất hiện trước /Contents kế tiếp
+      const nextCT = buf.indexOf(tokenCT, brOpen);
+      let brClose = -1;
+      const firstCloseAfterOpen = buf.indexOf(tokenCloseBracket, brOpen);
+      if (firstCloseAfterOpen === -1) {
+        throw new BadRequestException(
+          'Malformed /ByteRange array (missing ]).',
+        );
+      }
+      if (nextCT !== -1 && firstCloseAfterOpen > nextCT) {
+        throw new BadRequestException(
+          'Malformed /ByteRange array (] after /Contents).',
+        );
+      }
+      brClose = firstCloseAfterOpen;
+
+      // 2) Tìm /Contents <...> theo sau
+      const ctIdx = buf.indexOf(tokenCT, brClose);
+      if (ctIdx === -1) {
+        throw new BadRequestException(
+          'Cannot find /Contents for a /ByteRange.',
+        );
+      }
+      const lt = buf.indexOf('<', ctIdx);
+      const gt = buf.indexOf('>', lt);
+      if (lt === -1 || gt === -1) {
+        throw new BadRequestException('Malformed /Contents hex string.');
+      }
+      const contentsStart = lt; // vị trí '<'
+      const contentsEndExclusive = gt + 1; // ngay sau '>'
+
+      // 3) Điền bốn số cho /ByteRange hiện tại
+      buf = this.fillOneByteRange(
+        buf,
+        brOpen,
+        brClose,
+        contentsStart,
+        contentsEndExclusive,
+      );
+
+      // 4) Tiếp tục quét sau phần /Contents này (hỗ trợ nhiều placeholder)
+      searchFrom = contentsEndExclusive;
     }
-    const toBeSigned = this.getToBeSignedBytes(pdfBuffer, signatureIndex);
 
-    const { keys, cert, certPem, keyPem } = this.generateSelfSignedCert();
-    const { cmsBase64, cmsHex } = this.createDetachedCmsSha256(
-      toBeSigned,
-      keys,
-      cert,
+    return buf;
+  }
+
+  public async getCertificates(options?: {
+    userId?: string;
+    serialNumber?: string; // nếu bạn đã biết serial (khuyến nghị truyền vào)
+    serviceType?: 'ESEAL' | 'ESIGN'; // nếu biết loại dịch vụ, truyền vào để đỡ fallback
+    transactionId?: string;
+  }) {
+    const user_id = (
+      options?.userId ??
+      this.smartca.smartcaUserId ??
+      ''
+    ).trim();
+    const basePayload: any = {
+      sp_id: this.smartca.smartcaSpId,
+      sp_password: this.smartca.smartcaSpPassword,
+      user_id,
+      transaction_id: options?.transactionId || 'SP_CA_' + Date.now(),
+      time_stamp: utcTimestamp(),
+    };
+
+    const attempt = async (extra?: Record<string, any>) => {
+      const url = `${this.smartca.smartcaBaseUrl}${this.smartca.smartcaCertPath}`;
+      const payload = { ...basePayload, ...(extra || {}) };
+      const res = await axios.post(url, payload, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 30000,
+        validateStatus: () => true,
+      });
+      const raw = res.data ?? {};
+      const list = raw?.data?.user_certificates ?? [];
+      const certs = Array.isArray(list)
+        ? list.map(this.normalizeCertItem.bind(this))
+        : [];
+      return {
+        status: res.status,
+        url,
+        request: payload,
+        response: raw,
+        certificates: certs,
+      };
+    };
+
+    // 1) Ưu tiên theo yêu cầu cụ thể của bạn (serial/service_type)
+    const first = await attempt({
+      ...(options?.serialNumber ? { serial_number: options.serialNumber } : {}),
+      ...(options?.serviceType ? { service_type: options.serviceType } : {}),
+    });
+    if (first.status === 200 && first.certificates.length) return first;
+
+    // 2) Nếu chưa có kết quả và bạn KHÔNG truyền serviceType: thử ESEAL → ESIGN
+    if (!options?.serviceType) {
+      const second = await attempt({
+        service_type: 'ESEAL',
+        ...(options?.serialNumber
+          ? { serial_number: options.serialNumber }
+          : {}),
+      });
+      if (second.status === 200 && second.certificates.length) return second;
+
+      const third = await attempt({
+        service_type: 'ESIGN',
+        ...(options?.serialNumber
+          ? { serial_number: options.serialNumber }
+          : {}),
+      });
+      if (third.status === 200 && third.certificates.length) return third;
+    }
+
+    // 3) Không tìm thấy -> trả data để bạn debug
+    return first;
+  }
+
+  // === Helper: chọn serial đang active ===
+  private pickActiveSerial(
+    certs: SmartCAUserCertificate[],
+  ): string | undefined {
+    // Ưu tiên: VALID + (cert_status chứa "Đang hoạt động" hoặc "ACTIVE")
+    const isActive = (c: SmartCAUserCertificate) => {
+      const code = (c.cert_status_code ?? '').toUpperCase();
+      const text = (c.cert_status ?? '').toUpperCase();
+      return (
+        code === 'VALID' ||
+        text.includes('ĐANG HOẠT ĐỘNG'.toUpperCase()) ||
+        text.includes('ACTIVE')
+      );
+    };
+    const firstActive = certs.find((c) => c.serial_number && isActive(c));
+    return (
+      firstActive?.serial_number ??
+      certs.find((c) => c.serial_number)?.serial_number
+    );
+  }
+
+  /**
+   * Embed 1 CMS (pkcs#7) vào placeholder /Contents tương ứng với signatureIndex.
+   * - Chấp nhận cmsBase64 hoặc cmsHex
+   * - Giữ nguyên độ dài giữa '<' '>' bằng cách PAD '0' (hex) cho đủ
+   * - Không đụng /ByteRange (đã finalize từ trước)
+   */
+  public embedCmsAtIndex(
+    pdf: Buffer,
+    cmsBase64OrHex: string,
+    signatureIndex: number,
+  ): Buffer {
+    const BR_SLOT_WIDTH = 12; // mỗi số 12 ký tự
+    const MIN_SPACES_BETWEEN = 1; // ít nhất 1 khoảng trắng giữa các số
+
+    // 1) Chuẩn hoá CMS: chấp nhận base64 hoặc hex, chuẩn hoá về HEX (UPPER)
+    let cmsHex = (cmsBase64OrHex || '').trim();
+    const looksHex =
+      /^[0-9A-Fa-f\s]+$/.test(cmsHex) &&
+      cmsHex.replace(/\s+/g, '').length % 2 === 0;
+    if (!looksHex) {
+      // coi như base64 => decode sang bytes => to HEX
+      try {
+        const bytes = Buffer.from(cmsHex, 'base64');
+        if (!bytes.length) throw new Error('empty');
+        cmsHex = bytes.toString('hex').toUpperCase();
+      } catch (e) {
+        throw new BadRequestException('CMS must be base64 or hex');
+      }
+    } else {
+      cmsHex = cmsHex.replace(/\s+/g, '').toUpperCase();
+    }
+
+    const padFixed = (n: number): string => {
+      const s = String(n);
+      if (!Number.isFinite(n)) {
+        throw new BadRequestException('Invalid number in /ByteRange');
+      }
+      if (s.length > BR_SLOT_WIDTH) {
+        throw new BadRequestException(
+          `ByteRange number ${n} exceeds ${BR_SLOT_WIDTH} chars`,
+        );
+      }
+      return ' '.repeat(BR_SLOT_WIDTH - s.length) + s;
+    };
+
+    // 2) Tìm /Contents <...> theo signatureIndex (0-based)
+    const s0 = pdf.toString('latin1');
+    const contentsRe = /\/Contents\s*<([\s\S]*?)>/g; // non-greedy
+    let m: RegExpExecArray | null;
+    let matchIdx = 0;
+    let contStart = -1,
+      lt = -1,
+      gt = -1;
+
+    contentsRe.lastIndex = 0;
+    while ((m = contentsRe.exec(s0)) !== null) {
+      if (matchIdx++ === signatureIndex) {
+        contStart = m.index;
+        lt = s0.indexOf('<', contStart);
+        gt = s0.indexOf('>', lt);
+        break;
+      }
+    }
+    if (lt < 0 || gt < 0) {
+      throw new BadRequestException(
+        `Contents #${signatureIndex} not found or malformed`,
+      );
+    }
+
+    // 3) Thay CMS vào đúng vùng giữa <...>, GIỮ NGUYÊN độ dài reserved
+    const reservedLen = gt - (lt + 1); // số ký tự HEX đã chừa sẵn
+    if (cmsHex.length > reservedLen) {
+      throw new BadRequestException(
+        `CMS hex length ${cmsHex.length} exceeds reserved ${reservedLen}`,
+      );
+    }
+    if (cmsHex.length < reservedLen) {
+      cmsHex = cmsHex.padEnd(reservedLen, '0'); // pad '0' cho đủ
+    }
+    const s1 = s0.slice(0, lt + 1) + cmsHex + s0.slice(gt);
+    let out = Buffer.from(s1, 'latin1');
+
+    // 4) Tìm /ByteRange gần nhất ĐỨNG TRƯỚC vùng /Contents này
+    const beforeLt = s1.slice(0, lt);
+    const brKeyPos = beforeLt.lastIndexOf('/ByteRange');
+    if (brKeyPos < 0)
+      throw new BadRequestException('Matching /ByteRange not found');
+
+    const brOpen = s1.indexOf('[', brKeyPos);
+    const brClose = s1.indexOf(']', brOpen);
+    if (brOpen < 0 || brClose < 0)
+      throw new BadRequestException('Malformed /ByteRange');
+
+    // 5) Tính lại 4 số CHUẨN: a=0, b=lt, c=gt+1, d=out.length - c
+    const a = 0;
+    const b = lt; // độ dài đoạn 1: từ đầu file đến ngay trước '<'
+    const c = gt + 1; // offset đoạn 2: ngay sau '>'
+    const d = out.length - c;
+
+    // KHÔNG kiểm tra b===c (điều đó là sai cho PDF chuẩn). Chỉ cần đảm bảo b < c và (c-b) = độ dài '<...>'
+    if (!(b >= 0 && c > b)) {
+      throw new BadRequestException(
+        'Computed /ByteRange is invalid (b>=0, c>b required)',
+      );
+    }
+
+    // 6) Viết lại 4 số với width=12, GIỮ NGUYÊN tổng chiều dài bên trong [ ... ]
+    const insideStart = brOpen + 1;
+    const insideEnd = brClose;
+    const oldInside = s1.slice(insideStart, insideEnd);
+
+    const parts = [padFixed(a), padFixed(b), padFixed(c), padFixed(d)];
+    const baseLen =
+      parts.reduce((t, p) => t + p.length, 0) + 3 * MIN_SPACES_BETWEEN;
+    if (baseLen > oldInside.length) {
+      // về lý không xảy ra vì bạn đã widen thành 12 ký tự ở bước /prepare
+      throw new BadRequestException(
+        `Not enough room inside /ByteRange (need >= ${baseLen}, have ${oldInside.length})`,
+      );
+    }
+    const extra = oldInside.length - baseLen; // dồn extra vào khoảng trắng cuối
+    const sep1 = ' '.repeat(MIN_SPACES_BETWEEN);
+    const sep2 = ' '.repeat(MIN_SPACES_BETWEEN);
+    const sep3 = ' '.repeat(MIN_SPACES_BETWEEN + (extra > 0 ? extra : 0));
+    const newInside =
+      parts[0] + sep1 + parts[1] + sep2 + parts[2] + sep3 + parts[3];
+
+    const s2 = s1.slice(0, insideStart) + newInside + s1.slice(insideEnd);
+    out = Buffer.from(s2, 'latin1');
+
+    return out;
+  }
+
+  private buildSignedAttrsDER(pdfDigestHex: string, signerPem: string): Buffer {
+    const contentTypeOID = this.smartca.oidData;
+
+    // Attribute constructors
+    const makeAttr = (oid: string, valueAsn1: forge.asn1.Asn1) =>
+      forge.asn1.create(
+        forge.asn1.Class.UNIVERSAL,
+        forge.asn1.Type.SEQUENCE,
+        true,
+        [
+          forge.asn1.create(
+            forge.asn1.Class.UNIVERSAL,
+            forge.asn1.Type.OID,
+            false,
+            forge.asn1.oidToDer(oid).getBytes(),
+          ),
+          forge.asn1.create(
+            forge.asn1.Class.UNIVERSAL,
+            forge.asn1.Type.SET,
+            true,
+            [valueAsn1],
+          ),
+        ],
+      );
+
+    // 1) contentType = data
+    const contentTypeAsn1 = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.OID,
+      false,
+      forge.asn1.oidToDer(contentTypeOID).getBytes(),
+    );
+    const attrContentType = makeAttr(
+      this.smartca.oidContentType ?? '',
+      contentTypeAsn1,
     );
 
-    // Thumbprint (SHA-256) của cert để tham chiếu
-    const certDer = Buffer.from(
-      forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes(),
-      'binary',
+    // 2) messageDigest = SHA-256(PDF ByteRange)
+    const msgDigestBytes = forge.util.hexToBytes(pdfDigestHex);
+    const messageDigestAsn1 = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.OCTETSTRING,
+      false,
+      msgDigestBytes,
     );
-    const certThumbHex = crypto
-      .createHash('sha256')
+    const attrMessageDigest = makeAttr(
+      this.smartca.oidMessageDigest ?? '',
+      messageDigestAsn1,
+    );
+
+    // 3) signingTime = now (UTCTime nếu < 2050)
+    const signingTimeAsn1 = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.UTCTIME,
+      false,
+      forge.asn1.dateToUtcTime(new Date()),
+    );
+    const attrSigningTime = makeAttr(
+      this.smartca.oidSigningTime ?? '',
+      signingTimeAsn1,
+    );
+
+    // 4) signingCertificateV2 (ESSCertIDv2 với certHash SHA-256)
+    const cert = forge.pki.certificateFromPem(signerPem);
+    const certDer = forge.asn1
+      .toDer(forge.pki.certificateToAsn1(cert))
+      .getBytes();
+    const certHash = forge.md.sha256
+      .create()
       .update(certDer)
-      .digest('hex');
+      .digest()
+      .getBytes();
+    const essCertIDv2 = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.SEQUENCE,
+      true,
+      [
+        // hash (OCTET STRING)
+        forge.asn1.create(
+          forge.asn1.Class.UNIVERSAL,
+          forge.asn1.Type.OCTETSTRING,
+          false,
+          certHash,
+        ),
+        // algorithmIdentifier (OPTIONAL) — bỏ qua (mặc định sha256)
+        // issuerSerial (OPTIONAL) — có thể bỏ qua, vẫn hợp lệ
+      ],
+    );
+    const scv2Value = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.SEQUENCE,
+      true,
+      [essCertIDv2],
+    );
+    const attrSigningCertV2 = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.SEQUENCE,
+      true,
+      [
+        forge.asn1.create(
+          forge.asn1.Class.UNIVERSAL,
+          forge.asn1.Type.OID,
+          false,
+          forge.asn1.oidToDer(this.smartca.oidSigningCertV2).getBytes(),
+        ),
+        forge.asn1.create(
+          forge.asn1.Class.UNIVERSAL,
+          forge.asn1.Type.SET,
+          true,
+          [scv2Value],
+        ),
+      ],
+    );
+
+    // === DER SORTING for SET OF Attribute ===
+    const attrs = [
+      attrContentType,
+      attrMessageDigest,
+      attrSigningTime,
+      attrSigningCertV2,
+    ];
+
+    // Encode từng Attribute -> buffer để sort
+    const encoded = attrs.map((a) => {
+      const der = forge.asn1.toDer(a).getBytes();
+      return { asn1: a, der: Buffer.from(der, 'binary') };
+    });
+
+    // Sort tăng dần theo byte DER (DER rule cho SET OF)
+    encoded.sort((x, y) => x.der.compare(y.der));
+
+    // Lấy lại danh sách ASN.1 theo thứ tự đã sort
+    const sortedAsn1 = encoded.map((e) => e.asn1);
+
+    // SET OF Attribute
+    const signedAttrsSet = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.SET,
+      true,
+      sortedAsn1,
+    );
+
+    // Xuất DER bytes
+    const derBytes = forge.asn1.toDer(signedAttrsSet).getBytes();
+    return Buffer.from(derBytes, 'binary');
+  }
+
+  public async signToCmsPades(options: {
+    pdf: Buffer;
+    signatureIndex?: number;
+    userIdOverride?: string;
+    intervalMs?: number;
+    timeoutMs?: number;
+  }) {
+    const signatureIndex = options.signatureIndex ?? 0;
+
+    // 1) Hash PDF theo /ByteRange
+    const gap = this.locateContentsGap(options.pdf, signatureIndex);
+    const decl = this.readDeclaredByteRange(options.pdf, signatureIndex);
+
+    if (decl) {
+      const should = gap.byteRangeShouldBe; // [a,b,c,d] kỳ vọng từ locate
+      const aOk = decl.a === should[0];
+      const bOk = decl.b === should[1];
+      const cOk = decl.c === should[2];
+      const dOk = decl.d === should[3];
+
+      // Nếu lệch ở a/b/c => offset sai thật, phải chặn
+      if (!aOk || !bOk || !cOk) {
+        throw new BadRequestException(
+          `BYTE_RANGE_MISMATCH: declared=[${decl.a},${decl.b},${decl.c},${decl.d}] should=[${should.join(',')}]`,
+        );
+      }
+
+      // Nếu chỉ lệch ở d (thường do thêm vài byte sau '>'), KHÔNG ném lỗi.
+      // Ta vẫn hash theo 'should' (gap) vì đó mới là chiều dài thực tế.
+      if (!dOk) {
+        // optional: có thể log cảnh báo nội bộ tại đây nếu bạn muốn
+        // this.logger?.warn?.(`Auto-ignoring ByteRange.d mismatch: declared=${decl.d}, should=${should[3]}`);
+      }
+    }
+
+    const { digestHex: pdfDigestHex } = this.hashForSignatureByGap(
+      options.pdf,
+      gap,
+    );
+
+    // 2) Lấy cert & serial
+    const certResp = await this.getCertificates({
+      userId: this.smartca.smartcaUserId,
+    });
+    if (certResp.status !== 200 || !certResp.certificates?.length) {
+      throw new BadRequestException(`get_certificate failed or empty`);
+    }
+    const { signerPem, chainPem, serial } = this.extractPemChainFromGetCertResp(
+      certResp.certificates,
+    );
+    if (!serial) throw new BadRequestException('No serial_number');
+
+    // 3) Build SignedAttributes DER (có signingCertificateV2)
+    const signedAttrsDER = this.buildSignedAttrsDER(pdfDigestHex, signerPem);
+
+    // 4) Hash DER (SHA-256) → gửi ký
+    const derHashBytes = forge.md.sha256
+      .create()
+      .update(signedAttrsDER.toString('binary'))
+      .digest()
+      .bytes();
+    const derHashHex = Buffer.from(derHashBytes, 'binary').toString('hex');
+    const derHashB64 = Buffer.from(derHashBytes, 'binary').toString('base64');
+
+    const transactionId = 'SP_CA_' + Date.now();
+    const docId = 'doc-' + randomUUID();
+
+    await this.requestSmartCASignByHash({
+      digestHex: derHashHex,
+      digestBase64: derHashB64,
+      transactionId,
+      docId,
+      serialNumber: serial,
+      userIdOverride: this.smartca.smartcaUserId,
+    });
+
+    // 5) Poll cho tới khi có signature_value
+    const poll = await this.pollSmartCASignResult({
+      transactionId,
+      intervalMs: options.intervalMs ?? 2000,
+      timeoutMs: options.timeoutMs ?? 180000, // tăng timeout
+    });
+
+    const raw = (poll as any).raw?.data ?? {};
+    const st = raw?.status_code;
+    if (!st) throw new BadRequestException('No status returned from SmartCA');
+
+    const sig =
+      raw?.data?.signature_value ||
+      raw?.data?.signatures?.[0]?.signature_value ||
+      null;
+    if (!sig) {
+      throw new BadRequestException('No signature_value in SmartCA result');
+    }
+
+    // 6) Lắp CMS detached (Base64)
+    const cmsBase64 = this.buildDetachedCMSBase64(
+      signedAttrsDER,
+      sig,
+      signerPem,
+      chainPem,
+    );
+
+    // 7) Trả về CMS (KHÔNG embed)
+    return {
+      cmsBase64,
+      transactionId,
+      docId,
+      signatureIndex,
+      byteRange: gap,
+      pdfLength: options.pdf.length,
+      digestHex: pdfDigestHex,
+    };
+  }
+
+  private buildDetachedCMSBase64(
+    signedAttrsDER: Buffer, // DER của SignedAttributes (SET OF Attribute) đã chuẩn
+    signatureValueBase64: string, // raw RSA signature (base64) do VNPT trả
+    signerPem: string, // end-entity certificate PEM
+    chainPem: string[], // CA/Root PEM (optional)
+  ): string {
+    const signerCert = forge.pki.certificateFromPem(signerPem);
+    const signerCertAsn1 = forge.pki.certificateToAsn1(signerCert);
+    const chainAsn1: forge.asn1.Asn1[] = [];
+    for (const pem of chainPem || []) {
+      try {
+        chainAsn1.push(
+          forge.pki.certificateToAsn1(forge.pki.certificateFromPem(pem)),
+        );
+      } catch {}
+    }
+
+    // AlgorithmIdentifier helpers
+    const algId = (oid: string) =>
+      forge.asn1.create(
+        forge.asn1.Class.UNIVERSAL,
+        forge.asn1.Type.SEQUENCE,
+        true,
+        [
+          forge.asn1.create(
+            forge.asn1.Class.UNIVERSAL,
+            forge.asn1.Type.OID,
+            false,
+            forge.asn1.oidToDer(oid).getBytes(),
+          ),
+          // rsaEncryption thường kèm NULL params
+          forge.asn1.create(
+            forge.asn1.Class.UNIVERSAL,
+            forge.asn1.Type.NULL,
+            false,
+            '',
+          ),
+        ],
+      );
+
+    const algIdNoParam = (oid: string) =>
+      forge.asn1.create(
+        forge.asn1.Class.UNIVERSAL,
+        forge.asn1.Type.SEQUENCE,
+        true,
+        [
+          forge.asn1.create(
+            forge.asn1.Class.UNIVERSAL,
+            forge.asn1.Type.OID,
+            false,
+            forge.asn1.oidToDer(oid).getBytes(),
+          ),
+        ],
+      );
+
+    // Name (issuer) & serial từ certificate
+    const issuerAsn1 = forge.pki.distinguishedNameToAsn1(signerCert.issuer);
+    const serialAsn1 = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.INTEGER,
+      false,
+      forge.util.hexToBytes(signerCert.serialNumber),
+    );
+
+    // sid = IssuerAndSerialNumber
+    const sidAsn1 = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.SEQUENCE,
+      true,
+      [issuerAsn1, serialAsn1],
+    );
+
+    // signedAttrs: [0] IMPLICIT (SET OF Attribute)  — dùng DER đã có để đảm bảo ordering
+    const signedAttrsAsAsn1 = forge.asn1.fromDer(
+      signedAttrsDER.toString('binary'),
+    );
+    const signedAttrsTagged = forge.asn1.create(
+      forge.asn1.Class.CONTEXT_SPECIFIC,
+      0,
+      true,
+      signedAttrsAsAsn1.value,
+    );
+
+    // SignerInfo (version=1 khi dùng IssuerAndSerialNumber)
+    const signerInfo = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.SEQUENCE,
+      true,
+      [
+        forge.asn1.create(
+          forge.asn1.Class.UNIVERSAL,
+          forge.asn1.Type.INTEGER,
+          false,
+          forge.util.hexToBytes('01'),
+        ), // version = 1
+        sidAsn1, // sid
+        algIdNoParam(OID_SHA256), // digestAlgorithm (sha256, KHÔNG param)
+        signedAttrsTagged, // [0] signedAttrs
+        algId(OID_RSA), // signatureAlgorithm (rsaEncryption + NULL)
+        forge.asn1.create(
+          // signature (OCTET STRING)
+          forge.asn1.Class.UNIVERSAL,
+          forge.asn1.Type.OCTETSTRING,
+          false,
+          forge.util.decode64(signatureValueBase64),
+        ),
+        // unsignedAttrs (optional) — bỏ qua
+      ],
+    );
+
+    // digestAlgorithms: SET OF { sha256 }
+    const digestAlgorithms = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.SET,
+      true,
+      [algIdNoParam(OID_SHA256)],
+    );
+
+    // encapContentInfo: data, detached (không eContent)
+    const encapContentInfo = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.SEQUENCE,
+      true,
+      [
+        forge.asn1.create(
+          forge.asn1.Class.UNIVERSAL,
+          forge.asn1.Type.OID,
+          false,
+          forge.asn1.oidToDer(this.smartca.oidData).getBytes(),
+        ),
+        // [0] eContent omitted (detached)
+      ],
+    );
+
+    // certificates: [0] IMPLICIT CertificateSet (include signer + chain)
+    const certificatesTagged = forge.asn1.create(
+      forge.asn1.Class.CONTEXT_SPECIFIC,
+      0,
+      true,
+      [signerCertAsn1, ...chainAsn1],
+    );
+
+    // signerInfos: SET OF SignerInfo (1 signer)
+    const signerInfos = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.SET,
+      true,
+      [signerInfo],
+    );
+
+    // SignedData
+    const signedData = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.SEQUENCE,
+      true,
+      [
+        forge.asn1.create(
+          forge.asn1.Class.UNIVERSAL,
+          forge.asn1.Type.INTEGER,
+          false,
+          forge.util.hexToBytes('01'),
+        ), // version=1
+        digestAlgorithms,
+        encapContentInfo,
+        certificatesTagged, // [0] certificates
+        // crls [1] — optional, bỏ qua
+        signerInfos,
+      ],
+    );
+
+    // ContentInfo: { contentType: signedData, content [0] EXPLICIT SignedData }
+    const contentInfo = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.SEQUENCE,
+      true,
+      [
+        forge.asn1.create(
+          forge.asn1.Class.UNIVERSAL,
+          forge.asn1.Type.OID,
+          false,
+          forge.asn1.oidToDer(this.smartca.oidSignedData).getBytes(),
+        ),
+        forge.asn1.create(forge.asn1.Class.CONTEXT_SPECIFIC, 0, true, [
+          signedData,
+        ]),
+      ],
+    );
+
+    const derBytes = forge.asn1.toDer(contentInfo).getBytes();
+    return forge.util.encode64(derBytes); // ← CMS (PKCS#7) base64 để đưa cho /embed-cms
+  }
+
+  private derBase64ToPem(derB64: string, label = 'CERTIFICATE'): string {
+    const clean = derB64.replace(/\s+/g, '');
+    const b64 = Buffer.from(Buffer.from(clean, 'base64')).toString('base64');
+    const chunk = b64.match(/.{1,64}/g)?.join('\n') ?? b64;
+    return `-----BEGIN ${label}-----\n${chunk}\n-----END ${label}-----\n`;
+  }
+
+  private maybeToPem(input?: string | null): string[] {
+    if (!input) return [];
+    if (/-----BEGIN CERTIFICATE-----/.test(input)) return [input];
+    try {
+      return [this.derBase64ToPem(input)];
+    } catch {
+      return [];
+    }
+  }
+
+  private extractPemChainFromGetCertResp(certificates: any[]): {
+    signerPem: string;
+    chainPem: string[];
+    serial: string;
+  } {
+    if (!Array.isArray(certificates) || !certificates.length) {
+      throw new BadRequestException(
+        'No certificates returned from get_certificate',
+      );
+    }
+    const pick = this.pickActiveCert(certificates);
+    const serial = pick.serial_number;
+    if (!serial)
+      throw new BadRequestException(
+        'Missing serial_number in certificate item',
+      );
+
+    let signerPem: string | null = null;
+    if (pick.cert_pem) signerPem = pick.cert_pem;
+    else if (pick.cert_b64_der)
+      signerPem = this.derBase64ToPem(pick.cert_b64_der);
+    else
+      throw new BadRequestException(
+        'Missing certificate content (cert_data/certificate)',
+      );
+
+    if (!signerPem) {
+      throw new BadRequestException('signerPem is null or undefined');
+    }
+
+    const chainPem: string[] = [];
+    chainPem.push(...this.maybeToPem(pick.chain_obj?.ca_cert));
+    chainPem.push(...this.maybeToPem(pick.chain_obj?.root_cert));
+
+    return { signerPem, chainPem, serial };
+  }
+
+  /**
+   * Gọi 1 lần tới endpoint trạng thái ký:
+   * GET {BASE}{/signatures/sign/{tranId}/status}
+   * Trả về nguyên status + body để bạn tự xử lý.
+   */
+  public async requestSmartCASignStatus(transactionId: string) {
+    if (!transactionId?.trim()) {
+      throw new Error('transactionId is required');
+    }
+    const url = `${this.smartca.smartcaBaseUrl}${(this.smartca.smartcaSignStatusTmpl ?? '').replace('{tranId}', encodeURIComponent(transactionId))}`;
+    const res = await axios.post(url, undefined, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 30000,
+      validateStatus: () => true,
+    });
+    return { status: res.status, data: res.data, requestUrl: url };
+  }
+
+  /**
+   * Poll trạng thái ký tới khi có kết quả / lỗi / timeout.
+   * Trả về:
+   *  - done: true/false
+   *  - raw: response cuối
+   *  - signatureValueBase64?: chuỗi chữ ký raw (nếu có)
+   *  - error?: 'expired' | 'user_denied' | 'timeout' | 'error_4xx/5xx'
+   */
+  public async pollSmartCASignResult(opts: {
+    transactionId: string;
+    intervalMs?: number;
+    timeoutMs?: number;
+  }) {
+    const intervalMs = opts.intervalMs ?? 2000;
+    const timeoutMs = opts.timeoutMs ?? 120000;
+    const startedAt = Date.now();
+
+    while (true) {
+      const r = await this.requestSmartCASignStatus(opts.transactionId);
+
+      const body = r.data ?? {};
+      const code = body.status_code ?? r.status;
+      const msg = String(body.message ?? '').toLowerCase();
+      const data = body.data ?? {};
+
+      const sigDirect = data.signature_value;
+      const sigArray = Array.isArray(data.signatures)
+        ? data.signatures[0]?.signature_value
+        : undefined;
+      const signatureValueBase64 = sigDirect || sigArray || null;
+
+      if (code === 200 && signatureValueBase64) {
+        return { done: true, signatureValueBase64, raw: r };
+      }
+
+      if (msg.includes('wait_for_user') || msg.includes('pending')) {
+        // tiếp tục chờ
+      } else if (msg.includes('expire')) {
+        return { done: true, error: 'expired', raw: r };
+      } else if (msg.includes('deny') || msg.includes('reject')) {
+        return { done: true, error: 'user_denied', raw: r };
+      } else if ((r.status ?? 0) >= 400 && (r.status ?? 0) !== 409) {
+        // ← đây là nơi bạn thấy error_405 trước đó
+        return { done: true, error: `error_${r.status}`, raw: r };
+      }
+
+      if (Date.now() - startedAt > timeoutMs) {
+        return { done: true, error: 'timeout', raw: r };
+      }
+      await new Promise((res) => setTimeout(res, intervalMs));
+    }
+  }
+
+  private async sleep(ms: number) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  private normalizeCertItem(it: any) {
+    const serial_number = it?.serial_number ?? null;
+    const cert_b64_der =
+      typeof it?.cert_data === 'string'
+        ? it.cert_data.replace(/\s+/g, '')
+        : null; // DER b64
+    const cert_pem =
+      typeof it?.certificate === 'string' ? it.certificate : null;
+    const chain_obj = it?.chain_data ?? {}; // { ca_cert, root_cert }
 
     return {
-      signatureIndex,
-      algorithm: 'sha256WithRSAEncryption',
-      cmsBase64,
-      cmsHex,
-      certificate: {
-        subjectCN: 'Mock Signer',
-        pem: certPem,
-        thumbprintSha256Hex: certThumbHex,
+      serial_number,
+      cert_status_code: it?.cert_status_code ?? null,
+      cert_status: it?.cert_status ?? null,
+      cert_b64_der,
+      cert_pem,
+      chain_obj: {
+        ca_cert: chain_obj?.ca_cert ?? null,
+        root_cert: chain_obj?.root_cert ?? null,
       },
-      // Bạn có thể bỏ keyPem khi deploy thực tế (chỉ để demo):
-      privateKeyPem: keyPem,
+      _raw: it,
     };
+  }
+
+  private pickActiveCert(list: any[]) {
+    const isActive = (c: any) => {
+      const code = String(c.cert_status_code ?? '').toUpperCase();
+      const text = String(c.cert_status ?? '').toUpperCase();
+      return (
+        code === 'VALID' ||
+        text.includes('ĐANG HOẠT ĐỘNG') ||
+        text.includes('ACTIVE')
+      );
+    };
+    return list.find(isActive) || list[0];
+  }
+
+  // Hash đúng chuẩn theo phạm vi gap đã xác định
+  private hashForSignatureByGap(
+    pdf: Buffer,
+    gap: { start: number; end: number },
+  ) {
+    const md = require('crypto').createHash('sha256');
+    if (gap.start > 0) md.update(pdf.subarray(0, gap.start));
+    if (gap.end < pdf.length) md.update(pdf.subarray(gap.end));
+    return { digestHex: md.digest('hex') };
+  }
+
+  // Tìm phạm vi /Contents <...> và tính ByteRange đúng chuẩn
+  private locateContentsGap(pdf: Buffer, signatureIndex = 0) {
+    const pdfStr = pdf.toString('latin1'); // giữ nguyên byte
+    const reSig =
+      /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\][\s\S]*?\/Contents\s*<([0-9A-Fa-f]*)>/g;
+    // Nếu bạn không muốn dựa vào ByteRange sẵn có, dùng regex khác chỉ tìm /Contents <...>
+    // const reSig = /\/Contents\s*<([0-9A-Fa-f]*)>/g;
+
+    let m: RegExpExecArray | null;
+    let found = 0;
+    while ((m = reSig.exec(pdfStr))) {
+      if (found === signatureIndex) {
+        const fullMatch = m[0];
+        const hexInside = m[5] ?? '';
+        // vị trí ký tự '<' mở
+        const ltPos = pdfStr.indexOf('<', m.index + fullMatch.indexOf('<'));
+        // vị trí ký tự '>' đóng tương ứng
+        const gtPos = pdfStr.indexOf('>', ltPos);
+        if (ltPos < 0 || gtPos < 0)
+          throw new Error('Cannot find <...> of /Contents');
+
+        const start = ltPos; // offset bắt đầu gap (tại '<')
+        const hexLen = hexInside.length; // số ký tự hex giữa < >
+        const gapLen = 2 + hexLen; // tính cả '<' và '>'
+        const end = start + gapLen; // vị trí sau dấu '>' (c = end)
+
+        return {
+          start,
+          end,
+          gapLen,
+          hexLen,
+          ltPos,
+          gtPos,
+          byteRangeShouldBe: [0, start, end, pdf.length - end] as [
+            number,
+            number,
+            number,
+            number,
+          ],
+          hexInside,
+        };
+      }
+      found++;
+    }
+    throw new Error(`Signature index ${signatureIndex} not found`);
+  }
+
+  // Đọc /ByteRange đã khai báo trong file ở signatureIndex
+  private readDeclaredByteRange(pdf: Buffer, signatureIndex = 0) {
+    const s = pdf.toString('latin1');
+    const re = /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/g;
+    let m: RegExpExecArray | null;
+    let idx = 0;
+    while ((m = re.exec(s))) {
+      if (idx === signatureIndex) {
+        const a = Number(m[1]),
+          b = Number(m[2]),
+          c = Number(m[3]),
+          d = Number(m[4]);
+        return { a, b, c, d, text: m[0], start: m.index, end: re.lastIndex };
+      }
+      idx++;
+    }
+    return null; // có thể là prepare chưa viết ByteRange
+  }
+
+  fmtBR(n: number): string {
+    const s = String(n);
+    if (s.length > BR_SLOT_WIDTH) {
+      throw new BadRequestException(
+        `ByteRange number ${n} exceeds fixed width ${BR_SLOT_WIDTH}`,
+      );
+    }
+    return ' '.repeat(BR_SLOT_WIDTH - s.length) + s;
+  }
+
+  pad12(n: number): string {
+    const s = String(n);
+    if (s.length > BR_SLOT_WIDTH) {
+      throw new BadRequestException(
+        `ByteRange number ${n} exceeds ${BR_SLOT_WIDTH} chars`,
+      );
+    }
+    return ' '.repeat(BR_SLOT_WIDTH - s.length) + s;
+  }
+
+  nthMatch(
+    s: string,
+    re: RegExp, // phải có cờ /g
+    n: number,
+  ): RegExpExecArray | null {
+    re.lastIndex = 0;
+    let i = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(s)) !== null) {
+      if (i++ === n) return m;
+    }
+    return null;
+  }
+
+  fixLen1IfNeededByIndex(buf: Buffer, brIndex: number): Buffer {
+    const s = buf.toString('latin1');
+
+    // Tìm ByteRange thứ brIndex
+    const brKeyRe = /\/ByteRange\s*\[/g;
+    const brKey = this.nthMatch(s, brKeyRe, brIndex);
+    if (!brKey)
+      throw new BadRequestException(`ByteRange #${brIndex} not found`);
+    const brKeyPos = brKey.index;
+
+    const brOpen = s.indexOf('[', brKeyPos);
+    const brClose = s.indexOf(']', brOpen);
+    if (brOpen < 0 || brClose < 0)
+      throw new BadRequestException('Malformed /ByteRange');
+
+    const inside = s.slice(brOpen + 1, brClose);
+    const nums = inside.trim().split(/\s+/);
+    if (nums.length < 4)
+      throw new BadRequestException('Malformed /ByteRange (need 4 numbers)');
+
+    const a = parseInt(nums[0], 10);
+    const b = parseInt(nums[1], 10);
+    const c = parseInt(nums[2], 10);
+    const d = parseInt(nums[3], 10);
+
+    // Kiểm tra cơ bản
+    if (
+      !Number.isFinite(a) ||
+      !Number.isFinite(b) ||
+      !Number.isFinite(c) ||
+      !Number.isFinite(d)
+    ) {
+      throw new BadRequestException('Invalid /ByteRange numbers');
+    }
+    if (a !== 0 || b !== c) {
+      // Với template chuẩn chúng ta dùng, b luôn phải bằng c
+      throw new BadRequestException(
+        'Unexpected /ByteRange values (a!=0 or b!=c)',
+      );
+    }
+
+    const shouldD = buf.length - c;
+    if (shouldD === d) return buf; // không cần sửa
+
+    // Rebuild lại phần bên trong `[...]` với width=12, giữ NGUYÊN tổng chiều dài `inside`
+    const parts = [
+      this.pad12(a),
+      this.pad12(b),
+      this.pad12(c),
+      this.pad12(shouldD),
+    ];
+    const baseLen =
+      parts.reduce((t, p) => t + p.length, 0) + 3 * MIN_SPACES_BETWEEN;
+
+    if (baseLen > inside.length) {
+      // Trường hợp này hầu như không xảy ra vì bạn đã widen từ /prepare
+      throw new BadRequestException(
+        'Not enough room inside /ByteRange to rewrite',
+      );
+    }
+
+    const extra = inside.length - baseLen; // dồn hết vào sep cuối
+    const sep1 = ' '.repeat(MIN_SPACES_BETWEEN);
+    const sep2 = ' '.repeat(MIN_SPACES_BETWEEN);
+    const sep3 = ' '.repeat(MIN_SPACES_BETWEEN + extra);
+    const rebuiltInside =
+      parts[0] + sep1 + parts[1] + sep2 + parts[2] + sep3 + parts[3];
+
+    const out = s.slice(0, brOpen + 1) + rebuiltInside + s.slice(brClose);
+    return Buffer.from(out, 'latin1');
   }
 }

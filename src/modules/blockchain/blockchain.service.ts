@@ -20,7 +20,7 @@ import {
 
 // Import Fabric Network directly
 import { Gateway, Wallets, Contract, Network, X509Identity, Identity } from 'fabric-network';
-import * as FabricCAServices from 'fabric-ca-client';
+import FabricCAServices from 'fabric-ca-client';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';

@@ -121,59 +121,95 @@ export class ContractController {
   @Post('prepare')
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
-    summary: 'Chuẩn bị PDF: thêm placeholder chữ ký (2 vị trí)',
+    summary:
+      'Chuẩn bị PDF: thêm placeholder chữ ký (2 vị trí) và điền ByteRange',
   })
-  @ApiBody({
-    type: PreparePDFDto,
-  })
+  @ApiBody({ type: PreparePDFDto })
   async prepare(
     @UploadedFile() file: Express.Multer.File,
     @Body() body: PreparePDFDto,
     @Res() res: Response,
   ) {
-    if (!file?.buffer?.length)
+    if (!file?.buffer?.length) {
       throw new BadRequestException('Missing file "pdf"');
+    }
 
-    // helper parse rect JSON -> tuple
+    // helper: parse rect -> [x, y, w, h]
     const parseRect = (raw?: string) => {
       if (!raw) return undefined;
       try {
-        const parsed: unknown = JSON.parse(raw);
-        if (
-          Array.isArray(parsed) &&
-          parsed.length === 4 &&
-          parsed.every((n) => typeof n === 'number' && Number.isFinite(n))
-        ) {
-          return parsed as [number, number, number, number];
+        // Clean the input string: remove BOM, trim whitespace, and handle quotes
+        let cleanedRaw = raw.toString().trim();
+
+        // Remove BOM if present
+        if (cleanedRaw.charCodeAt(0) === 0xfeff) {
+          cleanedRaw = cleanedRaw.slice(1);
         }
-      } catch {
-        // ignore
+
+        // If string is wrapped in quotes, remove them
+        if (
+          (cleanedRaw.startsWith('"') && cleanedRaw.endsWith('"')) ||
+          (cleanedRaw.startsWith("'") && cleanedRaw.endsWith("'"))
+        ) {
+          cleanedRaw = cleanedRaw.slice(1, -1);
+        }
+
+        let v: unknown;
+
+        // Try parsing as JSON array first: [50,50,250,120]
+        if (cleanedRaw.startsWith('[') && cleanedRaw.endsWith(']')) {
+          v = JSON.parse(cleanedRaw);
+        } else {
+          // Try parsing as comma-separated values: 50,50,250,120
+          const parts = cleanedRaw.split(',').map((part) => {
+            const num = Number(part.trim());
+            if (!Number.isFinite(num)) {
+              throw new Error(`Invalid number: ${part}`);
+            }
+            return num;
+          });
+          v = parts;
+        }
+
+        if (
+          Array.isArray(v) &&
+          v.length === 4 &&
+          v.every((n) => typeof n === 'number' && Number.isFinite(n))
+        ) {
+          return v as [number, number, number, number];
+        }
+      } catch (err) {
+        console.warn('Cannot parse rect:', {
+          error: err as Error,
+          input: raw,
+          inputType: typeof raw,
+          inputLength: raw?.length,
+        });
       }
       return undefined;
     };
 
-    const places: {
+    const places: Array<{
       page?: number;
       rect?: [number, number, number, number];
       signatureLength?: number;
-    }[] = [];
+    }> = [];
 
-    // placeholder #1 (giữ nguyên như cũ)
+    // placeholder #1
     places.push({
       page: body.page !== undefined ? Number(body.page) : undefined,
       rect: parseRect(body.rect),
       signatureLength:
         body.signatureLength !== undefined
           ? Number(body.signatureLength)
-          : undefined,
+          : 65536, // Default 64KB for large ByteRange area + signature
     });
 
-    // placeholder #2 (nếu có)
+    // placeholder #2 (optional)
     const hasSecond =
       body.page2 !== undefined ||
       body.rect2 !== undefined ||
       body.signatureLength2 !== undefined;
-
     if (hasSecond) {
       places.push({
         page: body.page2 !== undefined ? Number(body.page2) : undefined,
@@ -181,20 +217,22 @@ export class ContractController {
         signatureLength:
           body.signatureLength2 !== undefined
             ? Number(body.signatureLength2)
-            : undefined,
+            : 65536, // Default 64KB for large ByteRange area + signature
       });
     }
 
     const prepared = await this.contractService.preparePlaceholder(
-      file.buffer,
+      Buffer.from(file.buffer),
       {
         places,
       },
     );
+    const finalized = this.contractService.finalizeAllByteRanges(prepared);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="prepared.pdf"');
-    return res.send(prepared);
+    res.setHeader('Content-Length', String(finalized.length));
+    return res.end(finalized);
   }
 
   @Post('hash')
@@ -240,52 +278,11 @@ export class ContractController {
     return res.json(result);
   }
 
-  @Post('mock-cms')
-  @UseInterceptors(FileInterceptor('pdf'))
-  @ApiConsumes('multipart/form-data')
-  @ApiOperation({
-    summary:
-      'Tạo CMS (PKCS#7) mock (detached, SHA-256) cho placeholder chỉ định',
-    description:
-      'Dùng để test nhúng chữ ký khi chưa có SmartCA. Nhận PDF + signatureIndex, trả về cmsBase64 & cmsHex.',
-  })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      required: ['pdf'],
-      properties: {
-        pdf: { type: 'string', format: 'binary' },
-        signatureIndex: {
-          type: 'string',
-          example: '0',
-          description: 'Index placeholder (0-based), mặc định 0.',
-        },
-      },
-    },
-  })
-  createMockCms(
-    @UploadedFile() file: Express.Multer.File,
-    @Body() body: { signatureIndex?: string },
-    @Res() res: Response,
-  ) {
-    if (!file?.buffer?.length) {
-      throw new BadRequestException('Missing file "pdf"');
-    }
-    const idx =
-      body.signatureIndex !== undefined ? Number(body.signatureIndex) : 5;
-    if (!Number.isFinite(idx) || idx < 0) {
-      throw new BadRequestException('Invalid signatureIndex');
-    }
-
-    const result = this.contractService.generateMockCmsForPdf(file.buffer, idx);
-    return res.json(result);
-  }
-
   @Post('embed-cms')
   @UseInterceptors(FileInterceptor('pdf'))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
-    summary: 'Nhúng CMS (PKCS#7) vào placeholder và hoàn thiện /ByteRange',
+    summary: 'Nhúng CMS (PKCS#7) vào placeholder (KHÔNG đổi ByteRange)',
     description:
       'Nhận CMS (base64 hoặc hex) từ CA và ghi vào /Contents của placeholder chỉ định (signatureIndex).',
   })
@@ -297,34 +294,30 @@ export class ContractController {
         pdf: {
           type: 'string',
           format: 'binary',
-          description: 'File PDF đã có placeholder',
+          description: 'PDF đã prepare (đã điền /ByteRange)',
         },
         signatureIndex: {
           type: 'string',
           example: '0',
-          description: 'Index placeholder (0-based). Mặc định 0.',
+          description: 'Index placeholder (0-based), mặc định 0',
         },
         cmsBase64: {
           type: 'string',
-          description: 'CMS/PKCS#7 dạng base64 (ưu tiên dùng)',
+          description: 'CMS/PKCS#7 dạng Base64 (ưu tiên)',
           example: 'MIIG...==',
         },
         cmsHex: {
           type: 'string',
-          description: 'CMS/PKCS#7 dạng hex (nếu không dùng base64)',
+          description: 'CMS/PKCS#7 dạng Hex (nếu không dùng base64)',
           example: '3082...A0F',
         },
       },
     },
   })
-  async embedCms(
+  embedCms(
     @UploadedFile() file: Express.Multer.File,
     @Body()
-    body: {
-      signatureIndex?: string;
-      cmsBase64?: string;
-      cmsHex?: string;
-    },
+    body: { signatureIndex?: string; cmsBase64?: string; cmsHex?: string },
     @Res() res: Response,
   ) {
     if (!file?.buffer?.length) {
@@ -347,19 +340,86 @@ export class ContractController {
       throw new BadRequestException('Provide only one of cmsBase64 or cmsHex');
     }
 
-    // Gọi service với object inputs
-    const signed = await this.contractService.embedCmsIntoPlaceholder(
+    // Convert CMS input to hex string
+    let cmsHexString: string;
+    if (cmsHex) {
+      cmsHexString = cmsHex;
+    } else {
+      // Convert base64 to hex
+      const buf = Buffer.from(cmsBase64, 'base64');
+      cmsHexString = buf.toString('hex').toUpperCase();
+    }
+
+    const signed = this.contractService.embedCmsAtIndex(
       Buffer.from(file.buffer),
-      {
-        cmsBase64: cmsBase64 || undefined,
-        cmsHex: cmsHex || undefined,
-        signatureIndex,
-      },
+      cmsHexString,
+      signatureIndex,
     );
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="signed.pdf"');
     res.setHeader('Content-Length', String(signed.length));
     return res.end(signed);
+  }
+
+  @Post('smartca/sign-to-cms')
+  @UseInterceptors(FileInterceptor('pdf'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary:
+      'VNPT SmartCA: ký DER(SignedAttributes) và TRẢ VỀ CMS (không embed)',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['pdf'],
+      properties: {
+        pdf: { type: 'string', format: 'binary' },
+        signatureIndex: { type: 'integer', default: 0 },
+        intervalMs: { type: 'integer', default: 2000 },
+        timeoutMs: { type: 'integer', default: 120000 },
+        userIdOverride: { type: 'string' },
+      },
+    },
+  })
+  async signToCms(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('signatureIndex') signatureIndexRaw?: string,
+    @Body('intervalMs') intervalMsRaw?: string,
+    @Body('timeoutMs') timeoutMsRaw?: string,
+    @Body('userIdOverride') userIdOverride?: string,
+  ) {
+    if (!file?.buffer?.length)
+      throw new BadRequestException('Missing file "pdf"');
+
+    const signatureIndex = Number.isFinite(Number(signatureIndexRaw))
+      ? Number(signatureIndexRaw)
+      : 0;
+    const intervalMs = Number.isFinite(Number(intervalMsRaw))
+      ? Number(intervalMsRaw)
+      : 2000;
+    const timeoutMs = Number.isFinite(Number(timeoutMsRaw))
+      ? Number(timeoutMsRaw)
+      : 120000;
+
+    const result = await this.contractService.signToCmsPades({
+      pdf: Buffer.from(file.buffer),
+      signatureIndex,
+      userIdOverride: userIdOverride?.trim() || undefined,
+      intervalMs,
+      timeoutMs,
+    });
+
+    // Trả JSON (để client dùng cmsBase64 gọi /embed-cms)
+    return {
+      message: 'CMS_READY',
+      cmsBase64: result.cmsBase64,
+      transactionId: result.transactionId,
+      docId: result.docId,
+      signatureIndex: result.signatureIndex,
+      byteRange: result.byteRange,
+      pdfLength: result.pdfLength,
+      digestHex: result.digestHex as string,
+    };
   }
 }
