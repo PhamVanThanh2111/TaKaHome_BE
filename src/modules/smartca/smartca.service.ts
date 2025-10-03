@@ -1,3 +1,8 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import { plainAddPlaceholder } from '@signpdf/placeholder-plain';
@@ -6,49 +11,26 @@ import axios from 'axios';
 import smartcaConfig from 'src/config/smartca.config';
 import * as crypto from 'crypto';
 import * as forge from 'node-forge';
+import {
+  PlainAddPlaceholderInput,
+  Place,
+  PrepareOptions,
+  SmartCASignResponse,
+  SmartCAUserCertificate,
+} from './types/smartca.types';
 
-type PlainAddPlaceholderInput = Parameters<typeof plainAddPlaceholder>[0] & {
-  rect?: [number, number, number, number];
-  page?: number;
-  signatureLength?: number;
-};
+const OID_SHA256 = forge.pki.oids.sha256 as string;
+const OID_RSA = forge.pki.oids.rsaEncryption as string;
 
-type Place = {
-  page?: number;
-  rect?: [number, number, number, number];
-  signatureLength?: number;
-  name?: string;
-  reason?: string;
-  contactInfo?: string;
-  location?: string;
-};
-
-type PrepareOptions = Place | { places: Place[] };
-
-const OID_SHA256 = forge.pki.oids.sha256;
-const OID_RSA = forge.pki.oids.rsaEncryption;
-
-const BR_SLOT_WIDTH = 12;
-const MIN_SPACES_BETWEEN = 1;
-
-export type SmartCASignResponse = any;
+export { SmartCASignResponse };
 
 // time_stamp: YYYYMMDDhhmmssZ (UTC, không có 'T')
 function utcTimestamp(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
-}
-
-export interface SmartCAUserCertificate {
-  serial_number?: string;
-  cert_status_code?: string; // "VALID" ...
-  cert_status?: string; // "Đang hoạt động" ...
-  [k: string]: any;
-}
-export interface SmartCAGetCertResp {
-  message?: string;
-  data?: { user_certificates?: SmartCAUserCertificate[] };
+  return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(
+    d.getUTCDate(),
+  )}${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
 }
 
 @Injectable()
@@ -58,10 +40,7 @@ export class SmartCAService {
     private readonly smartca: ConfigType<typeof smartcaConfig>,
   ) {}
 
-  async preparePlaceholder(
-    pdfBuffer: Buffer,
-    options: PrepareOptions,
-  ): Promise<Buffer> {
+  preparePlaceholder(pdfBuffer: Buffer, options: PrepareOptions): Buffer {
     const places: Place[] = 'places' in options ? options.places : [options];
 
     if (!Buffer.isBuffer(pdfBuffer)) {
@@ -225,7 +204,7 @@ export class SmartCAService {
     const { digestHex: pdfDigestHex } = this.hashForSignatureByGap(
       options.pdf,
       gap,
-    );
+    ) as { digestHex: string };
 
     // 2) Lấy cert & serial
     const certResp = await this.getCertificates({
@@ -314,52 +293,6 @@ export class SmartCAService {
     console.log('Input PDF size:', pdf.length);
     console.log('Signature index:', signatureIndex);
     console.log('CMS input length:', cmsBase64OrHex.length);
-
-    // Helper functions for ByteRange calculation and filling
-    const padFixedWidth = (num: number, width: number): string => {
-      const s = String(num);
-      if (s.length > width) {
-        throw new BadRequestException(
-          `ByteRange number ${s} exceeds placeholder width ${width}`,
-        );
-      }
-      return ' '.repeat(width - s.length) + s;
-    };
-
-    const writeByteRangeInPlace = (
-      outBuf: Buffer,
-      brText: string,
-      brStart: number,
-      values: number[], // [a,b,c,d]
-    ) => {
-      const starRe = /\/\*+|\*+/g; // "/****" or "****"
-      const runs: { absPos: number; width: number }[] = [];
-      for (let m = starRe.exec(brText); m; m = starRe.exec(brText)) {
-        const full = m[0];
-        const hasSlash = full.startsWith('/');
-        const width = full.length - (hasSlash ? 1 : 0);
-        const absPos = brStart + m.index + (hasSlash ? 1 : 0);
-        runs.push({ absPos, width });
-      }
-      // Map star runs back to which component (0..3) they belong to
-      const inside = brText.slice(brText.indexOf('[') + 1, brText.indexOf(']'));
-      const tokens = inside.trim().split(/\s+/); // expect 4
-      if (tokens.length < 4) {
-        throw new BadRequestException('Unexpected /ByteRange tokens');
-      }
-      const starredIdxs: number[] = [];
-      tokens.forEach((tk, idx) => {
-        if (tk.includes('*')) starredIdxs.push(idx);
-      });
-      if (runs.length !== starredIdxs.length) {
-        throw new BadRequestException('Star slot count mismatch in /ByteRange');
-      }
-      for (let i = 0; i < runs.length; i += 1) {
-        const comp = starredIdxs[i];
-        const r = runs[i];
-        outBuf.write(padFixedWidth(values[comp], r.width), r.absPos, 'latin1');
-      }
-    };
 
     // 1) Normalize CMS to HEX uppercase
     let cmsHex = (cmsBase64OrHex || '').trim();
@@ -686,7 +619,7 @@ export class SmartCAService {
     }
 
     // Update final PDF with calculated ByteRanges
-    let finalPdfResult = Buffer.from(finalPdfWithByteRange, 'latin1');
+    const finalPdfResult = Buffer.from(finalPdfWithByteRange, 'latin1');
     console.log('=== BYTERANGE FILLING COMPLETE ===\n');
 
     console.log('=== EMBED CMS DEBUG END ===\n');
@@ -769,7 +702,7 @@ export class SmartCAService {
     pdf: Buffer,
     gap: { start: number; end: number },
   ) {
-    const md = require('crypto').createHash('sha256');
+    const md = crypto.createHash('sha256');
     if (gap.start > 0) md.update(pdf.subarray(0, gap.start));
     if (gap.end < pdf.length) md.update(pdf.subarray(gap.end));
     return { digestHex: md.digest('hex') };
@@ -1287,7 +1220,9 @@ export class SmartCAService {
         chainAsn1.push(
           forge.pki.certificateToAsn1(forge.pki.certificateFromPem(pem)),
         );
-      } catch {}
+      } catch {
+        // Ignore conversion errors
+      }
     }
 
     // AlgorithmIdentifier helpers
