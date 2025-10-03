@@ -143,4 +143,69 @@ export class SmartCAController {
     res.setHeader('Content-Length', String(prepared.length));
     return res.end(prepared);
   }
+
+  @Post('sign-to-cms')
+  @UseInterceptors(FileInterceptor('pdf'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary:
+      'VNPT SmartCA: ký DER(SignedAttributes) và TRẢ VỀ CMS (không embed)',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['pdf'],
+      properties: {
+        pdf: { type: 'string', format: 'binary' },
+        signatureIndex: { type: 'integer', default: 0 },
+        intervalMs: { type: 'integer', default: 2000 },
+        timeoutMs: { type: 'integer', default: 120000 },
+        userIdOverride: { type: 'string' },
+      },
+    },
+  })
+  async signToCms(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('signatureIndex') signatureIndexRaw?: string,
+    @Body('intervalMs') intervalMsRaw?: string,
+    @Body('timeoutMs') timeoutMsRaw?: string,
+    @Body('userIdOverride') userIdOverride?: string,
+  ) {
+    if (!file?.buffer?.length)
+      throw new BadRequestException('Missing file "pdf"');
+
+    const signatureIndex = Number.isFinite(Number(signatureIndexRaw))
+      ? Number(signatureIndexRaw)
+      : 0;
+    const intervalMs = Number.isFinite(Number(intervalMsRaw))
+      ? Number(intervalMsRaw)
+      : 2000;
+    const timeoutMs = Number.isFinite(Number(timeoutMsRaw))
+      ? Number(timeoutMsRaw)
+      : 120000;
+
+    console.log(
+      `[POST] /contracts/smartca/sign-to-cms with signatureIndex: ${signatureIndex}`,
+    );
+
+    const result = await this.smartcaService.signToCmsPades({
+      pdf: Buffer.from(file.buffer),
+      signatureIndex,
+      userIdOverride: userIdOverride?.trim() || undefined,
+      intervalMs,
+      timeoutMs,
+    });
+
+    // Trả JSON (để client dùng cmsBase64 gọi /embed-cms)
+    return {
+      message: 'CMS_READY',
+      cmsBase64: result.cmsBase64,
+      transactionId: result.transactionId,
+      docId: result.docId,
+      signatureIndex: result.signatureIndex,
+      byteRange: result.byteRange,
+      pdfLength: result.pdfLength,
+      digestHex: result.digestHex as string,
+    };
+  }
 }
