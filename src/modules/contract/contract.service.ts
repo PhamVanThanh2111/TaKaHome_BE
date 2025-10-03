@@ -382,6 +382,8 @@ export class ContractService {
 
     // Tìm các /ByteRange
     for (let m = byteRangeRe.exec(pdfStr); m; m = byteRangeRe.exec(pdfStr)) {
+      console.log(`DEBUG ByteRange found: "${m[0]}" at position ${m.index}`);
+      console.log(`DEBUG ByteRange captured groups:`, m.slice(1));
       byteRanges.push({ text: m[0], start: m.index });
     }
     if (byteRanges.length === 0) {
@@ -449,15 +451,32 @@ export class ContractService {
     // Ghi chuỗi HEX mới vào khoảng [hexStart, hexStart + hexLenChars)
     out.write(cmsHexUpper, ct.hexStart, 'latin1');
 
-    // 5) Tính lại 4 số /ByteRange theo ABS positions (trên buffer "out" sau khi đã ghi CMS hex)
-    // start1 luôn = 0
-    const start1 = 0;
-    // len1 = số byte từ đầu file tới ngay trước KÝ TỰ HEX đầu tiên trong <...>
-    const len1 = ct.hexStart - start1;
-    // start2 = vị trí sau phần HEX (vì độ dài hex giữ nguyên ⇒ hexEnd như cũ)
-    const start2 = ct.hexStart + ct.hexLenChars;
-    // len2 = phần còn lại
-    const len2 = out.length - start2;
+    // 5) Tính lại 4 số /ByteRange theo PDF spec (trên buffer "out" sau khi đã ghi CMS hex)
+    // PDF ByteRange [a b c d] format:
+    // Phần 1: từ byte a với độ dài b (phần trước signature)
+    // Phần 2: từ byte c với độ dài d (phần sau signature)
+    // Phần ở giữa (a+b đến c-1) sẽ bị bỏ qua (chứa signature)
+    const start1 = 0; // bắt đầu từ đầu file
+    const len1 = ct.hexStart; // từ đầu đến ngay trước hex data (ct.hexStart = vị trí sau '<')
+    const start2 = ct.hexStart + ct.hexLenChars; // từ ngay sau hex data cuối cùng
+    const len2 = out.length - start2; // phần còn lại từ sau hex data đến cuối file
+
+    console.log('=== embedCmsAtIndex ByteRange calculation (PDF SPEC) ===');
+    console.log('ct.hexStart (position after <):', ct.hexStart);
+    console.log('ct.hexLenChars (hex content length):', ct.hexLenChars);
+    console.log('out.length (total PDF size):', out.length);
+    console.log('PDF ByteRange calculation:');
+    console.log('  start1:', start1, '(always 0)');
+    console.log('  len1:', len1, '(from start to before hex data)');
+    console.log('  start2:', start2, '(from after hex data)');
+    console.log('  len2:', len2, '(remaining bytes)');
+    console.log(
+      'ByteRange will exclude bytes from',
+      len1,
+      'to',
+      start2 - 1,
+      '(signature area)',
+    );
 
     const numbers = [start1, len1, start2, len2];
 
@@ -486,6 +505,11 @@ export class ContractService {
       brStart: number, // vị trí bắt đầu "/ByteRange" trong outBuf
       numbersArr: number[], // [off0, len0, off1, len1]
     ) {
+      console.log(`DEBUG writeByteRangeInPlace called with:`);
+      console.log(`  brText: "${brText}"`);
+      console.log(`  brStart: ${brStart}`);
+      console.log(`  numbersArr: [${numbersArr.join(', ')}]`);
+
       const openIdx = brText.indexOf('[');
       const closeIdx = brText.indexOf(']');
       if (openIdx < 0 || closeIdx < 0 || closeIdx <= openIdx) {
@@ -494,6 +518,7 @@ export class ContractService {
 
       const inside = brText.slice(openIdx + 1, closeIdx);
       const insideLen = inside.length;
+      console.log(`  inside: "${inside}" (length: ${insideLen})`);
 
       // Xây các số width cố định = BR_SLOT_WIDTH (căn phải, pad space)
       const fmt = (n: number) => {
@@ -506,12 +531,16 @@ export class ContractService {
         return ' '.repeat(BR_SLOT_WIDTH - s.length) + s;
       };
 
+      // CLEAN FORMAT: ensure no "/" characters in output
       const parts = [
         fmt(numbersArr[0]),
         fmt(numbersArr[1]),
         fmt(numbersArr[2]),
         fmt(numbersArr[3]),
       ];
+      console.log(
+        `  formatted parts: [${parts.map((p) => `"${p}"`).join(', ')}]`,
+      );
 
       // Chuỗi tối thiểu khi ghép bằng 1 space giữa các số
       const MIN_SPACES_BETWEEN = 1;
@@ -534,9 +563,15 @@ export class ContractService {
       const rebuiltInside =
         parts[0] + sep1 + parts[1] + sep2 + parts[2] + sep3 + parts[3];
 
+      console.log(
+        `  rebuiltInside: "${rebuiltInside}" (length: ${rebuiltInside.length})`,
+      );
+
       // Ghi đè phần inside (giữ nguyên tổng chiều dài vùng [ ... ])
       const absInsideStart = brStart + openIdx + 1;
       outBuf.write(rebuiltInside, absInsideStart, 'latin1');
+
+      console.log(`  Written to buffer at position ${absInsideStart}`);
     }
 
     writeByteRangeInPlace(out, br.text, br.start, numbers);
@@ -545,6 +580,15 @@ export class ContractService {
     if (out.length !== pdfBuffer.length) {
       throw new BadRequestException(
         `PDF length changed after embed (was ${pdfBuffer.length}, now ${out.length})`,
+      );
+    }
+
+    // Debug: Check final ByteRange format in output buffer
+    const finalPdfStr = out.toString('latin1');
+    const finalByteRangeMatch = finalPdfStr.match(/\/ByteRange\s*\[[^\]]+\]/);
+    if (finalByteRangeMatch) {
+      console.log(
+        `DEBUG Final ByteRange in output: "${finalByteRangeMatch[0]}"`,
       );
     }
 
@@ -621,11 +665,13 @@ export class ContractService {
 
     const defaultRect: [number, number, number, number] = [50, 50, 250, 120];
 
-    // 1) Add all placeholders (each call uses the latest buffer)
+    // 1) Add placeholders for each signature place
     let out = Buffer.from(pdfBuffer);
-    places.forEach((p, idx) => {
+
+    // Process all places to create multiple signatures
+    for (const p of places) {
       const rect = p.rect ?? defaultRect;
-      const name = p.name?.trim() || `Signature${idx + 1}`;
+      const name = p.name?.trim() || 'Signature1';
       const signatureLength = Number.isFinite(p.signatureLength as number)
         ? Number(p.signatureLength)
         : 12000; // đủ rộng cho CMS RSA thông dụng
@@ -660,7 +706,7 @@ export class ContractService {
         `Creating placeholder with signatureLength: ${forceSignatureLength}`,
       );
       out = Buffer.from(plainAddPlaceholder(opts));
-    });
+    }
 
     // 1.5) REMOVED: Không cần expand ByteRange cho file nhỏ (<500KB)
     console.log(
@@ -704,68 +750,22 @@ export class ContractService {
       );
     }
 
-    // Helpers to write numbers into "/****" slots without changing file size
-    function padFixedWidth(num: number, width: number): string {
-      const s = String(num);
-      if (s.length > width) {
-        throw new BadRequestException(
-          `ByteRange number ${s} exceeds placeholder width ${width}`,
-        );
-      }
-      return ' '.repeat(width - s.length) + s;
-    }
-    function writeByteRangeInPlace(
-      outBuf: Buffer,
-      brText: string,
-      brStart: number,
-      values: number[], // [a,b,c,d]
-    ) {
-      const starRe = /\/\*+|\*+/g; // "/****" or "****"
-      const runs: { absPos: number; width: number }[] = [];
-      for (let m = starRe.exec(brText); m; m = starRe.exec(brText)) {
-        const full = m[0];
-        const hasSlash = full.startsWith('/');
-        // RESTORED: Sử dụng dynamic width detection từ placeholder
-        const width = full.length - (hasSlash ? 1 : 0);
-        const absPos = brStart + m.index + (hasSlash ? 1 : 0);
-        runs.push({ absPos, width });
-      }
-      // Map star runs back to which component (0..3) they belong to
-      const inside = brText.slice(brText.indexOf('[') + 1, brText.indexOf(']'));
-      const tokens = inside.trim().split(/\s+/); // expect 4
-      if (tokens.length < 4) {
-        throw new BadRequestException('Unexpected /ByteRange tokens');
-      }
-      const starredIdxs: number[] = [];
-      tokens.forEach((tk, idx) => {
-        if (tk.includes('*')) starredIdxs.push(idx);
-      });
-      if (runs.length !== starredIdxs.length) {
-        throw new BadRequestException('Star slot count mismatch in /ByteRange');
-      }
-      for (let i = 0; i < runs.length; i += 1) {
-        const comp = starredIdxs[i];
-        const r = runs[i];
-        outBuf.write(padFixedWidth(values[comp], r.width), r.absPos, 'latin1');
-      }
-    }
+    // 3) REMOVED: No longer calculate/fill ByteRange in /prepare API
+    // ByteRange will remain as placeholders (*) and will be calculated in /embed-cms API
+    console.log('=== PREPARE API: Leaving ByteRange as placeholders (*) ===');
+    console.log(
+      `Created ${byteRanges.length} signature placeholders with ${contents.length} contents placeholders`,
+    );
 
-    // 3) For each signature placeholder: compute numbers and fill /ByteRange
+    // Log placeholder positions for debugging
     for (let i = 0; i < byteRanges.length; i += 1) {
       const br = byteRanges[i];
       const ct = contents[i];
-
-      const start1 = 0;
-      const len1 = ct.hexStart - start1;
-      const start2 = ct.hexStart + ct.hexLenChars;
-      const len2 = out.length - start2;
-
-      writeByteRangeInPlace(out, br.text, br.start, [
-        start1,
-        len1,
-        start2,
-        len2,
-      ]);
+      console.log(`Placeholder #${i}:`);
+      console.log(`  ByteRange position: ${br.start}`);
+      console.log(
+        `  Contents hex start: ${ct.hexStart}, length: ${ct.hexLenChars}`,
+      );
     }
 
     return out;
@@ -915,7 +915,7 @@ export class ContractService {
   }
 
   // Điền 4 số của 1 /ByteRange theo vị trí <...> của /Contents ngay sau đó.
-  // IMPROVED: Tự động expand /ByteRange area nếu cần thiết cho 12-char format
+  // FIXED: ByteRange theo PDF spec - bao gồm 2 phần không bao gồm signature hex data
   private fillOneByteRange(
     pdf: Buffer,
     brOpenIdx: number, // vị trí '['
@@ -923,13 +923,35 @@ export class ContractService {
     contentsStart: number, // vị trí '<' của /Contents
     contentsEndExclusive: number, // ngay sau '>'
   ): Buffer {
-    // SIMPLIFIED: Chỉ dùng dynamic width, không expand
-    const a = 0;
-    const b = contentsStart; // từ đầu đến ngay trước '<'
-    const c = contentsEndExclusive; // ngay sau '>'
-    const d = pdf.length - c;
+    // PDF ByteRange [a b c d] format:
+    // Phần 1: từ byte a với độ dài b
+    // Phần 2: từ byte c với độ dài d
+    // Phần ở giữa (a+b đến c-1) sẽ bị bỏ qua (chứa signature)
+    const a = 0; // bắt đầu từ đầu file
+    const b = contentsStart; // từ đầu đến vị trí '<' (exclusive)
+    const c = contentsEndExclusive; // từ ngay sau vị trí '>' (inclusive)
+    const d = pdf.length - c; // phần còn lại từ sau '>' đến cuối file
 
-    console.log('Using dynamic width ByteRange fill');
+    console.log('=== fillOneByteRange DEBUG (FIXED CALCULATION) ===');
+    console.log('contentsStart (position of <):', contentsStart);
+    console.log(
+      'contentsEndExclusive (position after >):',
+      contentsEndExclusive,
+    );
+    console.log('pdf.length:', pdf.length);
+    console.log('PDF ByteRange calculation:');
+    console.log('  a (start1):', a, '(always 0)');
+    console.log('  b (len1):', b, '(from start to position of < exclusive)');
+    console.log('  c (start2):', c, '(from position after > inclusive)');
+    console.log('  d (len2):', d, '(remaining bytes)');
+    console.log(
+      'ByteRange will exclude bytes from',
+      a + b,
+      'to',
+      c - 1,
+      '(signature area)',
+    );
+
     return this.fillMixedByteRangeDynamic(pdf, brOpenIdx, brCloseIdx, [
       a,
       b,
@@ -947,46 +969,99 @@ export class ContractService {
     brCloseIdx: number,
     values: number[],
   ): Buffer {
+    console.log(
+      `DEBUG fillMixedByteRangeDynamic called with values: [${values.join(', ')}]`,
+    );
+
     const s = pdf.toString('latin1');
     const insideStart = brOpenIdx + 1;
     const insideEnd = brCloseIdx;
     const insideText = s.slice(insideStart, insideEnd);
-    
-    // Parse tokens trong ByteRange
-    const tokens = insideText.trim().split(/\s+/);
+
+    console.log(`DEBUG insideText: "${insideText}"`);
+
+    // Parse tokens trong ByteRange và lọc bỏ dấu "/"
+    const allTokens = insideText.trim().split(/\s+/);
+    const tokens = allTokens.filter((token) => token !== '/');
+    console.log(
+      `DEBUG allTokens: [${allTokens.map((t) => `"${t}"`).join(', ')}]`,
+    );
+    console.log(
+      `DEBUG filtered tokens: [${tokens.map((t) => `"${t}"`).join(', ')}]`,
+    );
+
     if (tokens.length < 4) {
       throw new BadRequestException('Invalid ByteRange format in mixed mode');
     }
-    
-    // Replace mỗi token: nếu là placeholder (*) thì thay bằng số, nếu là số thì giữ nguyên
-    const newTokens = tokens.map((token, idx) => {
-      if (idx >= 4) return token; // chỉ process 4 tokens đầu
-      
+
+    // Replace mỗi token: LUÔN sử dụng calculated values
+    const newTokens = tokens.slice(0, 4).map((token, idx) => {
+      console.log(`DEBUG processing token[${idx}]: "${token}"`);
+
+      // LUÔN sử dụng calculated value thay vì token từ PDF
+      const calculatedValue = values[idx];
+      const numStr = String(calculatedValue);
+
       if (token.includes('*')) {
         // Placeholder: thay bằng số với width = length của placeholder
-        const hasSlash = token.startsWith('/');
-        const starCount = hasSlash ? token.length - 1 : token.length;
-        const numStr = String(values[idx]);
-        
+        const cleanToken = token.startsWith('/') ? token.slice(1) : token;
+        const starCount = cleanToken.length;
+
+        console.log(
+          `DEBUG placeholder: cleanToken="${cleanToken}", starCount=${starCount}, calculatedValue=${calculatedValue}`,
+        );
+
         if (numStr.length > starCount) {
           throw new BadRequestException(
             `ByteRange number ${numStr} exceeds placeholder width ${starCount}`,
           );
         }
-        
-        return ' '.repeat(starCount - numStr.length) + numStr;
+
+        const paddedNum = ' '.repeat(starCount - numStr.length) + numStr;
+        console.log(
+          `DEBUG result for token[${idx}]: calculated="${calculatedValue}" -> padded="${paddedNum}"`,
+        );
+        return paddedNum;
       } else {
-        // Số cố định: giữ nguyên
-        return token;
+        // Số đã có sẵn: THAY THẾ bằng calculated value với cùng width
+        const originalWidth = token.startsWith('/')
+          ? token.slice(1).length
+          : token.length;
+
+        if (numStr.length > originalWidth) {
+          throw new BadRequestException(
+            `ByteRange calculated number ${numStr} exceeds original width ${originalWidth}`,
+          );
+        }
+
+        const paddedNum = ' '.repeat(originalWidth - numStr.length) + numStr;
+        console.log(
+          `DEBUG fixed number for token[${idx}]: original="${token}" calculated="${calculatedValue}" -> padded="${paddedNum}"`,
+        );
+        return paddedNum;
       }
     });
-    
+
+    console.log(
+      `DEBUG newTokens: [${newTokens.map((t) => `"${t}"`).join(', ')}]`,
+    );
+
     // Rebuild inside text với original spacing
     const newInside = newTokens.join(' ').padEnd(insideText.length, ' ');
-    
+    console.log(`DEBUG newInside: "${newInside}"`);
+
     // Replace in-place
     const result = s.slice(0, insideStart) + newInside + s.slice(insideEnd);
-    return Buffer.from(result, 'latin1');
+    const resultBuffer = Buffer.from(result, 'latin1');
+
+    // Verify final result
+    const finalInsideText = result.slice(
+      insideStart,
+      insideStart + newInside.length,
+    );
+    console.log(`DEBUG final inside text: "${finalInsideText}"`);
+
+    return resultBuffer;
   }
 
   /**
@@ -1045,6 +1120,14 @@ export class ContractService {
       const contentsEndExclusive = gt + 1; // ngay sau '>'
 
       // 3) Điền bốn số cho /ByteRange hiện tại
+      console.log(
+        'DEBUG fillMixedByteRangeDynamic: calling fillOneByteRange with params:',
+      );
+      console.log('  brOpen:', brOpen);
+      console.log('  brClose:', brClose);
+      console.log('  contentsStart:', contentsStart);
+      console.log('  contentsEndExclusive:', contentsEndExclusive);
+
       buf = this.fillOneByteRange(
         buf,
         brOpen,
@@ -1153,136 +1236,455 @@ export class ContractService {
   }
 
   /**
-   * Embed 1 CMS (pkcs#7) vào placeholder /Contents tương ứng với signatureIndex.
-   * - Chấp nhận cmsBase64 hoặc cmsHex
-   * - Giữ nguyên độ dài giữa '<' '>' bằng cách PAD '0' (hex) cho đủ
-   * - Không đụng /ByteRange (đã finalize từ trước)
+   * Embed CMS vào placeholder /Contents - KHÔNG thay đổi ByteRange
+   * Chỉ thay thế hex content giữa <...> và pad với 0 nếu cần
    */
   public embedCmsAtIndex(
     pdf: Buffer,
     cmsBase64OrHex: string,
     signatureIndex: number,
   ): Buffer {
-    const BR_SLOT_WIDTH = 12; // mỗi số 12 ký tự
-    const MIN_SPACES_BETWEEN = 1; // ít nhất 1 khoảng trắng giữa các số
+    console.log('\n=== EMBED CMS DEBUG START ===');
+    console.log('Input PDF size:', pdf.length);
+    console.log('Signature index:', signatureIndex);
+    console.log('CMS input length:', cmsBase64OrHex.length);
 
-    // 1) Chuẩn hoá CMS: chấp nhận base64 hoặc hex, chuẩn hoá về HEX (UPPER)
+    // Helper functions for ByteRange calculation and filling
+    const padFixedWidth = (num: number, width: number): string => {
+      const s = String(num);
+      if (s.length > width) {
+        throw new BadRequestException(
+          `ByteRange number ${s} exceeds placeholder width ${width}`,
+        );
+      }
+      return ' '.repeat(width - s.length) + s;
+    };
+
+    const writeByteRangeInPlace = (
+      outBuf: Buffer,
+      brText: string,
+      brStart: number,
+      values: number[], // [a,b,c,d]
+    ) => {
+      const starRe = /\/\*+|\*+/g; // "/****" or "****"
+      const runs: { absPos: number; width: number }[] = [];
+      for (let m = starRe.exec(brText); m; m = starRe.exec(brText)) {
+        const full = m[0];
+        const hasSlash = full.startsWith('/');
+        const width = full.length - (hasSlash ? 1 : 0);
+        const absPos = brStart + m.index + (hasSlash ? 1 : 0);
+        runs.push({ absPos, width });
+      }
+      // Map star runs back to which component (0..3) they belong to
+      const inside = brText.slice(brText.indexOf('[') + 1, brText.indexOf(']'));
+      const tokens = inside.trim().split(/\s+/); // expect 4
+      if (tokens.length < 4) {
+        throw new BadRequestException('Unexpected /ByteRange tokens');
+      }
+      const starredIdxs: number[] = [];
+      tokens.forEach((tk, idx) => {
+        if (tk.includes('*')) starredIdxs.push(idx);
+      });
+      if (runs.length !== starredIdxs.length) {
+        throw new BadRequestException('Star slot count mismatch in /ByteRange');
+      }
+      for (let i = 0; i < runs.length; i += 1) {
+        const comp = starredIdxs[i];
+        const r = runs[i];
+        outBuf.write(padFixedWidth(values[comp], r.width), r.absPos, 'latin1');
+      }
+    };
+
+    // 1) Normalize CMS to HEX uppercase
     let cmsHex = (cmsBase64OrHex || '').trim();
     const looksHex =
       /^[0-9A-Fa-f\s]+$/.test(cmsHex) &&
       cmsHex.replace(/\s+/g, '').length % 2 === 0;
+
+    console.log('\n=== CMS HEX VALIDATION ===');
+    console.log('Original CMS input length:', cmsBase64OrHex.length);
+    console.log('Trimmed CMS length:', cmsHex.length);
+    console.log('Looks like hex:', looksHex);
+
     if (!looksHex) {
-      // coi như base64 => decode sang bytes => to HEX
       try {
         const bytes = Buffer.from(cmsHex, 'base64');
         if (!bytes.length) throw new Error('empty');
         cmsHex = bytes.toString('hex').toUpperCase();
-      } catch (e) {
+        console.log('Converted from base64 to hex, length:', cmsHex.length);
+      } catch (error) {
+        console.error('CMS conversion error:', error);
         throw new BadRequestException('CMS must be base64 or hex');
       }
     } else {
       cmsHex = cmsHex.replace(/\s+/g, '').toUpperCase();
+      console.log('Using provided hex, length:', cmsHex.length);
+      console.log('CMS hex preview:', cmsHex.substring(0, 100) + '...');
+      console.log(
+        'CMS hex ending:',
+        '...' + cmsHex.substring(cmsHex.length - 50),
+      );
     }
 
-    const padFixed = (n: number): string => {
-      const s = String(n);
-      if (!Number.isFinite(n)) {
-        throw new BadRequestException('Invalid number in /ByteRange');
-      }
-      if (s.length > BR_SLOT_WIDTH) {
-        throw new BadRequestException(
-          `ByteRange number ${n} exceeds ${BR_SLOT_WIDTH} chars`,
+    // 2) Convert to string for text operations
+    const pdfStr = pdf.toString('latin1');
+    console.log('PDF as string length:', pdfStr.length);
+
+    // Count total signatures in PDF
+    const sigMatches = Array.from(pdfStr.matchAll(/\/Type\s*\/Sig/g));
+    const contentsMatches = Array.from(pdfStr.matchAll(/\/Contents\s*<[0]*>/g));
+    console.log('Total /Type/Sig entries:', sigMatches.length);
+    console.log('Total /Contents placeholders:', contentsMatches.length);
+
+    // 3) Find the Contents placeholder by index - Updated regex to handle any hex content
+    const contentsRegex = /\/Contents\s*<([0-9A-Fa-f]*)>/g;
+    let match: RegExpExecArray | null;
+    let currentIndex = 0;
+    let contentsStart = -1;
+    let contentsEnd = -1;
+    let placeholderContent = '';
+
+    console.log('Searching for Contents placeholders...');
+
+    while ((match = contentsRegex.exec(pdfStr)) !== null) {
+      console.log(`Found Contents #${currentIndex} at position ${match.index}`);
+      console.log(`  Full match: "${match[0]}"`);
+      console.log(`  Content inside brackets: "${match[1] || '(empty)'}"`);
+
+      if (currentIndex === signatureIndex) {
+        // FIXED: Calculate positions correctly
+        contentsStart = match.index + match[0].indexOf('<');
+        contentsEnd = match.index + match[0].lastIndexOf('>') + 1;
+        placeholderContent = match[1] || '';
+
+        console.log('Selected Contents placeholder:');
+        console.log('  Start position (position of <):', contentsStart);
+        console.log('  End position (position after >):', contentsEnd);
+        console.log('  Placeholder length:', placeholderContent.length);
+        console.log(
+          '  Placeholder preview:',
+          placeholderContent.substring(0, 50) + '...',
         );
-      }
-      return ' '.repeat(BR_SLOT_WIDTH - s.length) + s;
-    };
-
-    // 2) Tìm /Contents <...> theo signatureIndex (0-based)
-    const s0 = pdf.toString('latin1');
-    const contentsRe = /\/Contents\s*<([\s\S]*?)>/g; // non-greedy
-    let m: RegExpExecArray | null;
-    let matchIdx = 0;
-    let contStart = -1,
-      lt = -1,
-      gt = -1;
-
-    contentsRe.lastIndex = 0;
-    while ((m = contentsRe.exec(s0)) !== null) {
-      if (matchIdx++ === signatureIndex) {
-        contStart = m.index;
-        lt = s0.indexOf('<', contStart);
-        gt = s0.indexOf('>', lt);
         break;
       }
+      currentIndex++;
     }
-    if (lt < 0 || gt < 0) {
+
+    if (contentsStart === -1 || contentsEnd === -1) {
+      console.error(`Contents placeholder #${signatureIndex} not found`);
       throw new BadRequestException(
-        `Contents #${signatureIndex} not found or malformed`,
+        `Contents placeholder #${signatureIndex} not found`,
       );
     }
 
-    // 3) Thay CMS vào đúng vùng giữa <...>, GIỮ NGUYÊN độ dài reserved
-    const reservedLen = gt - (lt + 1); // số ký tự HEX đã chừa sẵn
-    if (cmsHex.length > reservedLen) {
+    // 4) Check if CMS fits in placeholder (excluding < and > brackets)
+    const reservedSpace = contentsEnd - contentsStart - 2; // -2 for < and >
+    console.log('Reserved space in placeholder:', reservedSpace);
+    console.log('CMS hex length:', cmsHex.length);
+
+    if (cmsHex.length > reservedSpace) {
+      console.error(`CMS too large: ${cmsHex.length} > ${reservedSpace}`);
       throw new BadRequestException(
-        `CMS hex length ${cmsHex.length} exceeds reserved ${reservedLen}`,
-      );
-    }
-    if (cmsHex.length < reservedLen) {
-      cmsHex = cmsHex.padEnd(reservedLen, '0'); // pad '0' cho đủ
-    }
-    const s1 = s0.slice(0, lt + 1) + cmsHex + s0.slice(gt);
-    let out = Buffer.from(s1, 'latin1');
-
-    // 4) Tìm /ByteRange gần nhất ĐỨNG TRƯỚC vùng /Contents này
-    const beforeLt = s1.slice(0, lt);
-    const brKeyPos = beforeLt.lastIndexOf('/ByteRange');
-    if (brKeyPos < 0)
-      throw new BadRequestException('Matching /ByteRange not found');
-
-    const brOpen = s1.indexOf('[', brKeyPos);
-    const brClose = s1.indexOf(']', brOpen);
-    if (brOpen < 0 || brClose < 0)
-      throw new BadRequestException('Malformed /ByteRange');
-
-    // 5) Tính lại 4 số CHUẨN: a=0, b=lt, c=gt+1, d=out.length - c
-    const a = 0;
-    const b = lt; // độ dài đoạn 1: từ đầu file đến ngay trước '<'
-    const c = gt + 1; // offset đoạn 2: ngay sau '>'
-    const d = out.length - c;
-
-    // KHÔNG kiểm tra b===c (điều đó là sai cho PDF chuẩn). Chỉ cần đảm bảo b < c và (c-b) = độ dài '<...>'
-    if (!(b >= 0 && c > b)) {
-      throw new BadRequestException(
-        'Computed /ByteRange is invalid (b>=0, c>b required)',
+        `CMS hex length ${cmsHex.length} exceeds reserved space ${reservedSpace}`,
       );
     }
 
-    // 6) Viết lại 4 số với width=12, GIỮ NGUYÊN tổng chiều dài bên trong [ ... ]
-    const insideStart = brOpen + 1;
-    const insideEnd = brClose;
-    const oldInside = s1.slice(insideStart, insideEnd);
+    // 5) Pad CMS with zeros to fill the placeholder exactly - CRITICAL: maintain exact length
+    const paddedCMS = cmsHex.padEnd(reservedSpace, '0');
+    console.log('Padded CMS length:', paddedCMS.length);
+    console.log('Reserved space:', reservedSpace);
+    console.log('Length match check:', paddedCMS.length === reservedSpace);
 
-    const parts = [padFixed(a), padFixed(b), padFixed(c), padFixed(d)];
-    const baseLen =
-      parts.reduce((t, p) => t + p.length, 0) + 3 * MIN_SPACES_BETWEEN;
-    if (baseLen > oldInside.length) {
-      // về lý không xảy ra vì bạn đã widen thành 12 ký tự ở bước /prepare
+    // 6) Replace ONLY the Contents including < and >, do NOT touch ByteRange yet
+    const beforeContents = pdfStr.substring(0, contentsStart);
+    const afterContents = pdfStr.substring(contentsEnd);
+
+    // Debug: Check content before replacement
+    const originalContent = pdfStr.substring(contentsStart, contentsEnd);
+    console.log('=== CMS REPLACEMENT DEBUG ===');
+    console.log('Original content length:', originalContent.length);
+    console.log(
+      'Original content preview:',
+      originalContent.substring(0, 50) + '...',
+    );
+    console.log('Padded CMS preview:', paddedCMS.substring(0, 50) + '...');
+
+    // CRITICAL: Replacement MUST maintain exact same length
+    const newContentsSection = '<' + paddedCMS + '>';
+    console.log('Original contents section length:', originalContent.length);
+    console.log('New contents section length:', newContentsSection.length);
+    console.log(
+      'Length preservation check:',
+      originalContent.length === newContentsSection.length,
+    );
+
+    if (originalContent.length !== newContentsSection.length) {
       throw new BadRequestException(
-        `Not enough room inside /ByteRange (need >= ${baseLen}, have ${oldInside.length})`,
+        `CMS replacement length mismatch: original ${originalContent.length} vs new ${newContentsSection.length}`,
       );
     }
-    const extra = oldInside.length - baseLen; // dồn extra vào khoảng trắng cuối
-    const sep1 = ' '.repeat(MIN_SPACES_BETWEEN);
-    const sep2 = ' '.repeat(MIN_SPACES_BETWEEN);
-    const sep3 = ' '.repeat(MIN_SPACES_BETWEEN + (extra > 0 ? extra : 0));
-    const newInside =
-      parts[0] + sep1 + parts[1] + sep2 + parts[2] + sep3 + parts[3];
 
-    const s2 = s1.slice(0, insideStart) + newInside + s1.slice(insideEnd);
-    out = Buffer.from(s2, 'latin1');
+    const finalPdfStr = beforeContents + newContentsSection + afterContents;
+    console.log('Replacement: <' + paddedCMS.substring(0, 20) + '...>');
 
-    return out;
+    // Debug: Verify replacement worked
+    const newContent = finalPdfStr.substring(
+      contentsStart,
+      contentsStart + originalContent.length,
+    );
+    console.log('New content preview:', newContent.substring(0, 50) + '...');
+    console.log(
+      'Replacement successful:',
+      newContent.startsWith('<') && newContent.endsWith('>'),
+    );
+    console.log('=== CMS REPLACEMENT DEBUG END ===');
+
+    console.log('Final PDF string length:', finalPdfStr.length);
+    console.log('Length change:', finalPdfStr.length - pdfStr.length);
+
+    const finalPdf = Buffer.from(finalPdfStr, 'latin1');
+
+    // 7) **CRITICAL**: Calculate ByteRange AFTER CMS embedding for accurate positions
+    console.log('\n=== CALCULATING BYTERANGE AFTER CMS EMBED ===');
+
+    // Calculate ByteRange based on PDF specification with FINAL PDF positions:
+    // [a b c d] means: signed data = bytes[a..a+b-1] + bytes[c..c+d-1]
+    // Signature area (excluded) = bytes[a+b..c-1]
+    const a = 0; // always start from beginning
+    const b = contentsStart + 1; // up to and INCLUDING '<' (signature starts AFTER '<')
+    const c = contentsEnd - 1; // from and INCLUDING '>' (signature ends BEFORE '>')
+    const d = finalPdf.length - c; // remaining bytes from FINAL PDF (after CMS embedding)
+
+    console.log('ByteRange calculation (AFTER CMS embed):');
+    console.log(`  Final PDF length: ${finalPdf.length}`);
+    console.log(`  Contents start: ${contentsStart} (position of '<')`);
+    console.log(`  Contents end: ${contentsEnd} (position after '>')`);
+    console.log(`  Calculated ByteRange: [${a}, ${b}, ${c}, ${d}]`);
+    console.log(`  Signature area (excluded): bytes ${b} to ${c - 1}`);
+    console.log(
+      `  Signed data: bytes 0-${b - 1} + bytes ${c}-${finalPdf.length - 1}`,
+    );
+
+    // 8) TEMPORARILY DISABLED: Recalculate ALL ByteRanges after embedding CMS
+    // Testing to see if signatures work without recalculation
+    console.log('DISABLED: Recalculating all ByteRanges after CMS embed...');
+    // finalPdf = this.recalculateAllByteRanges(finalPdf);
+
+    // Debug: Check final PDF content around ByteRange positions
+    console.log('\n=== FINAL PDF CONTENT ANALYSIS ===');
+    const finalPdfString = finalPdf.toString('latin1'); // CRITICAL: Use latin1 encoding!
+
+    // Debug: Check actual bytes at the embedded position
+    console.log('\n=== BYTE-LEVEL CMS VERIFICATION ===');
+    const cmsDataStart = contentsStart + 1; // CMS data starts AFTER '<'
+    console.log(
+      'Checking bytes at position',
+      cmsDataStart,
+      'to',
+      cmsDataStart + 20,
+    );
+    const bytesAtPosition = finalPdf.subarray(cmsDataStart, cmsDataStart + 20);
+    console.log(
+      'Hex bytes at embedded position:',
+      bytesAtPosition.toString('hex').toUpperCase(),
+    );
+    console.log(
+      'ASCII at embedded position:',
+      bytesAtPosition.toString('ascii'),
+    );
+
+    // Check if it matches CMS start
+    const expectedCmsStart = paddedCMS.substring(0, 40); // First 20 bytes = 40 hex chars
+    console.log('Expected CMS start (first 40 hex chars):', expectedCmsStart);
+    console.log(
+      'Actual vs Expected match:',
+      bytesAtPosition.toString('hex').toUpperCase() ===
+        expectedCmsStart.toUpperCase(),
+    );
+    console.log('=== BYTE-LEVEL CMS VERIFICATION END ===\n');
+
+    // Find all ByteRange entries in final PDF
+    const byteRangeMatches = Array.from(
+      finalPdfString.matchAll(
+        /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/g,
+      ),
+    );
+    console.log('Found ByteRange entries:', byteRangeMatches.length);
+
+    byteRangeMatches.forEach((match, idx) => {
+      const [, a, b, c, d] = match;
+      const byteRange = {
+        a: parseInt(a),
+        b: parseInt(b),
+        c: parseInt(c),
+        d: parseInt(d),
+      };
+      console.log(`ByteRange #${idx}:`, byteRange);
+
+      // Check what's at those positions in FINAL PDF
+      console.log(
+        `  Final content at position ${byteRange.b}:`,
+        JSON.stringify(finalPdfString.charAt(byteRange.b)),
+      );
+      console.log(
+        `  Final content at position ${byteRange.c}:`,
+        JSON.stringify(finalPdfString.charAt(byteRange.c)),
+      );
+      console.log(
+        `  Final range preview at ${byteRange.b}: "${finalPdfString.substring(byteRange.b, byteRange.b + 10)}"`,
+      );
+      console.log(
+        `  Final range preview at ${byteRange.c}: "${finalPdfString.substring(byteRange.c, byteRange.c + 10)}"`,
+      );
+    });
+
+    // *** NEW: Calculate and fill ByteRange using pre-calculated values ***
+    console.log('\n=== FILLING BYTERANGE WITH PRE-CALCULATED VALUES ===');
+
+    // Find ByteRange placeholders (with * or / patterns) that need to be filled
+    const brRe = /\/ByteRange\s*\[\s*([^[\]]*?)\s*\]/g;
+    const placeholderMatches: Array<{
+      text: string;
+      start: number;
+      components: string[];
+      insideContent: string;
+    }> = [];
+    let finalPdfWithByteRange = finalPdfString;
+
+    for (let m = brRe.exec(finalPdfString); m; m = brRe.exec(finalPdfString)) {
+      const insideContent = m[1]; // Everything inside [ ]
+      const components = insideContent.trim().split(/\s+/); // Split by whitespace
+
+      console.log(`Found ByteRange: "${m[0]}"`);
+      console.log(`  Inside content: "${insideContent}"`);
+      console.log(`  Components: [${components.join(', ')}]`);
+
+      placeholderMatches.push({
+        text: m[0],
+        start: m.index,
+        components: components,
+        insideContent: insideContent,
+      });
+    }
+
+    console.log(`Found ${placeholderMatches.length} ByteRange placeholders`);
+
+    // Fill ByteRange for the signature we just embedded (signatureIndex)
+    if (placeholderMatches.length > signatureIndex) {
+      const brMatch = placeholderMatches[signatureIndex];
+
+      // Check if this ByteRange has placeholder values (contains * or /)
+      const hasPlaceholders = brMatch.components.some(
+        (comp) => comp.includes('*') || comp.includes('/'),
+      );
+
+      console.log(`\nProcessing ByteRange #${signatureIndex}:`);
+      console.log(`  Components: [${brMatch.components.join(', ')}]`);
+      console.log(`  Has placeholders: ${hasPlaceholders}`);
+
+      if (hasPlaceholders) {
+        console.log(
+          `Filling ByteRange #${signatureIndex} with pre-calculated values:`,
+        );
+        console.log(`  Values: [${a}, ${b}, ${c}, ${d}]`);
+
+        // Create new ByteRange content with proper formatting
+        const newByteRangeContent = `${a} ${b} ${c} ${d}`;
+        const paddedContent = newByteRangeContent.padEnd(
+          brMatch.insideContent.length,
+          ' ',
+        );
+
+        console.log(`  Original inside: "${brMatch.insideContent}"`);
+        console.log(`  New inside: "${paddedContent}"`);
+
+        // Replace the ByteRange content
+        const beforeBr = finalPdfWithByteRange.substring(0, brMatch.start);
+        const afterBr = finalPdfWithByteRange.substring(
+          brMatch.start + brMatch.text.length,
+        );
+        const newBrText = `/ByteRange [${paddedContent}]`;
+
+        finalPdfWithByteRange = beforeBr + newBrText + afterBr;
+
+        console.log(`  ByteRange #${signatureIndex} filled successfully`);
+      } else {
+        console.log(
+          `\nByteRange #${signatureIndex} already has numeric values, skipping`,
+        );
+      }
+    } else {
+      console.log(
+        `\nWarning: Could not find ByteRange #${signatureIndex} to fill`,
+      );
+    }
+
+    // Update final PDF with calculated ByteRanges
+    let finalPdfResult = Buffer.from(finalPdfWithByteRange, 'latin1');
+    console.log('=== BYTERANGE FILLING COMPLETE ===\n');
+
+    console.log('=== EMBED CMS DEBUG END ===\n');
+    return finalPdfResult;
+  }
+
+  /**
+   * Recalculate all ByteRanges in the PDF after CMS embedding
+   * This is critical because embedding CMS shifts positions
+   */
+  private recalculateAllByteRanges(pdf: Buffer): Buffer {
+    const s = pdf.toString('latin1');
+    let result = Buffer.from(pdf);
+
+    // Find all /ByteRange [...] entries with capture group for inside content
+    const byteRangePattern = /\/ByteRange\s*\[([^\]]*)\]/g;
+    const matches = [...s.matchAll(byteRangePattern)];
+
+    console.log(`Found ${matches.length} ByteRange entries to recalculate`);
+
+    // For each ByteRange, find its corresponding /Contents and recalculate
+    for (let i = 0; i < matches.length; i++) {
+      const match = matches[i];
+      const fullMatch = match[0]; // "/ByteRange [...]"
+      const insideContent = match[1]; // "0 222504 353578 133270               "
+      const brStart = match.index!;
+      const brFullEnd = brStart + fullMatch.length;
+
+      // Find positions of [ and ] to target only the inside content
+      const openBracket = brStart + fullMatch.indexOf('[');
+      const closeBracket = brStart + fullMatch.lastIndexOf(']');
+
+      // Find the corresponding /Contents for this ByteRange
+      const afterBR = s.substring(brFullEnd);
+      const contentsMatch = afterBR.match(/\/Contents\s*<([^>]*)>/);
+
+      if (contentsMatch) {
+        const contentsStart =
+          brFullEnd + contentsMatch.index! + contentsMatch[0].indexOf('<');
+        const contentsEnd =
+          contentsStart +
+          contentsMatch[0].substring(contentsMatch[0].indexOf('<')).length;
+
+        // Recalculate ByteRange for this signature
+        const values = [
+          0, // a: start of first range
+          contentsStart, // b: end of first range
+          contentsEnd, // c: start of second range
+          result.length - contentsEnd, // d: length of second range
+        ];
+
+        console.log(`Recalculating ByteRange #${i}: [${values.join(', ')}]`);
+
+        // Update this specific ByteRange (only the inside content between [ and ])
+        result = this.fillMixedByteRangeDynamic(
+          result,
+          openBracket,
+          closeBracket,
+          values,
+        );
+      }
+    }
+
+    return result;
   }
 
   private buildSignedAttrsDER(pdfDigestHex: string, signerPem: string): Buffer {
@@ -1443,7 +1845,7 @@ export class ContractService {
 
     // 1) Locate signature gap first (independent of ByteRange format)
     const gap = this.locateContentsGap(options.pdf, signatureIndex);
-    
+
     // 2) Try to read declared ByteRange (might be corrupted)
     const decl = this.readDeclaredByteRange(options.pdf, signatureIndex);
 
@@ -1934,7 +2336,7 @@ export class ContractService {
   // Tìm phạm vi /Contents <...> và tính ByteRange đúng chuẩn
   private locateContentsGap(pdf: Buffer, signatureIndex = 0) {
     const pdfStr = pdf.toString('latin1'); // giữ nguyên byte
-    
+
     // Tìm tất cả signature objects dựa vào /Contents pattern (không phụ thuộc ByteRange)
     const reSig = /\/Contents\s*<([0-9A-Fa-f]*)>/g;
 
@@ -1944,12 +2346,12 @@ export class ContractService {
       if (found === signatureIndex) {
         const fullMatch = m[0];
         const hexInside = m[1] ?? '';
-        
+
         // Tìm vị trí chính xác của '<' và '>'
         const contentsStart = m.index + fullMatch.indexOf('/Contents');
         const ltPos = pdfStr.indexOf('<', contentsStart);
         const gtPos = pdfStr.indexOf('>', ltPos);
-        
+
         if (ltPos < 0 || gtPos < 0) {
           throw new Error(
             `Cannot find <...> brackets for signature ${signatureIndex}`,

@@ -122,7 +122,7 @@ export class ContractController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary:
-      'Chuẩn bị PDF: thêm placeholder chữ ký (2 vị trí) và điền ByteRange',
+      'Chuẩn bị PDF: thêm placeholder chữ ký (2 vị trí) với ByteRange placeholders (*)',
   })
   @ApiBody({ type: PreparePDFDto })
   async prepare(
@@ -227,12 +227,14 @@ export class ContractController {
         places,
       },
     );
-    const finalized = this.contractService.finalizeAllByteRanges(prepared);
+    
+    // REMOVED: No longer finalize ByteRange in /prepare - it will be done in /embed-cms
+    // const finalized = this.contractService.finalizeAllByteRanges(prepared);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="prepared.pdf"');
-    res.setHeader('Content-Length', String(finalized.length));
-    return res.end(finalized);
+    res.setHeader('Content-Length', String(prepared.length));
+    return res.end(prepared);
   }
 
   @Post('hash')
@@ -294,7 +296,7 @@ export class ContractController {
         pdf: {
           type: 'string',
           format: 'binary',
-          description: 'PDF đã prepare (đã điền /ByteRange)',
+          description: 'PDF đã prepare (có placeholder ByteRange với *)',
         },
         signatureIndex: {
           type: 'string',
@@ -329,6 +331,8 @@ export class ContractController {
     if (!Number.isFinite(signatureIndex) || signatureIndex < 0) {
       throw new BadRequestException('Invalid signatureIndex');
     }
+
+    console.log(`[POST] /contracts/embed-cms with signatureIndex: ${signatureIndex}`);
 
     const cmsBase64 = (body.cmsBase64 || '').trim();
     const cmsHex = (body.cmsHex || '').trim();
@@ -401,6 +405,8 @@ export class ContractController {
     const timeoutMs = Number.isFinite(Number(timeoutMsRaw))
       ? Number(timeoutMsRaw)
       : 120000;
+
+    console.log(`[POST] /contracts/smartca/sign-to-cms with signatureIndex: ${signatureIndex}`);
 
     const result = await this.contractService.signToCmsPades({
       pdf: Buffer.from(file.buffer),
