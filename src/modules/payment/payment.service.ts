@@ -23,7 +23,6 @@ import {
   vnNow,
   vnpFormatYYYYMMDDHHmmss,
 } from '../../common/datetime';
-import { WalletTxnType } from '../common/enums/wallet-txn-type.enum';
 
 @Injectable()
 export class PaymentService {
@@ -69,7 +68,8 @@ export class PaymentService {
       // 2A) Thanh toán bằng ví: trừ ví và chuyển sang PAID
       await this.walletService.debit(ctx.userId, {
         amount,
-        type: WalletTxnType.CONTRACT_PAYMENT,
+        type: 'CONTRACT_PAYMENT',
+        refType: 'PAYMENT',
         refId: payment.id,
         note: `Pay contract ${contractId} by wallet`,
       });
@@ -355,6 +355,7 @@ export class PaymentService {
         .toLowerCase();
 
       if (signed !== receivedHash) {
+        console.log('signed !== receivedHash');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -363,6 +364,7 @@ export class PaymentService {
       }
 
       if (vnpParams['vnp_TmnCode'] !== tmnCode) {
+        console.log('!== tmnCode');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -372,6 +374,7 @@ export class PaymentService {
 
       const txnRef = vnpParams['vnp_TxnRef'];
       if (!txnRef) {
+        console.log('!txnRef');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -381,15 +384,11 @@ export class PaymentService {
 
       const payment = await this.paymentRepository.findOne({
         where: { gatewayTxnRef: txnRef },
-        relations: [
-          'contract',
-          'contract.tenant',
-          'contract.property',
-          'contract.landlord',
-        ],
+        relations: ['contract', 'contract.tenant', 'contract.property'],
       });
 
       if (!payment) {
+        console.log('!payment');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -399,6 +398,7 @@ export class PaymentService {
 
       const amountFromGateway = Number(vnpParams['vnp_Amount'] || 0);
       if (!Number.isFinite(amountFromGateway)) {
+        console.log('!Number.isFinite(amountFromGateway)');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -408,6 +408,7 @@ export class PaymentService {
 
       const expected = Math.round(Number(payment.amount) * 100);
       if (expected !== amountFromGateway) {
+        console.log('expected !== amountFromGateway');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -416,6 +417,7 @@ export class PaymentService {
       }
 
       if (payment.status === PaymentStatusEnum.PAID) {
+        console.log('PaymentStatusEnum.PAID');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -438,6 +440,7 @@ export class PaymentService {
 
         await this.onPaymentPaid(payment.id, payment);
 
+        console.log('onPaymentPaid chay xong');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -445,6 +448,7 @@ export class PaymentService {
         );
       }
 
+      console.log('failed');
       payment.status = PaymentStatusEnum.FAILED;
       await this.paymentRepository.save(payment);
 
@@ -468,24 +472,12 @@ export class PaymentService {
       loaded ??
       (await this.paymentRepository.findOne({
         where: { id: paymentId },
-        relations: [
-          'contract',
-          'contract.tenant',
-          'contract.property',
-          'contract.landlord',
-        ],
+        relations: ['contract', 'contract.tenant', 'contract.property'],
       }));
 
     if (!payment || !payment.contract) {
       return;
     }
-
-    // Xử lý theo mục đích payment
-    // Hiện có 3 mục đích chính:
-    // - Tenant đặt cọc vào Escrow (PaymentPurpose.TENANT_ESCROW_DEPOSIT)
-    // - Landlord đặt cọc vào Escrow (PaymentPurpose.LANDLORD_ESCROW_DEPOSIT)
-    // - Tenant trả tiền thuê tháng đầu (PaymentPurpose.FIRST_MONTH_RENT)
-    // - Tenant trả tiền thuê hàng tháng (PaymentPurpose.MONTHLY_RENT) -- chưa xử lý tự động
 
     if (
       payment.purpose === PaymentPurpose.TENANT_ESCROW_DEPOSIT ||
@@ -520,7 +512,6 @@ export class PaymentService {
     console.log('Truoc khi chay vao if FIRST_MONTH_RENT');
     if (payment.purpose === PaymentPurpose.FIRST_MONTH_RENT) {
       console.log('Da chay vao if FIRST_MONTH_RENT');
-      await this.creditFirstMonthRentToLandlord(payment);
       const tenantId = payment.contract.tenant?.id;
       const propertyId = payment.contract.property?.id;
       if (tenantId && propertyId) {
@@ -533,39 +524,6 @@ export class PaymentService {
           console.error('Failed to sync booking first rent state', error);
         }
       }
-    }
-  }
-
-  private async creditFirstMonthRentToLandlord(payment: Payment) {
-    const landlordId = payment.contract?.landlord?.id;
-
-    if (!landlordId) {
-      console.warn('Missing landlord information for first rent payment', {
-        paymentId: payment.id,
-        contractId: payment.contract?.id,
-      });
-      return;
-    }
-
-    const contractCode =
-      payment.contract?.contractCode ?? payment.contract?.id ?? undefined;
-    const note = contractCode
-      ? `First month rent for contract ${contractCode}`
-      : 'First month rent payout';
-
-    try {
-      await this.walletService.credit(landlordId, {
-        amount: Number(payment.amount),
-        type: WalletTxnType.CONTRACT_PAYMENT,
-        refId: payment.id,
-        note,
-      });
-    } catch (error) {
-      console.error(
-        'Failed to credit landlord wallet for first month rent',
-        error,
-      );
-      throw error;
     }
   }
 
