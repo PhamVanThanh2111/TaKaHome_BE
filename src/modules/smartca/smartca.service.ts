@@ -301,6 +301,398 @@ export class SmartCAService {
     };
   }
 
+  /**
+   * Embed CMS vào placeholder /Contents - KHÔNG thay đổi ByteRange
+   * Chỉ thay thế hex content giữa <...> và pad với 0 nếu cần
+   */
+  public embedCmsAtIndex(
+    pdf: Buffer,
+    cmsBase64OrHex: string,
+    signatureIndex: number,
+  ): Buffer {
+    console.log('\n=== EMBED CMS DEBUG START ===');
+    console.log('Input PDF size:', pdf.length);
+    console.log('Signature index:', signatureIndex);
+    console.log('CMS input length:', cmsBase64OrHex.length);
+
+    // Helper functions for ByteRange calculation and filling
+    const padFixedWidth = (num: number, width: number): string => {
+      const s = String(num);
+      if (s.length > width) {
+        throw new BadRequestException(
+          `ByteRange number ${s} exceeds placeholder width ${width}`,
+        );
+      }
+      return ' '.repeat(width - s.length) + s;
+    };
+
+    const writeByteRangeInPlace = (
+      outBuf: Buffer,
+      brText: string,
+      brStart: number,
+      values: number[], // [a,b,c,d]
+    ) => {
+      const starRe = /\/\*+|\*+/g; // "/****" or "****"
+      const runs: { absPos: number; width: number }[] = [];
+      for (let m = starRe.exec(brText); m; m = starRe.exec(brText)) {
+        const full = m[0];
+        const hasSlash = full.startsWith('/');
+        const width = full.length - (hasSlash ? 1 : 0);
+        const absPos = brStart + m.index + (hasSlash ? 1 : 0);
+        runs.push({ absPos, width });
+      }
+      // Map star runs back to which component (0..3) they belong to
+      const inside = brText.slice(brText.indexOf('[') + 1, brText.indexOf(']'));
+      const tokens = inside.trim().split(/\s+/); // expect 4
+      if (tokens.length < 4) {
+        throw new BadRequestException('Unexpected /ByteRange tokens');
+      }
+      const starredIdxs: number[] = [];
+      tokens.forEach((tk, idx) => {
+        if (tk.includes('*')) starredIdxs.push(idx);
+      });
+      if (runs.length !== starredIdxs.length) {
+        throw new BadRequestException('Star slot count mismatch in /ByteRange');
+      }
+      for (let i = 0; i < runs.length; i += 1) {
+        const comp = starredIdxs[i];
+        const r = runs[i];
+        outBuf.write(padFixedWidth(values[comp], r.width), r.absPos, 'latin1');
+      }
+    };
+
+    // 1) Normalize CMS to HEX uppercase
+    let cmsHex = (cmsBase64OrHex || '').trim();
+    const looksHex =
+      /^[0-9A-Fa-f\s]+$/.test(cmsHex) &&
+      cmsHex.replace(/\s+/g, '').length % 2 === 0;
+
+    console.log('\n=== CMS HEX VALIDATION ===');
+    console.log('Original CMS input length:', cmsBase64OrHex.length);
+    console.log('Trimmed CMS length:', cmsHex.length);
+    console.log('Looks like hex:', looksHex);
+
+    if (!looksHex) {
+      try {
+        const bytes = Buffer.from(cmsHex, 'base64');
+        if (!bytes.length) throw new Error('empty');
+        cmsHex = bytes.toString('hex').toUpperCase();
+        console.log('Converted from base64 to hex, length:', cmsHex.length);
+      } catch (error) {
+        console.error('CMS conversion error:', error);
+        throw new BadRequestException('CMS must be base64 or hex');
+      }
+    } else {
+      cmsHex = cmsHex.replace(/\s+/g, '').toUpperCase();
+      console.log('Using provided hex, length:', cmsHex.length);
+      console.log('CMS hex preview:', cmsHex.substring(0, 100) + '...');
+      console.log(
+        'CMS hex ending:',
+        '...' + cmsHex.substring(cmsHex.length - 50),
+      );
+    }
+
+    // 2) Convert to string for text operations
+    const pdfStr = pdf.toString('latin1');
+    console.log('PDF as string length:', pdfStr.length);
+
+    // Count total signatures in PDF
+    const sigMatches = Array.from(pdfStr.matchAll(/\/Type\s*\/Sig/g));
+    const contentsMatches = Array.from(pdfStr.matchAll(/\/Contents\s*<[0]*>/g));
+    console.log('Total /Type/Sig entries:', sigMatches.length);
+    console.log('Total /Contents placeholders:', contentsMatches.length);
+
+    // 3) Find the Contents placeholder by index - Updated regex to handle any hex content
+    const contentsRegex = /\/Contents\s*<([0-9A-Fa-f]*)>/g;
+    let match: RegExpExecArray | null;
+    let currentIndex = 0;
+    let contentsStart = -1;
+    let contentsEnd = -1;
+    let placeholderContent = '';
+
+    console.log('Searching for Contents placeholders...');
+
+    while ((match = contentsRegex.exec(pdfStr)) !== null) {
+      console.log(`Found Contents #${currentIndex} at position ${match.index}`);
+      console.log(`  Full match: "${match[0]}"`);
+      console.log(`  Content inside brackets: "${match[1] || '(empty)'}"`);
+
+      if (currentIndex === signatureIndex) {
+        // FIXED: Calculate positions correctly
+        contentsStart = match.index + match[0].indexOf('<');
+        contentsEnd = match.index + match[0].lastIndexOf('>') + 1;
+        placeholderContent = match[1] || '';
+
+        console.log('Selected Contents placeholder:');
+        console.log('  Start position (position of <):', contentsStart);
+        console.log('  End position (position after >):', contentsEnd);
+        console.log('  Placeholder length:', placeholderContent.length);
+        console.log(
+          '  Placeholder preview:',
+          placeholderContent.substring(0, 50) + '...',
+        );
+        break;
+      }
+      currentIndex++;
+    }
+
+    if (contentsStart === -1 || contentsEnd === -1) {
+      console.error(`Contents placeholder #${signatureIndex} not found`);
+      throw new BadRequestException(
+        `Contents placeholder #${signatureIndex} not found`,
+      );
+    }
+
+    // 4) Check if CMS fits in placeholder (excluding < and > brackets)
+    const reservedSpace = contentsEnd - contentsStart - 2; // -2 for < and >
+    console.log('Reserved space in placeholder:', reservedSpace);
+    console.log('CMS hex length:', cmsHex.length);
+
+    if (cmsHex.length > reservedSpace) {
+      console.error(`CMS too large: ${cmsHex.length} > ${reservedSpace}`);
+      throw new BadRequestException(
+        `CMS hex length ${cmsHex.length} exceeds reserved space ${reservedSpace}`,
+      );
+    }
+
+    // 5) Pad CMS with zeros to fill the placeholder exactly - CRITICAL: maintain exact length
+    const paddedCMS = cmsHex.padEnd(reservedSpace, '0');
+    console.log('Padded CMS length:', paddedCMS.length);
+    console.log('Reserved space:', reservedSpace);
+    console.log('Length match check:', paddedCMS.length === reservedSpace);
+
+    // 6) Replace ONLY the Contents including < and >, do NOT touch ByteRange yet
+    const beforeContents = pdfStr.substring(0, contentsStart);
+    const afterContents = pdfStr.substring(contentsEnd);
+
+    // Debug: Check content before replacement
+    const originalContent = pdfStr.substring(contentsStart, contentsEnd);
+    console.log('=== CMS REPLACEMENT DEBUG ===');
+    console.log('Original content length:', originalContent.length);
+    console.log(
+      'Original content preview:',
+      originalContent.substring(0, 50) + '...',
+    );
+    console.log('Padded CMS preview:', paddedCMS.substring(0, 50) + '...');
+
+    // CRITICAL: Replacement MUST maintain exact same length
+    const newContentsSection = '<' + paddedCMS + '>';
+    console.log('Original contents section length:', originalContent.length);
+    console.log('New contents section length:', newContentsSection.length);
+    console.log(
+      'Length preservation check:',
+      originalContent.length === newContentsSection.length,
+    );
+
+    if (originalContent.length !== newContentsSection.length) {
+      throw new BadRequestException(
+        `CMS replacement length mismatch: original ${originalContent.length} vs new ${newContentsSection.length}`,
+      );
+    }
+
+    const finalPdfStr = beforeContents + newContentsSection + afterContents;
+    console.log('Replacement: <' + paddedCMS.substring(0, 20) + '...>');
+
+    // Debug: Verify replacement worked
+    const newContent = finalPdfStr.substring(
+      contentsStart,
+      contentsStart + originalContent.length,
+    );
+    console.log('New content preview:', newContent.substring(0, 50) + '...');
+    console.log(
+      'Replacement successful:',
+      newContent.startsWith('<') && newContent.endsWith('>'),
+    );
+    console.log('=== CMS REPLACEMENT DEBUG END ===');
+
+    console.log('Final PDF string length:', finalPdfStr.length);
+    console.log('Length change:', finalPdfStr.length - pdfStr.length);
+
+    const finalPdf = Buffer.from(finalPdfStr, 'latin1');
+
+    // 7) **CRITICAL**: Calculate ByteRange AFTER CMS embedding for accurate positions
+    console.log('\n=== CALCULATING BYTERANGE AFTER CMS EMBED ===');
+
+    // Calculate ByteRange based on PDF specification with FINAL PDF positions:
+    // [a b c d] means: signed data = bytes[a..a+b-1] + bytes[c..c+d-1]
+    // Signature area (excluded) = bytes[a+b..c-1]
+    const a = 0; // always start from beginning
+    const b = contentsStart + 1; // up to and INCLUDING '<' (signature starts AFTER '<')
+    const c = contentsEnd - 1; // from and INCLUDING '>' (signature ends BEFORE '>')
+    const d = finalPdf.length - c; // remaining bytes from FINAL PDF (after CMS embedding)
+
+    console.log('ByteRange calculation (AFTER CMS embed):');
+    console.log(`  Final PDF length: ${finalPdf.length}`);
+    console.log(`  Contents start: ${contentsStart} (position of '<')`);
+    console.log(`  Contents end: ${contentsEnd} (position after '>')`);
+    console.log(`  Calculated ByteRange: [${a}, ${b}, ${c}, ${d}]`);
+    console.log(`  Signature area (excluded): bytes ${b} to ${c - 1}`);
+    console.log(
+      `  Signed data: bytes 0-${b - 1} + bytes ${c}-${finalPdf.length - 1}`,
+    );
+
+    // 8) TEMPORARILY DISABLED: Recalculate ALL ByteRanges after embedding CMS
+    // Testing to see if signatures work without recalculation
+    console.log('DISABLED: Recalculating all ByteRanges after CMS embed...');
+    // finalPdf = this.recalculateAllByteRanges(finalPdf);
+
+    // Debug: Check final PDF content around ByteRange positions
+    console.log('\n=== FINAL PDF CONTENT ANALYSIS ===');
+    const finalPdfString = finalPdf.toString('latin1'); // CRITICAL: Use latin1 encoding!
+
+    // Debug: Check actual bytes at the embedded position
+    console.log('\n=== BYTE-LEVEL CMS VERIFICATION ===');
+    const cmsDataStart = contentsStart + 1; // CMS data starts AFTER '<'
+    console.log(
+      'Checking bytes at position',
+      cmsDataStart,
+      'to',
+      cmsDataStart + 20,
+    );
+    const bytesAtPosition = finalPdf.subarray(cmsDataStart, cmsDataStart + 20);
+    console.log(
+      'Hex bytes at embedded position:',
+      bytesAtPosition.toString('hex').toUpperCase(),
+    );
+    console.log(
+      'ASCII at embedded position:',
+      bytesAtPosition.toString('ascii'),
+    );
+
+    // Check if it matches CMS start
+    const expectedCmsStart = paddedCMS.substring(0, 40); // First 20 bytes = 40 hex chars
+    console.log('Expected CMS start (first 40 hex chars):', expectedCmsStart);
+    console.log(
+      'Actual vs Expected match:',
+      bytesAtPosition.toString('hex').toUpperCase() ===
+        expectedCmsStart.toUpperCase(),
+    );
+    console.log('=== BYTE-LEVEL CMS VERIFICATION END ===\n');
+
+    // Find all ByteRange entries in final PDF
+    const byteRangeMatches = Array.from(
+      finalPdfString.matchAll(
+        /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/g,
+      ),
+    );
+    console.log('Found ByteRange entries:', byteRangeMatches.length);
+
+    byteRangeMatches.forEach((match, idx) => {
+      const [, a, b, c, d] = match;
+      const byteRange = {
+        a: parseInt(a),
+        b: parseInt(b),
+        c: parseInt(c),
+        d: parseInt(d),
+      };
+      console.log(`ByteRange #${idx}:`, byteRange);
+
+      // Check what's at those positions in FINAL PDF
+      console.log(
+        `  Final content at position ${byteRange.b}:`,
+        JSON.stringify(finalPdfString.charAt(byteRange.b)),
+      );
+      console.log(
+        `  Final content at position ${byteRange.c}:`,
+        JSON.stringify(finalPdfString.charAt(byteRange.c)),
+      );
+      console.log(
+        `  Final range preview at ${byteRange.b}: "${finalPdfString.substring(byteRange.b, byteRange.b + 10)}"`,
+      );
+      console.log(
+        `  Final range preview at ${byteRange.c}: "${finalPdfString.substring(byteRange.c, byteRange.c + 10)}"`,
+      );
+    });
+
+    // *** NEW: Calculate and fill ByteRange using pre-calculated values ***
+    console.log('\n=== FILLING BYTERANGE WITH PRE-CALCULATED VALUES ===');
+
+    // Find ByteRange placeholders (with * or / patterns) that need to be filled
+    const brRe = /\/ByteRange\s*\[\s*([^[\]]*?)\s*\]/g;
+    const placeholderMatches: Array<{
+      text: string;
+      start: number;
+      components: string[];
+      insideContent: string;
+    }> = [];
+    let finalPdfWithByteRange = finalPdfString;
+
+    for (let m = brRe.exec(finalPdfString); m; m = brRe.exec(finalPdfString)) {
+      const insideContent = m[1]; // Everything inside [ ]
+      const components = insideContent.trim().split(/\s+/); // Split by whitespace
+
+      console.log(`Found ByteRange: "${m[0]}"`);
+      console.log(`  Inside content: "${insideContent}"`);
+      console.log(`  Components: [${components.join(', ')}]`);
+
+      placeholderMatches.push({
+        text: m[0],
+        start: m.index,
+        components: components,
+        insideContent: insideContent,
+      });
+    }
+
+    console.log(`Found ${placeholderMatches.length} ByteRange placeholders`);
+
+    // Fill ByteRange for the signature we just embedded (signatureIndex)
+    if (placeholderMatches.length > signatureIndex) {
+      const brMatch = placeholderMatches[signatureIndex];
+
+      // Check if this ByteRange has placeholder values (contains * or /)
+      const hasPlaceholders = brMatch.components.some(
+        (comp) => comp.includes('*') || comp.includes('/'),
+      );
+
+      console.log(`\nProcessing ByteRange #${signatureIndex}:`);
+      console.log(`  Components: [${brMatch.components.join(', ')}]`);
+      console.log(`  Has placeholders: ${hasPlaceholders}`);
+
+      if (hasPlaceholders) {
+        console.log(
+          `Filling ByteRange #${signatureIndex} with pre-calculated values:`,
+        );
+        console.log(`  Values: [${a}, ${b}, ${c}, ${d}]`);
+
+        // Create new ByteRange content with proper formatting
+        const newByteRangeContent = `${a} ${b} ${c} ${d}`;
+        const paddedContent = newByteRangeContent.padEnd(
+          brMatch.insideContent.length,
+          ' ',
+        );
+
+        console.log(`  Original inside: "${brMatch.insideContent}"`);
+        console.log(`  New inside: "${paddedContent}"`);
+
+        // Replace the ByteRange content
+        const beforeBr = finalPdfWithByteRange.substring(0, brMatch.start);
+        const afterBr = finalPdfWithByteRange.substring(
+          brMatch.start + brMatch.text.length,
+        );
+        const newBrText = `/ByteRange [${paddedContent}]`;
+
+        finalPdfWithByteRange = beforeBr + newBrText + afterBr;
+
+        console.log(`  ByteRange #${signatureIndex} filled successfully`);
+      } else {
+        console.log(
+          `\nByteRange #${signatureIndex} already has numeric values, skipping`,
+        );
+      }
+    } else {
+      console.log(
+        `\nWarning: Could not find ByteRange #${signatureIndex} to fill`,
+      );
+    }
+
+    // Update final PDF with calculated ByteRanges
+    let finalPdfResult = Buffer.from(finalPdfWithByteRange, 'latin1');
+    console.log('=== BYTERANGE FILLING COMPLETE ===\n');
+
+    console.log('=== EMBED CMS DEBUG END ===\n');
+    return finalPdfResult;
+  }
+
   // --- Helpers ---
   // Tìm phạm vi /Contents <...> và tính ByteRange đúng chuẩn
   private locateContentsGap(pdf: Buffer, signatureIndex = 0) {
