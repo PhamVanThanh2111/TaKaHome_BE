@@ -24,10 +24,12 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { ConfigModule } from '@nestjs/config';
 import * as Joi from 'joi';
 import vnpayConfig from './config/vnpay.config';
+import smartcaConfig from './config/smartca.config';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { EscrowModule } from './modules/escrow/escrow.module';
 import { InvoiceModule } from './modules/invoice/invoice.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
+import { SmartCAModule } from './modules/smartca/smartca.module';
 
 @Module({
   imports: [
@@ -36,7 +38,7 @@ import { MaintenanceModule } from './modules/maintenance/maintenance.module';
     }),
     ConfigModule.forRoot({
       isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
-      load: [vnpayConfig], // <— nạp file config/vnpay.config.ts
+      load: [vnpayConfig, smartcaConfig], // <— nạp file config/vnpay.config.ts và smartca.config.ts
       validationSchema: Joi.object({
         VNP_TMN_CODE: Joi.string().required(),
         VNP_HASH_SECRET: Joi.string().required(),
@@ -65,6 +67,7 @@ import { MaintenanceModule } from './modules/maintenance/maintenance.module';
     ContractModule,
     BookingModule,
     PaymentModule,
+    SmartCAModule,
     ReviewModule,
     ReportModule,
     FavoriteModule,

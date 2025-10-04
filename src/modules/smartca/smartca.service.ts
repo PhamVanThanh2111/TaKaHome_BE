@@ -464,14 +464,13 @@ export class SmartCAService {
       `  Signed data: bytes 0-${b - 1} + bytes ${c}-${finalPdf.length - 1}`,
     );
 
-    // 8) TEMPORARILY DISABLED: Recalculate ALL ByteRanges after embedding CMS
-    // Testing to see if signatures work without recalculation
-    console.log('DISABLED: Recalculating all ByteRanges after CMS embed...');
-    // finalPdf = this.recalculateAllByteRanges(finalPdf);
+    // 8) Recalculate ALL ByteRanges after embedding CMS for multiple signature support
+    console.log('Recalculating all ByteRanges after CMS embed...');
+    const recalculatedPdf = this.recalculateAllByteRanges(finalPdf);
 
     // Debug: Check final PDF content around ByteRange positions
     console.log('\n=== FINAL PDF CONTENT ANALYSIS ===');
-    const finalPdfString = finalPdf.toString('latin1'); // CRITICAL: Use latin1 encoding!
+    const finalPdfString = recalculatedPdf.toString('latin1'); // CRITICAL: Use latin1 encoding!
 
     // Debug: Check actual bytes at the embedded position
     console.log('\n=== BYTE-LEVEL CMS VERIFICATION ===');
@@ -482,7 +481,10 @@ export class SmartCAService {
       'to',
       cmsDataStart + 20,
     );
-    const bytesAtPosition = finalPdf.subarray(cmsDataStart, cmsDataStart + 20);
+    const bytesAtPosition = recalculatedPdf.subarray(
+      cmsDataStart,
+      cmsDataStart + 20,
+    );
     console.log(
       'Hex bytes at embedded position:',
       bytesAtPosition.toString('hex').toUpperCase(),
@@ -537,93 +539,14 @@ export class SmartCAService {
       );
     });
 
-    // *** NEW: Calculate and fill ByteRange using pre-calculated values ***
-    console.log('\n=== FILLING BYTERANGE WITH PRE-CALCULATED VALUES ===');
-
-    // Find ByteRange placeholders (with * or / patterns) that need to be filled
-    const brRe = /\/ByteRange\s*\[\s*([^[\]]*?)\s*\]/g;
-    const placeholderMatches: Array<{
-      text: string;
-      start: number;
-      components: string[];
-      insideContent: string;
-    }> = [];
-    let finalPdfWithByteRange = finalPdfString;
-
-    for (let m = brRe.exec(finalPdfString); m; m = brRe.exec(finalPdfString)) {
-      const insideContent = m[1]; // Everything inside [ ]
-      const components = insideContent.trim().split(/\s+/); // Split by whitespace
-
-      console.log(`Found ByteRange: "${m[0]}"`);
-      console.log(`  Inside content: "${insideContent}"`);
-      console.log(`  Components: [${components.join(', ')}]`);
-
-      placeholderMatches.push({
-        text: m[0],
-        start: m.index,
-        components: components,
-        insideContent: insideContent,
-      });
-    }
-
-    console.log(`Found ${placeholderMatches.length} ByteRange placeholders`);
-
-    // Fill ByteRange for the signature we just embedded (signatureIndex)
-    if (placeholderMatches.length > signatureIndex) {
-      const brMatch = placeholderMatches[signatureIndex];
-
-      // Check if this ByteRange has placeholder values (contains * or /)
-      const hasPlaceholders = brMatch.components.some(
-        (comp) => comp.includes('*') || comp.includes('/'),
-      );
-
-      console.log(`\nProcessing ByteRange #${signatureIndex}:`);
-      console.log(`  Components: [${brMatch.components.join(', ')}]`);
-      console.log(`  Has placeholders: ${hasPlaceholders}`);
-
-      if (hasPlaceholders) {
-        console.log(
-          `Filling ByteRange #${signatureIndex} with pre-calculated values:`,
-        );
-        console.log(`  Values: [${a}, ${b}, ${c}, ${d}]`);
-
-        // Create new ByteRange content with proper formatting
-        const newByteRangeContent = `${a} ${b} ${c} ${d}`;
-        const paddedContent = newByteRangeContent.padEnd(
-          brMatch.insideContent.length,
-          ' ',
-        );
-
-        console.log(`  Original inside: "${brMatch.insideContent}"`);
-        console.log(`  New inside: "${paddedContent}"`);
-
-        // Replace the ByteRange content
-        const beforeBr = finalPdfWithByteRange.substring(0, brMatch.start);
-        const afterBr = finalPdfWithByteRange.substring(
-          brMatch.start + brMatch.text.length,
-        );
-        const newBrText = `/ByteRange [${paddedContent}]`;
-
-        finalPdfWithByteRange = beforeBr + newBrText + afterBr;
-
-        console.log(`  ByteRange #${signatureIndex} filled successfully`);
-      } else {
-        console.log(
-          `\nByteRange #${signatureIndex} already has numeric values, skipping`,
-        );
-      }
-    } else {
-      console.log(
-        `\nWarning: Could not find ByteRange #${signatureIndex} to fill`,
-      );
-    }
-
-    // Update final PDF with calculated ByteRanges
-    const finalPdfResult = Buffer.from(finalPdfWithByteRange, 'latin1');
-    console.log('=== BYTERANGE FILLING COMPLETE ===\n');
+    // *** ByteRange calculation is now handled by recalculateAllByteRanges ***
+    console.log('\n=== BYTERANGE ALREADY CALCULATED ===');
+    console.log(
+      'All ByteRanges have been recalculated by recalculateAllByteRanges method',
+    );
 
     console.log('=== EMBED CMS DEBUG END ===\n');
-    return finalPdfResult;
+    return recalculatedPdf;
   }
 
   // --- Helpers ---
@@ -1398,5 +1321,149 @@ export class SmartCAService {
 
     const derBytes = forge.asn1.toDer(contentInfo).getBytes();
     return forge.util.encode64(derBytes); // ← CMS (PKCS#7) base64 để đưa cho /embed-cms
+  }
+
+  /**
+   * Recalculate all ByteRange entries in a PDF after structural changes
+   * This is critical for multiple signatures to work correctly
+   */
+  private recalculateAllByteRanges(pdf: Buffer): Buffer {
+    console.log('\n=== RECALCULATING ALL BYTERANGES ===');
+
+    const pdfStr = pdf.toString('latin1');
+    console.log('PDF length for recalculation:', pdf.length);
+
+    // Find all signature objects with /Contents placeholders
+    const signatureObjects: Array<{
+      signatureIndex: number;
+      contentsStart: number;
+      contentsEnd: number;
+      byteRangePosition: number;
+      currentByteRange: string;
+    }> = [];
+
+    // Find all /Contents entries (signature placeholders)
+    const contentsRegex = /\/Contents\s*<([0-9A-Fa-f]*)>/g;
+    let contentsMatch: RegExpExecArray | null;
+    let signatureIndex = 0;
+
+    while ((contentsMatch = contentsRegex.exec(pdfStr)) !== null) {
+      const contentsStart = contentsMatch.index + contentsMatch[0].indexOf('<');
+      const contentsEnd =
+        contentsStart + contentsMatch[0].length - contentsMatch[0].indexOf('<');
+
+      console.log(`\nFound signature #${signatureIndex}:`);
+      console.log(`  Contents start: ${contentsStart}`);
+      console.log(`  Contents end: ${contentsEnd}`);
+
+      // Find corresponding ByteRange for this signature
+      // Look backwards from the /Contents to find the /ByteRange
+      const beforeContents = pdfStr.substring(0, contentsMatch.index);
+      const byteRangeMatch = beforeContents.match(
+        /\/ByteRange\s*\[([^\]]+)\]/g,
+      );
+
+      if (byteRangeMatch && byteRangeMatch.length > 0) {
+        // Get the last ByteRange match (closest to this /Contents)
+        const lastByteRangeMatch = byteRangeMatch[byteRangeMatch.length - 1];
+        const byteRangePosition =
+          beforeContents.lastIndexOf(lastByteRangeMatch);
+
+        signatureObjects.push({
+          signatureIndex,
+          contentsStart,
+          contentsEnd,
+          byteRangePosition,
+          currentByteRange: lastByteRangeMatch,
+        });
+
+        console.log(`  Found ByteRange at position: ${byteRangePosition}`);
+        console.log(`  Current ByteRange: ${lastByteRangeMatch}`);
+      } else {
+        console.log(
+          `  Warning: No ByteRange found for signature #${signatureIndex}`,
+        );
+      }
+
+      signatureIndex++;
+    }
+
+    console.log(`\nTotal signatures found: ${signatureObjects.length}`);
+
+    // Recalculate ByteRange for each signature
+    let updatedPdfStr = pdfStr;
+    let totalLengthChange = 0;
+
+    for (const sigObj of signatureObjects) {
+      // Adjust positions based on previous changes
+      const adjustedContentsStart = sigObj.contentsStart + totalLengthChange;
+      const adjustedContentsEnd = sigObj.contentsEnd + totalLengthChange;
+      const adjustedByteRangePosition =
+        sigObj.byteRangePosition + totalLengthChange;
+
+      console.log(
+        `\nRecalculating ByteRange for signature #${sigObj.signatureIndex}:`,
+      );
+      console.log(`  Adjusted contents start: ${adjustedContentsStart}`);
+      console.log(`  Adjusted contents end: ${adjustedContentsEnd}`);
+
+      // Calculate new ByteRange values
+      const a = 0; // Always start from beginning
+      const b = adjustedContentsStart + 1; // Up to and including '<'
+      const c = adjustedContentsEnd - 1; // From and including '>'
+      const d = Buffer.from(updatedPdfStr, 'latin1').length - c; // Remaining bytes
+
+      console.log(`  New ByteRange: [${a}, ${b}, ${c}, ${d}]`);
+
+      // Create new ByteRange string
+      const newByteRangeContent = `${a} ${b} ${c} ${d}`;
+      const newByteRangeStr = `/ByteRange [${newByteRangeContent}]`;
+
+      // Find the exact ByteRange to replace
+      const currentByteRangeRegex = /\/ByteRange\s*\[[^\]]+\]/;
+      const byteRangeStartIndex = adjustedByteRangePosition;
+      const searchArea = updatedPdfStr.substring(
+        byteRangeStartIndex,
+        byteRangeStartIndex + 200,
+      );
+      const localMatch = searchArea.match(currentByteRangeRegex);
+
+      if (localMatch) {
+        const actualByteRangeStart = byteRangeStartIndex + localMatch.index!;
+        const actualByteRangeEnd = actualByteRangeStart + localMatch[0].length;
+        const oldByteRangeStr = localMatch[0];
+
+        console.log(`  Old ByteRange: "${oldByteRangeStr}"`);
+        console.log(`  New ByteRange: "${newByteRangeStr}"`);
+
+        // Replace the ByteRange
+        const beforeByteRange = updatedPdfStr.substring(
+          0,
+          actualByteRangeStart,
+        );
+        const afterByteRange = updatedPdfStr.substring(actualByteRangeEnd);
+        updatedPdfStr = beforeByteRange + newByteRangeStr + afterByteRange;
+
+        const lengthChange = newByteRangeStr.length - oldByteRangeStr.length;
+        totalLengthChange += lengthChange;
+
+        console.log(
+          `  Length change: ${lengthChange} (total: ${totalLengthChange})`,
+        );
+        console.log(`  ByteRange updated successfully`);
+      } else {
+        console.log(
+          `  Error: Could not find ByteRange to replace at position ${adjustedByteRangePosition}`,
+        );
+      }
+    }
+
+    console.log('\n=== BYTERANGE RECALCULATION COMPLETE ===');
+    console.log(
+      `Final PDF length: ${Buffer.from(updatedPdfStr, 'latin1').length}`,
+    );
+    console.log(`Total length change: ${totalLengthChange}`);
+
+    return Buffer.from(updatedPdfStr, 'latin1');
   }
 }

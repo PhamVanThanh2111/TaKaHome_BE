@@ -32,7 +32,7 @@ export class SmartCAController {
       'Chuẩn bị PDF: thêm placeholder chữ ký (2 vị trí) với ByteRange placeholders (*)',
   })
   @ApiBody({ type: PreparePDFDto })
-  async prepare(
+  prepare(
     @UploadedFile() file: Express.Multer.File,
     @Body() body: PreparePDFDto,
     @Res() res: Response,
@@ -128,7 +128,7 @@ export class SmartCAController {
       });
     }
 
-    const prepared = await this.smartcaService.preparePlaceholder(
+    const prepared = this.smartcaService.preparePlaceholder(
       Buffer.from(file.buffer),
       {
         places,
@@ -205,7 +205,7 @@ export class SmartCAController {
       signatureIndex: result.signatureIndex,
       byteRange: result.byteRange,
       pdfLength: result.pdfLength,
-      digestHex: result.digestHex as string,
+      digestHex: result.digestHex,
     };
   }
 
