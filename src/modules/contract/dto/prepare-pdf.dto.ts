@@ -30,20 +30,4 @@ export class PreparePDFDto {
   @IsOptional()
   @IsNumberString()
   signatureLength?: string;
-
-  // placeholder #2
-  @ApiPropertyOptional({ example: '0' })
-  @IsOptional()
-  @IsNumberString()
-  page2?: string;
-
-  @ApiPropertyOptional({ example: '[300,50,500,120]' })
-  @IsOptional()
-  @IsString()
-  rect2?: string;
-
-  @ApiPropertyOptional({ example: '36864' })
-  @IsOptional()
-  @IsNumberString()
-  signatureLength2?: string;
 }

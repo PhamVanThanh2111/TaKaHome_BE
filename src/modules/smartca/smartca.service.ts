@@ -1394,4 +1394,222 @@ export class SmartCAService {
       'latin1',
     );
   }
+
+  /**
+   * Chuẩn hóa PDF structure để pass NEAC validation
+   */
+  // normalizePdfStructure(pdfBuffer: Buffer): Buffer {
+  //   let pdfContent = pdfBuffer.toString('latin1');
+
+  //   console.log(
+  //     '[normalizePdfStructure] Starting PDF normalization for NEAC compliance',
+  //   );
+
+  //   // 1. Đảm bảo PDF version đúng
+  //   pdfContent = this.ensurePdfVersion(pdfContent);
+
+  //   // 2. Chuẩn hóa Catalog Object
+  //   pdfContent = this.normalizeCatalogStructure(pdfContent);
+
+  //   // 3. Thêm Microsoft metadata
+  //   pdfContent = this.addMicrosoftMetadata(pdfContent);
+
+  //   // 4. Chuẩn hóa Font Objects
+  //   pdfContent = this.normalizeFontStructures(pdfContent);
+
+  //   // 5. Chuẩn hóa Object spacing
+  //   pdfContent = this.normalizeObjectSpacing(pdfContent);
+
+  //   console.log('[normalizePdfStructure] PDF normalization completed');
+
+  //   return Buffer.from(pdfContent, 'latin1');
+  // }
+
+  // private ensurePdfVersion(content: string): string {
+  //   // Đảm bảo PDF version 1.7
+  //   if (!content.startsWith('%PDF-1.7')) {
+  //     content = content.replace(/^%PDF-[0-9.]+/, '%PDF-1.7');
+  //     console.log('[ensurePdfVersion] Updated PDF version to 1.7');
+  //   }
+  //   return content;
+  // }
+
+  // private normalizeCatalogStructure(content: string): string {
+  //   // Tìm Catalog object
+  //   const catalogRegex = /<<[^<>]*\/Type\s*\/Catalog[^<>]*>>/g;
+
+  //   return content.replace(catalogRegex, (match) => {
+  //     console.log(
+  //       '[normalizeCatalogStructure] Found catalog:',
+  //       match.substring(0, 100) + '...',
+  //     );
+
+  //     // Extract attributes từ catalog hiện tại
+  //     const attributes = this.extractCatalogAttributes(match);
+
+  //     // Tạo catalog structure theo chuẩn Microsoft
+  //     const normalizedCatalog = this.buildStandardCatalog(attributes);
+
+  //     console.log('[normalizeCatalogStructure] Normalized catalog');
+  //     return normalizedCatalog;
+  //   });
+  // }
+
+  // private extractCatalogAttributes(
+  //   catalogString: string,
+  // ): Record<string, string> {
+  //   const attributes: Record<string, string> = {};
+
+  //   // Extract các attributes chính
+  //   const patterns = {
+  //     '/Type': /\/Type\s*\/Catalog/,
+  //     '/Pages': /\/Pages\s+(\d+\s+0\s+R)/,
+  //     '/Lang': /\/Lang\s*\(([^)]+)\)/,
+  //     '/StructTreeRoot': /\/StructTreeRoot\s+(\d+\s+0\s+R)/,
+  //     '/MarkInfo': /\/MarkInfo\s*<<[^>]*>>/,
+  //     '/Metadata': /\/Metadata\s+(\d+\s+0\s+R)/,
+  //     '/ViewerPreferences': /\/ViewerPreferences\s+(\d+\s+0\s+R)/,
+  //   };
+
+  //   Object.entries(patterns).forEach(([key, pattern]) => {
+  //     const match = catalogString.match(pattern);
+  //     if (match) {
+  //       if (key === '/Type') {
+  //         attributes[key] = '/Catalog';
+  //       } else if (key === '/Lang') {
+  //         attributes[key] = `(${match[1]})`;
+  //       } else if (key === '/MarkInfo') {
+  //         attributes[key] = match[0].replace('/MarkInfo', '').trim();
+  //       } else if (match[1]) {
+  //         attributes[key] = match[1];
+  //       }
+  //     }
+  //   });
+
+  //   return attributes;
+  // }
+
+  // private buildStandardCatalog(attributes: Record<string, string>): string {
+  //   // Thứ tự chuẩn theo Microsoft Word
+  //   const result = [
+  //     '<<',
+  //     attributes['/Lang'] ? `/Lang${attributes['/Lang']}` : '/Lang(en)',
+  //     attributes['/MarkInfo']
+  //       ? `/MarkInfo${attributes['/MarkInfo']}`
+  //       : '/MarkInfo<</Marked true>>',
+  //     attributes['/Metadata']
+  //       ? `/Metadata ${attributes['/Metadata']} `
+  //       : '/Metadata 191 0 R ',
+  //     attributes['/Pages']
+  //       ? `/Pages ${attributes['/Pages']} `
+  //       : '/Pages 2 0 R ',
+  //     attributes['/StructTreeRoot']
+  //       ? `/StructTreeRoot ${attributes['/StructTreeRoot']} `
+  //       : '/StructTreeRoot 46 0 R ',
+  //     '/Type/Catalog',
+  //     attributes['/ViewerPreferences']
+  //       ? `/ViewerPreferences ${attributes['/ViewerPreferences']} `
+  //       : '/ViewerPreferences 192 0 R ',
+  //     '/msxpdf:bookmarks[]',
+  //     '>>',
+  //   ];
+
+  //   return result.join('');
+  // }
+
+  // private addMicrosoftMetadata(content: string): string {
+  //   // Thêm Microsoft metadata nếu chưa có
+  //   if (!content.includes('/msxpdf:bookmarks[]')) {
+  //     console.log('[addMicrosoftMetadata] Adding Microsoft metadata');
+  //     // Đã được thêm trong buildStandardCatalog
+  //   }
+
+  //   // Ensure Producer và Creator metadata
+  //   if (!content.includes('/Producer')) {
+  //     content = content.replace(
+  //       '/Creator',
+  //       '/Producer(Microsoft Word for Microsoft 365)/Creator',
+  //     );
+  //   }
+
+  //   return content;
+  // }
+
+  // private normalizeFontStructures(content: string): string {
+  //   // Tìm và chuẩn hóa Font objects
+  //   const fontRegex = /<<[^<>]*\/Type\s*\/Font[^<>]*>>/g;
+
+  //   return content.replace(fontRegex, (match) => {
+  //     return this.reorderFontAttributes(match);
+  //   });
+  // }
+
+  // private reorderFontAttributes(fontObject: string): string {
+  //   const attributes = this.extractFontAttributes(fontObject);
+
+  //   // Thứ tự chuẩn cho Font object
+  //   const orderedKeys = [
+  //     '/BaseFont',
+  //     '/DescendantFonts',
+  //     '/Encoding',
+  //     '/Subtype',
+  //     '/ToUnicode',
+  //     '/Type',
+  //   ];
+
+  //   let result = '<<';
+  //   orderedKeys.forEach((key) => {
+  //     if (attributes[key]) {
+  //       result += key + attributes[key];
+  //     }
+  //   });
+  //   result += '>>';
+
+  //   return result;
+  // }
+
+  // private extractFontAttributes(fontString: string): Record<string, string> {
+  //   const attributes: Record<string, string> = {};
+
+  //   const patterns = {
+  //     '/Type': /\/Type\s*\/Font/,
+  //     '/Subtype': /\/Subtype\s*\/([A-Za-z0-9]+)/,
+  //     '/BaseFont': /\/BaseFont\s*\/([A-Za-z0-9+\-]+)/,
+  //     '/Encoding': /\/Encoding\s*\/([A-Za-z0-9\-]+)/,
+  //     '/DescendantFonts': /\/DescendantFonts\s+(\d+\s+0\s+R)/,
+  //     '/ToUnicode': /\/ToUnicode\s+(\d+\s+0\s+R)/,
+  //   };
+
+  //   Object.entries(patterns).forEach(([key, pattern]) => {
+  //     const match = fontString.match(pattern);
+  //     if (match) {
+  //       if (key === '/Type') {
+  //         attributes[key] = '/Font';
+  //       } else if (key === '/BaseFont') {
+  //         attributes[key] = `/${match[1]}`;
+  //       } else if (key === '/Subtype') {
+  //         attributes[key] = `/${match[1]}`;
+  //       } else if (key === '/Encoding') {
+  //         attributes[key] = `/${match[1]}`;
+  //       } else if (match[1]) {
+  //         attributes[key] = ` ${match[1]} `;
+  //       }
+  //     }
+  //   });
+
+  //   return attributes;
+  // }
+
+  // private normalizeObjectSpacing(content: string): string {
+  //   // Chuẩn hóa spacing theo format Microsoft
+  //   return content
+  //     .replace(/\s+/g, ' ') // Normalize whitespace
+  //     .replace(/\[\s*/g, '[ ') // Array opening spacing
+  //     .replace(/\s*\]/g, ' ]') // Array closing spacing
+  //     .replace(/(\d+)\s+0\s+R/g, '$1 0 R ') // Reference spacing
+  //     .replace(/<<\s*/g, '<<') // Dict opening
+  //     .replace(/\s*>>/g, '>>') // Dict closing
+  //     .replace(/\s+/g, ' ') // Final cleanup
+  //     .trim();
+  // }
 }

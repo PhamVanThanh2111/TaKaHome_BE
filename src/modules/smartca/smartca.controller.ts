@@ -29,7 +29,7 @@ export class SmartCAController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary:
-      'Chuẩn bị PDF: thêm placeholder chữ ký (2 vị trí) với ByteRange placeholders (*)',
+      'Chuẩn bị PDF: thêm 1 placeholder chữ ký với ByteRange placeholders (*)',
   })
   @ApiBody({ type: PreparePDFDto })
   prepare(
@@ -102,7 +102,7 @@ export class SmartCAController {
       signatureLength?: number;
     }> = [];
 
-    // placeholder #1
+    // Create single placeholder
     places.push({
       page: body.page !== undefined ? Number(body.page) : undefined,
       rect: parseRect(body.rect),
@@ -112,28 +112,16 @@ export class SmartCAController {
           : 65536, // Default 64KB for large ByteRange area + signature
     });
 
-    // placeholder #2 (optional)
-    const hasSecond =
-      body.page2 !== undefined ||
-      body.rect2 !== undefined ||
-      body.signatureLength2 !== undefined;
-    if (hasSecond) {
-      places.push({
-        page: body.page2 !== undefined ? Number(body.page2) : undefined,
-        rect: parseRect(body.rect2),
-        signatureLength:
-          body.signatureLength2 !== undefined
-            ? Number(body.signatureLength2)
-            : 65536, // Default 64KB for large ByteRange area + signature
-      });
-    }
-
+    console.log('[PREPARE] Starting PDF preparation');
+    
     const prepared = this.smartcaService.preparePlaceholder(
       Buffer.from(file.buffer),
       {
         places,
       },
     );
+
+    console.log('[PREPARE] PDF preparation completed');
 
     // REMOVED: No longer finalize ByteRange in /prepare - it will be done in /embed-cms
     // const finalized = this.smartcaService.finalizeAllByteRanges(prepared);
@@ -290,6 +278,8 @@ export class SmartCAController {
       cmsHexString,
       signatureIndex,
     );
+
+    console.log(`[EMBED-CMS] PDF signed successfully`);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="signed.pdf"');
