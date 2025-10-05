@@ -24,6 +24,16 @@ const OID_RSA = forge.pki.oids.rsaEncryption as string;
 
 export { SmartCASignResponse };
 
+type Gap = {
+  start: number; // absolute index of '<'  (excluded region start)
+  end: number; // absolute index of '>' + 1 (excluded region end)
+  lt: number; // index of '<'
+  gt: number; // index of '>'
+  innerRawLen: number; // bytes inside <...> including whitespace
+  innerHexLen: number; // hex length without whitespace
+  byteRangeShouldBe: [number, number, number, number];
+};
+
 // time_stamp: YYYYMMDDhhmmssZ (UTC, không có 'T')
 function utcTimestamp(): string {
   const d = new Date();
@@ -165,48 +175,94 @@ export class SmartCAService {
   }) {
     const signatureIndex = options.signatureIndex ?? 0;
 
-    // 1) Locate signature gap first (independent of ByteRange format)
+    // 1) Xác định khoảng bị loại trừ <...> theo /Contents (độc lập ByteRange)
     const gap = this.locateContentsGap(options.pdf, signatureIndex);
+    const b = gap.start; // vị trí '<'
+    const c = gap.end; // ngay sau '>'
+    const d = options.pdf.length - c; // phần đuôi
+    console.log('[sign-to-cms]', {
+      idx: signatureIndex,
+      fileSize: options.pdf.length,
+      lt: gap.start,
+      gtPlus1: gap.end,
+      excludedLen: gap.end - gap.start,
+      innerRawLen: gap.innerRawLen,
+      innerHexLen: gap.innerHexLen,
+      byteRangeShouldBe: [0, b, c, d],
+    });
 
-    // 2) Try to read declared ByteRange (might be corrupted)
-    const decl = this.readDeclaredByteRange(options.pdf, signatureIndex);
+    // 2) Xác định CHUỖI /ByteRange [...] đúng của chính từ điển chữ ký này
+    const s0 = options.pdf.toString('latin1');
 
-    if (decl) {
-      const should = gap.byteRangeShouldBe; // [a,b,c,d] kỳ vọng từ locate
-      const aOk = decl.a === should[0];
-      const bOk = decl.b === should[1];
-      const cOk = decl.c === should[2];
-      const dOk = decl.d === should[3];
-
-      // Nếu lệch ở a/b/c => offset sai thật, phải chặn
-      if (!aOk || !bOk || !cOk) {
-        console.warn(
-          `ByteRange mismatch detected but will use calculated gap:`,
-          {
-            declared: [decl.a, decl.b, decl.c, decl.d],
-            calculated: should,
-          },
-        );
-      }
-
-      if (!dOk) {
-        console.warn(
-          `Auto-ignoring ByteRange.d mismatch: declared=${decl.d}, calculated=${should[3]}`,
-        );
-      }
-    } else {
-      console.warn(
-        `No valid ByteRange found for signature ${signatureIndex}, using calculated gap`,
+    // Tìm đúng match /Contents thứ signatureIndex để suy ra ranh giới dictionary
+    const reContents = /\/Contents\s*<([\s\S]*?)>/g;
+    const contentsMatches = Array.from(s0.matchAll(reContents));
+    if (signatureIndex < 0 || signatureIndex >= contentsMatches.length) {
+      throw new BadRequestException(
+        `Cannot find /Contents for signature index ${signatureIndex}`,
       );
     }
+    const m = contentsMatches[signatureIndex];
+    const full = m[0];
+    const before = s0.slice(0, m.index!);
+    const ltPos = before.length + full.indexOf('<');
+    const gtPos = before.length + full.lastIndexOf('>');
 
-    // 3) Hash PDF theo gap được tính toán (an toàn hơn)
-    const { digestHex: pdfDigestHex } = this.hashForSignatureByGap(
-      options.pdf,
-      gap,
-    ) as { digestHex: string };
+    const dictStart = s0.lastIndexOf('<<', m.index!);
+    const dictEnd = s0.indexOf('>>', gtPos);
+    if (dictStart < 0 || dictEnd < 0 || dictEnd <= dictStart) {
+      throw new BadRequestException(
+        'Cannot locate signature dictionary in signToCmsPades',
+      );
+    }
+    const dictStr = s0.slice(dictStart, dictEnd + 2);
+    const relBR = dictStr.match(/\/ByteRange\s*\[([^\]]+)\]/);
+    if (!relBR || relBR.index == null) {
+      throw new BadRequestException(
+        'ByteRange not found inside signature dictionary in signToCmsPades',
+      );
+    }
+    const oldBR = relBR[0];
+    const brAbsStart = dictStart + relBR.index!;
+    const brAbsEnd = brAbsStart + oldBR.length;
 
-    // 2) Lấy cert & serial
+    // 3) Tạo chuỗi ByteRange số thật [0 b c d] và PAD cho đúng độ dài placeholder
+    let newBR = `/ByteRange [0 ${b} ${c} ${d}]`;
+    if (newBR.length > oldBR.length) {
+      throw new BadRequestException(
+        `new /ByteRange longer than placeholder by ${newBR.length - oldBR.length} bytes`,
+      );
+    }
+    if (newBR.length < oldBR.length) {
+      newBR =
+        newBR.slice(0, -1) + ' '.repeat(oldBR.length - newBR.length) + ']';
+    }
+
+    // 4) Tạo BẢN SAO "đúng ByteRange" để băm (KHÔNG đụng options.pdf gốc)
+    const simulated = Buffer.from(
+      s0.slice(0, brAbsStart) + newBR + s0.slice(brAbsEnd),
+      'latin1',
+    );
+
+    // Sentinel: bắt buộc tại b là '<' và tại c-1 là '>'
+    if (simulated[b] !== 0x3c || simulated[c - 1] !== 0x3e) {
+      throw new BadRequestException('sign-to-cms: not "<...>" at [b..c-1]');
+    }
+
+    // 5) Hash PAdES: SHA-256( simulated[0..b) || simulated[c..EOF] )
+    const h = crypto.createHash('sha256');
+    h.update(simulated.subarray(0, b));
+    h.update(simulated.subarray(c));
+    const pdfDigestHex = h.digest('hex');
+    console.log('[sign-to-cms/digestAfterBR]', pdfDigestHex, {
+      idx: signatureIndex,
+      b,
+      c,
+      d,
+      fileSize: options.pdf.length,
+    });
+
+    // 6) Lấy cert & serial (GIỮ NGUYÊN logic cũ của bạn)
     const certResp = await this.getCertificates({
       userId: this.smartca.smartcaUserId,
     });
@@ -218,10 +274,10 @@ export class SmartCAService {
     );
     if (!serial) throw new BadRequestException('No serial_number');
 
-    // 3) Build SignedAttributes DER (có signingCertificateV2)
+    // 7) Build SignedAttributes DER từ pdfDigestHex (GIỮ NGUYÊN)
     const signedAttrsDER = this.buildSignedAttrsDER(pdfDigestHex, signerPem);
 
-    // 4) Hash DER (SHA-256) → gửi ký
+    // 8) Hash DER (SHA-256) → gửi ký SmartCA (GIỮ NGUYÊN)
     const derHashBytes = crypto
       .createHash('sha256')
       .update(signedAttrsDER)
@@ -241,11 +297,11 @@ export class SmartCAService {
       userIdOverride: this.smartca.smartcaUserId,
     });
 
-    // 5) Poll cho tới khi có signature_value
+    // 9) Poll tới khi có signature_value (GIỮ NGUYÊN)
     const poll = await this.pollSmartCASignResult({
       transactionId,
       intervalMs: options.intervalMs ?? 2000,
-      timeoutMs: options.timeoutMs ?? 180000, // tăng timeout
+      timeoutMs: options.timeoutMs ?? 180000,
     });
 
     const raw = (poll as any).raw?.data ?? {};
@@ -260,7 +316,7 @@ export class SmartCAService {
       throw new BadRequestException('No signature_value in SmartCA result');
     }
 
-    // 6) Lắp CMS detached (Base64)
+    // 10) Lắp CMS detached (Base64) (GIỮ NGUYÊN)
     const cmsBase64 = this.buildDetachedCMSBase64(
       signedAttrsDER,
       sig,
@@ -268,15 +324,15 @@ export class SmartCAService {
       chainPem,
     );
 
-    // 7) Trả về CMS (KHÔNG embed)
+    // 11) Trả về đúng shape cũ (GIỮ NGUYÊN)
     return {
       cmsBase64,
       transactionId,
       docId,
       signatureIndex,
-      byteRange: gap,
+      byteRange: gap, // [0,b,c,d] từ locateContentsGap
       pdfLength: options.pdf.length,
-      digestHex: pdfDigestHex,
+      digestHex: pdfDigestHex, // hash khớp tuyệt đối với verify sau embed
     };
   }
 
@@ -289,317 +345,126 @@ export class SmartCAService {
     cmsBase64OrHex: string,
     signatureIndex: number,
   ): Buffer {
-    console.log('\n=== EMBED CMS DEBUG START ===');
-    console.log('Input PDF size:', pdf.length);
-    console.log('Signature index:', signatureIndex);
-    console.log('CMS input length:', cmsBase64OrHex.length);
-
-    // 1) Normalize CMS to HEX uppercase
+    // 0) Normalize CMS -> HEX UPPER
     let cmsHex = (cmsBase64OrHex || '').trim();
     const looksHex =
       /^[0-9A-Fa-f\s]+$/.test(cmsHex) &&
       cmsHex.replace(/\s+/g, '').length % 2 === 0;
+    if (!looksHex) cmsHex = Buffer.from(cmsHex, 'base64').toString('hex');
+    cmsHex = cmsHex.replace(/\s+/g, '').toUpperCase();
 
-    console.log('\n=== CMS HEX VALIDATION ===');
-    console.log('Original CMS input length:', cmsBase64OrHex.length);
-    console.log('Trimmed CMS length:', cmsHex.length);
-    console.log('Looks like hex:', looksHex);
+    let work = Buffer.from(pdf);
+    const s0 = work.toString('latin1');
 
-    if (!looksHex) {
-      try {
-        const bytes = Buffer.from(cmsHex, 'base64');
-        if (!bytes.length) throw new Error('empty');
-        cmsHex = bytes.toString('hex').toUpperCase();
-        console.log('Converted from base64 to hex, length:', cmsHex.length);
-      } catch (error) {
-        console.error('CMS conversion error:', error);
-        throw new BadRequestException('CMS must be base64 or hex');
-      }
-    } else {
-      cmsHex = cmsHex.replace(/\s+/g, '').toUpperCase();
-      console.log('Using provided hex, length:', cmsHex.length);
-      console.log('CMS hex preview:', cmsHex.substring(0, 100) + '...');
-      console.log(
-        'CMS hex ending:',
-        '...' + cmsHex.substring(cmsHex.length - 50),
-      );
-    }
-
-    // 2) Convert to string for text operations
-    const pdfStr = pdf.toString('latin1');
-    console.log('PDF as string length:', pdfStr.length);
-
-    // Count total signatures in PDF
-    const sigMatches = Array.from(pdfStr.matchAll(/\/Type\s*\/Sig/g));
-    const contentsMatches = Array.from(pdfStr.matchAll(/\/Contents\s*<[0]*>/g));
-    console.log('Total /Type/Sig entries:', sigMatches.length);
-    console.log('Total /Contents placeholders:', contentsMatches.length);
-
-    // 3) Find the Contents placeholder by index - Updated regex to handle any hex content
-    const contentsRegex = /\/Contents\s*<([0-9A-Fa-f]*)>/g;
-    let match: RegExpExecArray | null;
-    let currentIndex = 0;
-    let contentsStart = -1;
-    let contentsEnd = -1;
-    let placeholderContent = '';
-
-    console.log('Searching for Contents placeholders...');
-
-    while ((match = contentsRegex.exec(pdfStr)) !== null) {
-      console.log(`Found Contents #${currentIndex} at position ${match.index}`);
-      console.log(`  Full match: "${match[0]}"`);
-      console.log(`  Content inside brackets: "${match[1] || '(empty)'}"`);
-
-      if (currentIndex === signatureIndex) {
-        // FIXED: Calculate positions correctly
-        contentsStart = match.index + match[0].indexOf('<');
-        contentsEnd = match.index + match[0].lastIndexOf('>') + 1;
-        placeholderContent = match[1] || '';
-
-        console.log('Selected Contents placeholder:');
-        console.log('  Start position (position of <):', contentsStart);
-        console.log('  End position (position after >):', contentsEnd);
-        console.log('  Placeholder length:', placeholderContent.length);
-        console.log(
-          '  Placeholder preview:',
-          placeholderContent.substring(0, 50) + '...',
-        );
-        break;
-      }
-      currentIndex++;
-    }
-
-    if (contentsStart === -1 || contentsEnd === -1) {
-      console.error(`Contents placeholder #${signatureIndex} not found`);
+    // 1) Locate the /Contents <...> placeholder by index
+    const reContents = /\/Contents\s*<([\s\S]*?)>/g;
+    const hits = Array.from(s0.matchAll(reContents));
+    if (signatureIndex < 0 || signatureIndex >= hits.length) {
       throw new BadRequestException(
-        `Contents placeholder #${signatureIndex} not found`,
+        `Cannot find /Contents for signature index ${signatureIndex}`,
       );
     }
+    const m = hits[signatureIndex];
+    const full = m[0];
+    const before = s0.slice(0, m.index!);
+    const ltPos = before.length + full.indexOf('<'); // '<'
+    const gtPos = before.length + full.lastIndexOf('>'); // '>'
 
-    // 4) Check if CMS fits in placeholder (excluding < and > brackets)
-    const reservedSpace = contentsEnd - contentsStart - 2; // -2 for < and >
-    console.log('Reserved space in placeholder:', reservedSpace);
-    console.log('CMS hex length:', cmsHex.length);
-
-    if (cmsHex.length > reservedSpace) {
-      console.error(`CMS too large: ${cmsHex.length} > ${reservedSpace}`);
+    const reservedHex = (m[1] || '').replace(/\s+/g, '');
+    const reservedLen = reservedHex.length;
+    if (cmsHex.length > reservedLen) {
       throw new BadRequestException(
-        `CMS hex length ${cmsHex.length} exceeds reserved space ${reservedSpace}`,
+        `CMS hex length ${cmsHex.length} exceeds reserved ${reservedLen}`,
       );
     }
 
-    // 5) Pad CMS with zeros to fill the placeholder exactly - CRITICAL: maintain exact length
-    const paddedCMS = cmsHex.padEnd(reservedSpace, '0');
-    console.log('Padded CMS length:', paddedCMS.length);
-    console.log('Reserved space:', reservedSpace);
-    console.log('Length match check:', paddedCMS.length === reservedSpace);
-
-    // 6) Replace ONLY the Contents including < and >, do NOT touch ByteRange yet
-    const beforeContents = pdfStr.substring(0, contentsStart);
-    const afterContents = pdfStr.substring(contentsEnd);
-
-    // Debug: Check content before replacement
-    const originalContent = pdfStr.substring(contentsStart, contentsEnd);
-    console.log('=== CMS REPLACEMENT DEBUG ===');
-    console.log('Original content length:', originalContent.length);
-    console.log(
-      'Original content preview:',
-      originalContent.substring(0, 50) + '...',
-    );
-    console.log('Padded CMS preview:', paddedCMS.substring(0, 50) + '...');
-
-    // CRITICAL: Replacement MUST maintain exact same length
-    const newContentsSection = '<' + paddedCMS + '>';
-    console.log('Original contents section length:', originalContent.length);
-    console.log('New contents section length:', newContentsSection.length);
-    console.log(
-      'Length preservation check:',
-      originalContent.length === newContentsSection.length,
-    );
-
-    if (originalContent.length !== newContentsSection.length) {
-      throw new BadRequestException(
-        `CMS replacement length mismatch: original ${originalContent.length} vs new ${newContentsSection.length}`,
-      );
-    }
-
-    const finalPdfStr = beforeContents + newContentsSection + afterContents;
-    console.log('Replacement: <' + paddedCMS.substring(0, 20) + '...>');
-
-    // Debug: Verify replacement worked
-    const newContent = finalPdfStr.substring(
-      contentsStart,
-      contentsStart + originalContent.length,
-    );
-    console.log('New content preview:', newContent.substring(0, 50) + '...');
-    console.log(
-      'Replacement successful:',
-      newContent.startsWith('<') && newContent.endsWith('>'),
-    );
-    console.log('=== CMS REPLACEMENT DEBUG END ===');
-
-    console.log('Final PDF string length:', finalPdfStr.length);
-    console.log('Length change:', finalPdfStr.length - pdfStr.length);
-
-    const finalPdf = Buffer.from(finalPdfStr, 'latin1');
-
-    // 7) **CRITICAL**: Calculate ByteRange AFTER CMS embedding for accurate positions
-    console.log('\n=== CALCULATING BYTERANGE AFTER CMS EMBED ===');
-
-    // Calculate ByteRange based on PDF specification with FINAL PDF positions:
-    // [a b c d] means: signed data = bytes[a..a+b-1] + bytes[c..c+d-1]
-    // Signature area (excluded) = bytes[a+b..c-1]
-    const a = 0; // always start from beginning
-    const b = contentsStart + 1; // up to and INCLUDING '<' (signature starts AFTER '<')
-    const c = contentsEnd - 1; // from and INCLUDING '>' (signature ends BEFORE '>')
-    const d = finalPdf.length - c; // remaining bytes from FINAL PDF (after CMS embedding)
-
-    console.log('ByteRange calculation (AFTER CMS embed):');
-    console.log(`  Final PDF length: ${finalPdf.length}`);
-    console.log(`  Contents start: ${contentsStart} (position of '<')`);
-    console.log(`  Contents end: ${contentsEnd} (position after '>')`);
-    console.log(`  Calculated ByteRange: [${a}, ${b}, ${c}, ${d}]`);
-    console.log(`  Signature area (excluded): bytes ${b} to ${c - 1}`);
-    console.log(
-      `  Signed data: bytes 0-${b - 1} + bytes ${c}-${finalPdf.length - 1}`,
-    );
-
-    // 8) Recalculate ALL ByteRanges after embedding CMS for multiple signature support
-    console.log('Recalculating all ByteRanges after CMS embed...');
-    const recalculatedPdf = this.recalculateAllByteRanges(finalPdf);
-
-    // Debug: Check final PDF content around ByteRange positions
-    console.log('\n=== FINAL PDF CONTENT ANALYSIS ===');
-    const finalPdfString = recalculatedPdf.toString('latin1'); // CRITICAL: Use latin1 encoding!
-
-    // Debug: Check actual bytes at the embedded position
-    console.log('\n=== BYTE-LEVEL CMS VERIFICATION ===');
-    const cmsDataStart = contentsStart + 1; // CMS data starts AFTER '<'
-    console.log(
-      'Checking bytes at position',
-      cmsDataStart,
-      'to',
-      cmsDataStart + 20,
-    );
-    const bytesAtPosition = recalculatedPdf.subarray(
-      cmsDataStart,
-      cmsDataStart + 20,
-    );
-    console.log(
-      'Hex bytes at embedded position:',
-      bytesAtPosition.toString('hex').toUpperCase(),
-    );
-    console.log(
-      'ASCII at embedded position:',
-      bytesAtPosition.toString('ascii'),
-    );
-
-    // Check if it matches CMS start
-    const expectedCmsStart = paddedCMS.substring(0, 40); // First 20 bytes = 40 hex chars
-    console.log('Expected CMS start (first 40 hex chars):', expectedCmsStart);
-    console.log(
-      'Actual vs Expected match:',
-      bytesAtPosition.toString('hex').toUpperCase() ===
-        expectedCmsStart.toUpperCase(),
-    );
-    console.log('=== BYTE-LEVEL CMS VERIFICATION END ===\n');
-
-    // Find all ByteRange entries in final PDF
-    const byteRangeMatches = Array.from(
-      finalPdfString.matchAll(
-        /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/g,
-      ),
-    );
-    console.log('Found ByteRange entries:', byteRangeMatches.length);
-
-    byteRangeMatches.forEach((match, idx) => {
-      const [, a, b, c, d] = match;
-      const byteRange = {
-        a: parseInt(a),
-        b: parseInt(b),
-        c: parseInt(c),
-        d: parseInt(d),
-      };
-      console.log(`ByteRange #${idx}:`, byteRange);
-
-      // Check what's at those positions in FINAL PDF
-      console.log(
-        `  Final content at position ${byteRange.b}:`,
-        JSON.stringify(finalPdfString.charAt(byteRange.b)),
-      );
-      console.log(
-        `  Final content at position ${byteRange.c}:`,
-        JSON.stringify(finalPdfString.charAt(byteRange.c)),
-      );
-      console.log(
-        `  Final range preview at ${byteRange.b}: "${finalPdfString.substring(byteRange.b, byteRange.b + 10)}"`,
-      );
-      console.log(
-        `  Final range preview at ${byteRange.c}: "${finalPdfString.substring(byteRange.c, byteRange.c + 10)}"`,
-      );
+    // DEBUG
+    // eslint-disable-next-line no-console
+    console.log('[embed-cms/before]', {
+      idx: signatureIndex,
+      fileSize: work.length,
+      ltPos,
+      gtPos,
+      reservedLen,
+      cmsLen: cmsHex.length,
+      aroundLT: work
+        .subarray(Math.max(0, ltPos - 8), Math.min(work.length, ltPos + 2))
+        .toString('latin1'),
+      aroundGT: work
+        .subarray(Math.max(0, gtPos - 1), Math.min(work.length, gtPos + 8))
+        .toString('latin1'),
     });
 
-    // *** ByteRange calculation is now handled by recalculateAllByteRanges ***
-    console.log('\n=== BYTERANGE ALREADY CALCULATED ===');
-    console.log(
-      'All ByteRanges have been recalculated by recalculateAllByteRanges method',
-    );
+    // 2) Put CMS hex in-place BETWEEN < >
+    const padded = cmsHex.padEnd(reservedLen, '0');
+    const beforeContents = work.subarray(0, ltPos + 1); // includes '<'
+    const afterContents = work.subarray(gtPos); // starts at '>' (includes '>')
+    work = Buffer.concat([
+      beforeContents,
+      Buffer.from(padded, 'ascii'),
+      afterContents,
+    ]);
 
-    console.log('=== EMBED CMS DEBUG END ===\n');
-    return recalculatedPdf;
+    // 3) Exclusion by convention: EXCLUDE the whole <...>
+    const a = 0;
+    const b = ltPos; // at '<'
+    const c = gtPos + 1; // after '>'
+    const d = work.length - c;
+
+    // 4) Sync with locateContentsGap + size invariant
+    const expect = this.locateContentsGap(work, signatureIndex);
+    if (expect.start !== b || expect.end !== c) {
+      throw new BadRequestException('ByteRange mismatch with expected gap');
+    }
+    if (b + (c - b) + d !== work.length) {
+      throw new BadRequestException('ByteRange sums do not match file size');
+    }
+
+    // 5) Write /ByteRange INSIDE the signature dictionary (not by global index)
+    work = this.writeByteRangeInSigDict(work, signatureIndex, [a, b, c, d]);
+
+    // ========= VERIFY BLOCK (1): read /ByteRange back from file =========
+    const got = this.readByteRangeInSigDict(work, signatureIndex);
+    if (!got.length) {
+      throw new BadRequestException(
+        'Post-embed: no /ByteRange found in signature dictionary',
+      );
+    }
+    if (got[0] !== a || got[1] !== b || got[2] !== c || got[3] !== d) {
+      throw new BadRequestException(
+        `Post-embed /ByteRange mismatch: wrote [${a} ${b} ${c} ${d}] but file has [${got.join(' ')}]`,
+      );
+    }
+    console.log('[verify/byteRange-exact]', { got, expect: [a, b, c, d] });
+
+    // ========= VERIFY BLOCK (2): check sentinel bytes at b and c-1 =========
+    const byteAtB = work[b];
+    const byteAtCm1 = work[c - 1];
+    console.log('[verify/sentinels]', {
+      b,
+      c,
+      byteAtB,
+      charB: String.fromCharCode(byteAtB),
+      byteAtCm1,
+      charCm1: String.fromCharCode(byteAtCm1),
+    });
+    if (byteAtB !== 0x3c || byteAtCm1 !== 0x3e) {
+      // '<' and '>'
+      throw new BadRequestException(
+        'Sentinel bytes mismatch: not < ... > at [b .. c-1]',
+      );
+    }
+
+    // ========= VERIFY BLOCK (3): recompute digest over two ranges =========
+    const digestHexAfterEmbed = this.hashTwoRanges(work, b, c);
+    // eslint-disable-next-line no-console
+    console.log('[verify/digestAfterEmbed]', digestHexAfterEmbed);
+
+    // Done
+    return work;
   }
 
   // --- Helpers ---
-  // Tìm phạm vi /Contents <...> và tính ByteRange đúng chuẩn
-  private locateContentsGap(pdf: Buffer, signatureIndex = 0) {
-    const pdfStr = pdf.toString('latin1'); // giữ nguyên byte
-
-    // Tìm tất cả signature objects dựa vào /Contents pattern (không phụ thuộc ByteRange)
-    const reSig = /\/Contents\s*<([0-9A-Fa-f]*)>/g;
-
-    let m: RegExpExecArray | null;
-    let found = 0;
-    while ((m = reSig.exec(pdfStr))) {
-      if (found === signatureIndex) {
-        const fullMatch = m[0];
-        const hexInside = m[1] ?? '';
-
-        // Tìm vị trí chính xác của '<' và '>'
-        const contentsStart = m.index + fullMatch.indexOf('/Contents');
-        const ltPos = pdfStr.indexOf('<', contentsStart);
-        const gtPos = pdfStr.indexOf('>', ltPos);
-
-        if (ltPos < 0 || gtPos < 0) {
-          throw new Error(
-            `Cannot find <...> brackets for signature ${signatureIndex}`,
-          );
-        }
-
-        const start = ltPos; // offset bắt đầu gap (tại '<')
-        const hexLen = hexInside.length; // số ký tự hex giữa < >
-        const gapLen = gtPos - ltPos + 1; // từ '<' đến '>' (inclusive)
-        const end = gtPos + 1; // vị trí sau dấu '>' (c = end)
-
-        return {
-          start,
-          end,
-          gapLen,
-          hexLen,
-          ltPos,
-          gtPos,
-          byteRangeShouldBe: [0, start, end, pdf.length - end] as [
-            number,
-            number,
-            number,
-            number,
-          ],
-          hexInside,
-        };
-      }
-      found++;
-    }
-    throw new Error(`Signature index ${signatureIndex} not found`);
-  }
 
   // Đọc /ByteRange đã khai báo trong file ở signatureIndex
   private readDeclaredByteRange(pdf: Buffer, signatureIndex = 0) {
@@ -618,17 +483,6 @@ export class SmartCAService {
       idx++;
     }
     return null; // có thể là prepare chưa viết ByteRange
-  }
-
-  // Hash đúng chuẩn theo phạm vi gap đã xác định
-  private hashForSignatureByGap(
-    pdf: Buffer,
-    gap: { start: number; end: number },
-  ) {
-    const md = crypto.createHash('sha256');
-    if (gap.start > 0) md.update(pdf.subarray(0, gap.start));
-    if (gap.end < pdf.length) md.update(pdf.subarray(gap.end));
-    return { digestHex: md.digest('hex') };
   }
 
   public async getCertificates(options?: {
@@ -1323,147 +1177,221 @@ export class SmartCAService {
     return forge.util.encode64(derBytes); // ← CMS (PKCS#7) base64 để đưa cho /embed-cms
   }
 
-  /**
-   * Recalculate all ByteRange entries in a PDF after structural changes
-   * This is critical for multiple signatures to work correctly
-   */
-  private recalculateAllByteRanges(pdf: Buffer): Buffer {
-    console.log('\n=== RECALCULATING ALL BYTERANGES ===');
+  public debugScanSignatures(pdf: Buffer) {
+    const s = pdf.toString('latin1');
+    const list: any[] = [];
+    const reContents = /\/Contents\s*<([\s\S]*?)>/g;
 
-    const pdfStr = pdf.toString('latin1');
-    console.log('PDF length for recalculation:', pdf.length);
+    for (const m of s.matchAll(reContents)) {
+      const idx = list.length;
+      const full = m[0];
+      const before = s.slice(0, m.index!);
+      const lt = before.length + full.indexOf('<');
+      const gt = before.length + full.lastIndexOf('>');
 
-    // Find all signature objects with /Contents placeholders
-    const signatureObjects: Array<{
-      signatureIndex: number;
-      contentsStart: number;
-      contentsEnd: number;
-      byteRangePosition: number;
-      currentByteRange: string;
-    }> = [];
+      const dictStart = s.lastIndexOf('<<', m.index!);
+      const dictEnd = s.indexOf('>>', gt);
+      const dictStr =
+        dictStart >= 0 && dictEnd > dictStart
+          ? s.slice(dictStart, dictEnd + 2)
+          : '';
 
-    // Find all /Contents entries (signature placeholders)
-    const contentsRegex = /\/Contents\s*<([0-9A-Fa-f]*)>/g;
-    let contentsMatch: RegExpExecArray | null;
-    let signatureIndex = 0;
+      const relBR = dictStr.match(/\/ByteRange\s*\[([^\]]+)\]/);
+      const brNums = relBR ? relBR[1].trim().split(/\s+/).map(Number) : null;
 
-    while ((contentsMatch = contentsRegex.exec(pdfStr)) !== null) {
-      const contentsStart = contentsMatch.index + contentsMatch[0].indexOf('<');
-      const contentsEnd =
-        contentsStart + contentsMatch[0].length - contentsMatch[0].indexOf('<');
-
-      console.log(`\nFound signature #${signatureIndex}:`);
-      console.log(`  Contents start: ${contentsStart}`);
-      console.log(`  Contents end: ${contentsEnd}`);
-
-      // Find corresponding ByteRange for this signature
-      // Look backwards from the /Contents to find the /ByteRange
-      const beforeContents = pdfStr.substring(0, contentsMatch.index);
-      const byteRangeMatch = beforeContents.match(
-        /\/ByteRange\s*\[([^\]]+)\]/g,
-      );
-
-      if (byteRangeMatch && byteRangeMatch.length > 0) {
-        // Get the last ByteRange match (closest to this /Contents)
-        const lastByteRangeMatch = byteRangeMatch[byteRangeMatch.length - 1];
-        const byteRangePosition =
-          beforeContents.lastIndexOf(lastByteRangeMatch);
-
-        signatureObjects.push({
-          signatureIndex,
-          contentsStart,
-          contentsEnd,
-          byteRangePosition,
-          currentByteRange: lastByteRangeMatch,
-        });
-
-        console.log(`  Found ByteRange at position: ${byteRangePosition}`);
-        console.log(`  Current ByteRange: ${lastByteRangeMatch}`);
-      } else {
-        console.log(
-          `  Warning: No ByteRange found for signature #${signatureIndex}`,
-        );
-      }
-
-      signatureIndex++;
+      list.push({
+        idx,
+        lt,
+        gt,
+        hasDict: dictStart >= 0 && dictEnd > dictStart,
+        hasBR: !!relBR,
+        brNums,
+        dictPreview: dictStr.slice(0, 160),
+      });
     }
 
-    console.log(`\nTotal signatures found: ${signatureObjects.length}`);
+    // eslint-disable-next-line no-console
+    console.log('[scan]', list);
+    return list;
+  }
 
-    // Recalculate ByteRange for each signature
-    let updatedPdfStr = pdfStr;
-    let totalLengthChange = 0;
+  /** Step 1: build digest for remote signing (SmartCA). */
+  public signToCmsBuildDigest(pdf: Buffer, signatureIndex: number) {
+    // 1) Xác định gap EXCLUDE cả '<'…'>'
+    const gap = this.locateContentsGap(pdf, signatureIndex);
+    const [a, b, c, d] = gap.byteRangeShouldBe; // = [0, b, c, fileLen - c]
 
-    for (const sigObj of signatureObjects) {
-      // Adjust positions based on previous changes
-      const adjustedContentsStart = sigObj.contentsStart + totalLengthChange;
-      const adjustedContentsEnd = sigObj.contentsEnd + totalLengthChange;
-      const adjustedByteRangePosition =
-        sigObj.byteRangePosition + totalLengthChange;
+    // 2) Tạo BẢN COPY và GHI /ByteRange NGAY BÂY GIỜ
+    let work = Buffer.from(pdf);
+    work = this.writeByteRangeInSigDict(work, signatureIndex, [a, b, c, d]);
 
-      console.log(
-        `\nRecalculating ByteRange for signature #${sigObj.signatureIndex}:`,
+    // 3) VERIFY nhanh trên bản copy (để bắt lỗi sớm)
+    const got = this.readByteRangeInSigDict(work, signatureIndex);
+    if (
+      !got.length ||
+      got[0] !== a ||
+      got[1] !== b ||
+      got[2] !== c ||
+      got[3] !== d
+    ) {
+      throw new BadRequestException(
+        `sign-to-cms: /ByteRange not set as expected`,
       );
-      console.log(`  Adjusted contents start: ${adjustedContentsStart}`);
-      console.log(`  Adjusted contents end: ${adjustedContentsEnd}`);
-
-      // Calculate new ByteRange values
-      const a = 0; // Always start from beginning
-      const b = adjustedContentsStart + 1; // Up to and including '<'
-      const c = adjustedContentsEnd - 1; // From and including '>'
-      const d = Buffer.from(updatedPdfStr, 'latin1').length - c; // Remaining bytes
-
-      console.log(`  New ByteRange: [${a}, ${b}, ${c}, ${d}]`);
-
-      // Create new ByteRange string
-      const newByteRangeContent = `${a} ${b} ${c} ${d}`;
-      const newByteRangeStr = `/ByteRange [${newByteRangeContent}]`;
-
-      // Find the exact ByteRange to replace
-      const currentByteRangeRegex = /\/ByteRange\s*\[[^\]]+\]/;
-      const byteRangeStartIndex = adjustedByteRangePosition;
-      const searchArea = updatedPdfStr.substring(
-        byteRangeStartIndex,
-        byteRangeStartIndex + 200,
-      );
-      const localMatch = searchArea.match(currentByteRangeRegex);
-
-      if (localMatch) {
-        const actualByteRangeStart = byteRangeStartIndex + localMatch.index!;
-        const actualByteRangeEnd = actualByteRangeStart + localMatch[0].length;
-        const oldByteRangeStr = localMatch[0];
-
-        console.log(`  Old ByteRange: "${oldByteRangeStr}"`);
-        console.log(`  New ByteRange: "${newByteRangeStr}"`);
-
-        // Replace the ByteRange
-        const beforeByteRange = updatedPdfStr.substring(
-          0,
-          actualByteRangeStart,
-        );
-        const afterByteRange = updatedPdfStr.substring(actualByteRangeEnd);
-        updatedPdfStr = beforeByteRange + newByteRangeStr + afterByteRange;
-
-        const lengthChange = newByteRangeStr.length - oldByteRangeStr.length;
-        totalLengthChange += lengthChange;
-
-        console.log(
-          `  Length change: ${lengthChange} (total: ${totalLengthChange})`,
-        );
-        console.log(`  ByteRange updated successfully`);
-      } else {
-        console.log(
-          `  Error: Could not find ByteRange to replace at position ${adjustedByteRangePosition}`,
-        );
-      }
+    }
+    if (work[b] !== 0x3c || work[c - 1] !== 0x3e) {
+      // '<' và '>'
+      throw new BadRequestException(`sign-to-cms: not <...> at [b..c-1]`);
     }
 
-    console.log('\n=== BYTERANGE RECALCULATION COMPLETE ===');
-    console.log(
-      `Final PDF length: ${Buffer.from(updatedPdfStr, 'latin1').length}`,
+    // 4) BĂM trên bản copy đã có /ByteRange đúng
+    const mdHex = this.hashTwoRanges(work, b, c);
+    console.log('[sign-to-cms/digestAfterBR]', mdHex);
+
+    // 5) Trả digest để gửi SmartCA ký
+    const digest = Buffer.from(mdHex, 'hex'); // tuỳ SDK bạn cần Buffer hay hex
+    return { digest, digestHex: mdHex };
+  }
+
+  private locateContentsGap(pdf: Buffer, signatureIndex = 0): Gap {
+    const s = pdf.toString('latin1');
+
+    // allow all whitespace inside HEX
+    const re = /\/Contents\s*<([\s\S]*?)>/g;
+    const matches = Array.from(s.matchAll(re));
+    if (signatureIndex < 0 || signatureIndex >= matches.length) {
+      throw new BadRequestException(
+        `Cannot find /Contents for signature index ${signatureIndex}`,
+      );
+    }
+
+    const m = matches[signatureIndex];
+    const full = m[0];
+    const before = s.slice(0, m.index!);
+
+    const lt = before.length + full.indexOf('<'); // index of '<'
+    const gt = before.length + full.lastIndexOf('>'); // index of '>'
+    if (lt < 0 || gt < 0 || gt <= lt) {
+      throw new BadRequestException('Malformed /Contents <...>');
+    }
+
+    const innerRaw = m[1]; // may include \r\n/space
+    const innerRawLen = innerRaw.length;
+    const innerHex = innerRaw.replace(/\s+/g, '');
+    const innerHexLen = innerHex.length;
+
+    if (
+      innerHexLen === 0 ||
+      innerHexLen % 2 !== 0 ||
+      /[^0-9A-Fa-f]/.test(innerHex)
+    ) {
+      throw new BadRequestException('Invalid hex in /Contents');
+    }
+
+    // Exclude the whole token `<...>`
+    const start = lt; // at '<'
+    const end = gt + 1; // after '>'
+
+    const excludedLen = end - start;
+    // Must equal raw `<...>` bytes length: innerRawLen + 2 (two sentinels)
+    if (excludedLen !== innerRawLen + 2) {
+      throw new BadRequestException(
+        'Excluded range length != raw length (+2) in /Contents',
+      );
+    }
+
+    return {
+      start,
+      end,
+      lt,
+      gt,
+      innerRawLen,
+      innerHexLen,
+      byteRangeShouldBe: [0, start, end, pdf.length - end],
+    };
+  }
+
+  /** Hash 2 segments: [0..start) + [end..EOF] (exclude the whole `<...>`) */
+  private hashForSignatureByGap(pdf: Buffer, gap: Gap) {
+    const md = crypto.createHash('sha256');
+    md.update(pdf.subarray(0, gap.start)); // trước '<'
+    md.update(pdf.subarray(gap.end)); // sau '>'
+    const digest = md.digest();
+    return { digest, digestHex: Buffer.from(digest).toString('hex') };
+  }
+
+  /** Re-hash two ranges (used for post-embed verification). */
+  private hashTwoRanges(buf: Buffer, b: number, c: number): string {
+    const md = crypto.createHash('sha256');
+    md.update(buf.subarray(0, b));
+    md.update(buf.subarray(c));
+    return md.digest('hex');
+  }
+
+  /** Đọc /ByteRange ngay TRONG từ điển chữ ký theo index */
+  private readByteRangeInSigDict(
+    pdf: Buffer,
+    signatureIndex: number,
+  ): number[] {
+    const s = pdf.toString('latin1');
+    const reCont = /\/Contents\s*<([\s\S]*?)>/g;
+    const hits = Array.from(s.matchAll(reCont));
+    if (signatureIndex < 0 || signatureIndex >= hits.length) {
+      throw new BadRequestException(
+        `Cannot find /Contents for index ${signatureIndex}`,
+      );
+    }
+    const m = hits[signatureIndex];
+    const dictStart = s.lastIndexOf('<<', m.index!);
+    const dictEnd = s.indexOf('>>', s.indexOf('>', m.index!));
+    if (dictStart < 0 || dictEnd < 0 || dictEnd <= dictStart) {
+      throw new BadRequestException('Cannot locate signature dictionary');
+    }
+    const dictStr = s.slice(dictStart, dictEnd + 2);
+    const br = dictStr.match(/\/ByteRange\s*\[([^\]]+)\]/);
+    if (!br || br.index == null) return [];
+    const nums = br[1].trim().split(/\s+/).map(Number);
+    if (nums.length !== 4 || nums.some((n) => Number.isNaN(n))) return [];
+    return nums;
+  }
+
+  /** Ghi /ByteRange mới vào CHÍNH từ điển chữ ký (giữ nguyên độ dài placeholder) */
+  private writeByteRangeInSigDict(
+    pdf: Buffer,
+    signatureIndex: number,
+    arr: [number, number, number, number],
+  ): Buffer {
+    const s = pdf.toString('latin1');
+    const reCont = /\/Contents\s*<([\s\S]*?)>/g;
+    const hits = Array.from(s.matchAll(reCont));
+    const m = hits[signatureIndex];
+    const dictStart = s.lastIndexOf('<<', m.index!);
+    const dictEnd = s.indexOf('>>', s.indexOf('>', m.index!));
+    if (dictStart < 0 || dictEnd < 0 || dictEnd <= dictStart) {
+      throw new BadRequestException('Cannot locate signature dictionary');
+    }
+    const dictStr = s.slice(dictStart, dictEnd + 2);
+
+    const relBR = dictStr.match(/\/ByteRange\s*\[([^\]]+)\]/);
+    if (!relBR || relBR.index == null) {
+      throw new BadRequestException('ByteRange not found in dict');
+    }
+    const oldBR = relBR[0];
+    let newBR = `/ByteRange [${arr[0]} ${arr[1]} ${arr[2]} ${arr[3]}]`;
+    if (newBR.length > oldBR.length) {
+      throw new BadRequestException(
+        `new /ByteRange longer than placeholder by ${newBR.length - oldBR.length}`,
+      );
+    }
+    if (newBR.length < oldBR.length) {
+      newBR =
+        newBR.slice(0, -1) + ' '.repeat(oldBR.length - newBR.length) + ']';
+    }
+
+    const absStart = dictStart + relBR.index!;
+    const absEnd = absStart + oldBR.length;
+    return Buffer.from(
+      s.slice(0, absStart) + newBR + s.slice(absEnd),
+      'latin1',
     );
-    console.log(`Total length change: ${totalLengthChange}`);
-
-    return Buffer.from(updatedPdfStr, 'latin1');
   }
 }

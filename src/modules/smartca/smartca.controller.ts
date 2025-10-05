@@ -296,4 +296,32 @@ export class SmartCAController {
     res.setHeader('Content-Length', String(signed.length));
     return res.end(signed);
   }
+
+  @Post('debug/scan')
+  @ApiOperation({
+    summary: 'Quét chữ ký trong PDF (debug)',
+    description:
+      'Đọc PDF và trả thông tin từng chữ ký: vị trí <...>, /ByteRange (bên trong đúng signature dictionary), v.v.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+      },
+      required: ['file'],
+    },
+  })
+  @UseInterceptors(FileInterceptor('file'))
+  scan(
+    @UploadedFile() file: Express.Multer.File,
+  ): Array<Record<string, unknown>> {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('PDF file is required');
+    }
+    return this.smartcaService.debugScanSignatures(file.buffer) as Array<
+      Record<string, unknown>
+    >;
+  }
 }
