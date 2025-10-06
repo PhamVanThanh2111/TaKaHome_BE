@@ -137,7 +137,7 @@ export class BlockchainUtilityController {
         channelName: "rentalchannel",
         chaincodeName: "real-estate-cc",
         defaultOrg: "OrgProp",
-        discoveryAsLocalhost: true,
+        discoveryAsLocalhost: false,
         supportedOrganizations: ["OrgProp", "OrgTenant", "OrgLandlord"]
       }
     }

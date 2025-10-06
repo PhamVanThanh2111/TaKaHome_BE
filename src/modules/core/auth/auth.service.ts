@@ -69,10 +69,13 @@ export class AuthService {
     const orgName = this.determineOrgFromRole(defaultRoles);
     if (orgName) {
       try {
+        // Nếu có 2 roles thì lấy role thứ 2 (LANDLORD), ngược lại lấy role đầu tiên (TENANT)
+        const enrollmentRole = defaultRoles.length > 1 ? defaultRoles[1] : defaultRoles[0];
+        
         await this.blockchainService.enrollUser({
           userId: user.id.toString(),
           orgName: orgName,
-          role: defaultRoles[0]
+          role: enrollmentRole
         });
       } catch (error) {
         // Continue without failing registration - blockchain enrollment is optional
@@ -94,6 +97,8 @@ export class AuthService {
     if (roles.includes(RoleEnum.ADMIN)) return 'OrgProp';
     return null;
   }
+
+
 
   async validateAccount(
     email: string,

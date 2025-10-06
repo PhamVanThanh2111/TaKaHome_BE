@@ -304,8 +304,8 @@ export class AutomatedPenaltyService {
       // Create FabricUser for system operations (use landlord MSP)
       const fabricUser = {
         userId: 'system',
-        orgName: 'OrgLandlord',
-        mspId: 'OrgLandlordMSP',
+        orgName: 'OrgProp',
+        mspId: 'OrgPropMSP',
       };
 
       await this.blockchainService.recordPenalty(
@@ -376,8 +376,8 @@ export class AutomatedPenaltyService {
       // Create system user for blockchain queries
       const systemUser = {
         userId: 'system',
-        orgName: 'OrgLandlord',
-        mspId: 'OrgLandlordMSP',
+        orgName: 'OrgProp',
+        mspId: 'OrgPropMSP',
       };
       // Query SCHEDULED payments from blockchain (not overdue yet)
       const scheduledResponse = await this.blockchainService.queryPaymentsByStatus('SCHEDULED', systemUser);
@@ -461,8 +461,8 @@ export class AutomatedPenaltyService {
       // Create system user for blockchain operations
       const systemUser = {
         userId: 'system',
-        orgName: 'OrgLandlord',
-        mspId: 'OrgLandlordMSP',
+        orgName: 'OrgProp',
+        mspId: 'OrgPropMSP',
       };
       await this.deductFromEscrow(
         contract.id,

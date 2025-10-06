@@ -22,8 +22,8 @@ export class BlockchainConfigService {
       walletPath: this.configService.get<string>('BLOCKCHAIN_WALLET_PATH', './src/modules/blockchain/wallet'),
       orgName: this.configService.get<string>('BLOCKCHAIN_ORG_NAME', 'OrgProp'),
       mspId: this.configService.get<string>('BLOCKCHAIN_MSP_ID', 'OrgPropMSP'),
-      discoveryAsLocalhost: this.configService.get<boolean>('DISCOVERY_AS_LOCALHOST', true),
-      connectionProfilePath: this.configService.get<string>('CONNECTION_PROFILE_PATH', '../network/connection-profile.json')
+      discoveryAsLocalhost: this.configService.get<boolean>('DISCOVERY_AS_LOCALHOST', false),
+      connectionProfilePath: this.configService.get<string>('CONNECTION_PROFILE_PATH', './assets/blockchain/connection-profile.json')
     };
   }
 
@@ -39,7 +39,7 @@ export class BlockchainConfigService {
           admin: 'admin-OrgProp',
           user: 'appUserProp'
         },
-        caUrl: this.configService.get<string>('CA_PROP_URL', 'https://localhost:7054')
+        caUrl: this.configService.get<string>('CA_PROP_URL', 'https://13.228.124.49:7054')
       },
       OrgTenant: {
         name: 'OrgTenant',
@@ -48,7 +48,7 @@ export class BlockchainConfigService {
           admin: 'admin-OrgTenant',
           user: 'appUserTenant'
         },
-        caUrl: this.configService.get<string>('CA_TENANT_URL', 'https://localhost:8054')
+        caUrl: this.configService.get<string>('CA_TENANT_URL', 'https://13.228.124.49:8054')
       },
       OrgLandlord: {
         name: 'OrgLandlord',
@@ -57,7 +57,7 @@ export class BlockchainConfigService {
           admin: 'admin-OrgLandlord',
           user: 'appUserLandlord'
         },
-        caUrl: this.configService.get<string>('CA_LANDLORD_URL', 'https://localhost:9054')
+        caUrl: this.configService.get<string>('CA_LANDLORD_URL', 'https://13.228.124.49:9054')
       }
     };
   }
@@ -107,12 +107,12 @@ export class BlockchainConfigService {
    */
   getNetworkEndpoints() {
     return {
-      peer: this.configService.get<string>('PEER_ENDPOINT', 'grpcs://localhost:7051'),
-      orderer: this.configService.get<string>('ORDERER_ENDPOINT', 'grpcs://localhost:7050'),
+      peer: this.configService.get<string>('PEER_ENDPOINT', 'grpcs://13.228.124.49:7051'),
+      orderer: this.configService.get<string>('ORDERER_ENDPOINT', 'grpcs://13.228.124.49:7050'),
       ca: {
-        orgProp: this.configService.get<string>('CA_PROP_URL', 'https://localhost:7054'),
-        orgTenant: this.configService.get<string>('CA_TENANT_URL', 'https://localhost:8054'),
-        orgLandlord: this.configService.get<string>('CA_LANDLORD_URL', 'https://localhost:9054')
+        orgProp: this.configService.get<string>('CA_PROP_URL', 'https://13.228.124.49:7054'),
+        orgTenant: this.configService.get<string>('CA_TENANT_URL', 'https://13.228.124.49:8054'),
+        orgLandlord: this.configService.get<string>('CA_LANDLORD_URL', 'https://13.228.124.49:9054')
       }
     };
   }

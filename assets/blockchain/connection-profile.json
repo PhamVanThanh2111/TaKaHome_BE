@@ -1,8 +1,13 @@
 {
   "name": "real-estate-network",
   "version": "1.0.0",
-  "client": {
-    "organization": "OrgProp",
+      "url": "grpcs://13.228.124.49:8051",
+      "tlsCACerts": {
+        "path": "./assets/blockchain/tls/peer0-orgtenant-ca.crt"
+      }, "client": {      "url": "grpcs://13.228.124.49:9051",
+      "tlsCACerts": {
+        "path": "./assets/blockchain/tls/peer0-orglandlord-ca.crt"
+      },    "organization": "OrgProp",
     "connection": {
       "timeout": {
         "peer": {
@@ -15,66 +20,85 @@
     "OrgProp": {
       "mspid": "OrgPropMSP",
       "peers": [
-        "peer0.orgprop.example.com"
+        "peer0.orgprop"
       ],
       "certificateAuthorities": [
-        "ca-orgprop"
+        "ca.orgprop"
       ]
     },
     "OrgTenant": {
       "mspid": "OrgTenantMSP",
       "peers": [
-        "peer0.orgtenant.example.com"
+        "peer0.orgtenant"
       ],
       "certificateAuthorities": [
-        "ca-orgtenant"
+        "ca.orgtenant"
       ]
     },
     "OrgLandlord": {
       "mspid": "OrgLandlordMSP",
       "peers": [
-        "peer0.orglandlord.example.com"
+        "peer0.orglandlord"
       ],
       "certificateAuthorities": [
-        "ca-orglandlord"
+        "ca.orglandlord"
       ]
     }
   },
   "peers": {
-    "peer0.orgprop.example.com": {
-      "url": "grpcs://localhost:7051",
+    "peer0.orgprop": {
+      "url": "grpcs://13.228.124.49:7051",
       "tlsCACerts": {
         "path": "./assets/blockchain/tls/peer0-orgprop-ca.crt"
       },
+
       "grpcOptions": {
         "ssl-target-name-override": "peer0.orgprop.example.com",
-        "hostnameOverride": "peer0.orgprop.example.com"
+        "grpc-max-send-message-length": 15728640,
+        "grpc-max-receive-message-length": 15728640,
+        "grpc.keepalive_time_ms": 120000,
+        "grpc.keepalive_timeout_ms": 20000,
+        "grpc.keepalive_permit_without_calls": 1,
+        "grpc.http2.max_pings_without_data": 0,
+        "grpc.http2.min_time_between_pings_ms": 120000
       }
     },
-    "peer0.orgtenant.example.com": {
-      "url": "grpcs://localhost:8051",
+    "peer0.orgtenant": {
+      "url": "grpcs://13.228.124.49:8051",
       "tlsCACerts": {
         "path": "./assets/blockchain/tls/peer0-orgtenant-ca.crt"
       },
       "grpcOptions": {
         "ssl-target-name-override": "peer0.orgtenant.example.com",
-        "hostnameOverride": "peer0.orgtenant.example.com"
+        "grpc-max-send-message-length": 15728640,
+        "grpc-max-receive-message-length": 15728640,
+        "grpc.keepalive_time_ms": 120000,
+        "grpc.keepalive_timeout_ms": 20000,
+        "grpc.keepalive_permit_without_calls": 1,
+        "grpc.http2.max_pings_without_data": 0,
+        "grpc.http2.min_time_between_pings_ms": 120000
       }
     },
-    "peer0.orglandlord.example.com": {
-      "url": "grpcs://localhost:9051",
+    "peer0.orglandlord": {
+      "url": "grpcs://13.228.124.49:9051",
       "tlsCACerts": {
         "path": "./assets/blockchain/tls/peer0-orglandlord-ca.crt"
       },
       "grpcOptions": {
         "ssl-target-name-override": "peer0.orglandlord.example.com",
-        "hostnameOverride": "peer0.orglandlord.example.com"
+        "grpc-max-send-message-length": 15728640,
+        "grpc-max-receive-message-length": 15728640,
+        "grpc.keepalive_time_ms": 120000,
+        "grpc.keepalive_timeout_ms": 20000,
+        "grpc.keepalive_permit_without_calls": 1,
+        "grpc.http2.max_pings_without_data": 0,
+        "grpc.http2.min_time_between_pings_ms": 120000
       }
     }
   },
   "certificateAuthorities": {
-    "ca-orgprop": {
-      "url": "https://localhost:7054",
+    "ca.orgprop": {
+      "url": "https://13.228.124.49:7054",
       "caName": "ca-orgprop",
       "tlsCACerts": {
         "path": "./assets/blockchain/tls/ca-orgprop.crt"
@@ -83,8 +107,8 @@
         "verify": false
       }
     },
-    "ca-orgtenant": {
-      "url": "https://localhost:8054",
+    "ca.orgtenant": {
+      "url": "https://13.228.124.49:8054",
       "caName": "ca-orgtenant",
       "tlsCACerts": {
         "path": "./assets/blockchain/tls/ca-orgtenant.crt"
@@ -93,8 +117,8 @@
         "verify": false
       }
     },
-    "ca-orglandlord": {
-      "url": "https://localhost:9054",
+    "ca.orglandlord": {
+      "url": "https://13.228.124.49:9054",
       "caName": "ca-orglandlord",
       "tlsCACerts": {
         "path": "./assets/blockchain/tls/ca-orglandlord.crt"
@@ -107,22 +131,22 @@
   "channels": {
     "rentalchannel": {
       "orderers": [
-        "orderer1.ordererorg.example.com"
+        "orderer1.ordererorg"
       ],
       "peers": {
-        "peer0.orgprop.example.com": {
+        "peer0.orgprop": {
           "endorsingPeer": true,
           "chaincodeQuery": true,
           "ledgerQuery": true,
           "eventSource": true
         },
-        "peer0.orgtenant.example.com": {
+        "peer0.orgtenant": {
           "endorsingPeer": true,
           "chaincodeQuery": true,
           "ledgerQuery": true,
           "eventSource": true
         },
-        "peer0.orglandlord.example.com": {
+        "peer0.orglandlord": {
           "endorsingPeer": true,
           "chaincodeQuery": true,
           "ledgerQuery": true,
@@ -132,14 +156,21 @@
     }
   },
   "orderers": {
-    "orderer1.ordererorg.example.com": {
-      "url": "grpcs://localhost:7050",
+    "orderer1.ordererorg": {
+      "url": "grpcs://13.228.124.49:7050",
       "tlsCACerts": {
         "path": "./assets/blockchain/tls/ca-orderer.crt"
       },
+
       "grpcOptions": {
         "ssl-target-name-override": "orderer1.ordererorg.example.com",
-        "hostnameOverride": "orderer1.ordererorg.example.com"
+        "grpc-max-send-message-length": 15728640,
+        "grpc-max-receive-message-length": 15728640,
+        "grpc.keepalive_time_ms": 120000,
+        "grpc.keepalive_timeout_ms": 20000,
+        "grpc.keepalive_permit_without_calls": 1,
+        "grpc.http2.max_pings_without_data": 0,
+        "grpc.http2.min_time_between_pings_ms": 120000
       }
     }
   }

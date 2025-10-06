@@ -141,7 +141,7 @@ export class BlockchainService implements OnModuleInit {
       await this.gateway.connect(ccp, {
         wallet: this.wallet,
         identity: identityLabel,
-        discovery: { enabled: true, asLocalhost: true }
+        discovery: { enabled: false, asLocalhost: false }
       });
 
       const fabricConfig = this.blockchainConfig.getFabricConfig();
