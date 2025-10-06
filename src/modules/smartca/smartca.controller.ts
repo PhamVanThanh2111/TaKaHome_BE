@@ -109,7 +109,7 @@ export class SmartCAController {
       signatureLength:
         body.signatureLength !== undefined
           ? Number(body.signatureLength)
-          : 65536, // Default 64KB for large ByteRange area + signature
+          : 4096, // Default 4KB - matches NEAC compliance (3993 bytes observed)
     });
 
     console.log('[PREPARE] Starting PDF preparation');
