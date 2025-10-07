@@ -190,6 +190,145 @@ export class SmartCAService {
   }
 
   /**
+   * OneShot PDF Signing: Complete signing flow in one function
+   * Steps: prepare placeholder -> sign with VNPT -> poll result -> embed CMS -> return signed PDF
+   */
+  public async signPdfOneShot(options: {
+    pdfBuffer: Buffer;
+    signatureIndex?: number;
+    userIdOverride?: string;
+    contractId?: string;
+    intervalMs?: number;
+    timeoutMs?: number;
+    // NEAC compliance metadata
+    reason?: string;
+    location?: string;
+    contactInfo?: string;
+    signerName?: string;
+    creator?: string;
+  }): Promise<{
+    success: boolean;
+    signedPdf?: Buffer;
+    error?: string;
+    transactionId?: string;
+    docId?: string;
+    metadata?: {
+      originalSize: number;
+      signedSize: number;
+      signatureIndex: number;
+      processingTimeMs: number;
+    };
+  }> {
+    const startTime = Date.now();
+
+    console.log('[OneShot] Starting complete PDF signing flow');
+
+    try {
+      const {
+        pdfBuffer,
+        signatureIndex = 0,
+        userIdOverride,
+        intervalMs = 2000,
+        timeoutMs = 120000,
+        reason = 'Digitally signed',
+        location = 'Vietnam',
+        contactInfo = '',
+        signerName = 'Digital Signature',
+        creator = 'SmartCA VNPT 2025',
+      } = options;
+
+      // Step 1: Prepare PDF with placeholder
+      console.log('[OneShot] Step 1: Preparing PDF placeholder');
+      const preparedPdf = this.preparePlaceholder(pdfBuffer, {
+        places: [
+          {
+            page: 0,
+            rect: [85, 750, 250, 800],
+            signatureLength: 4096,
+            reason,
+            location,
+            contactInfo,
+            name: signerName,
+            creator,
+          },
+        ],
+      });
+
+      console.log(
+        `[OneShot] PDF prepared: ${pdfBuffer.length} -> ${preparedPdf.length} bytes`,
+      );
+
+      // Step 2: Sign to CMS using VNPT SmartCA
+      console.log('[OneShot] Step 2: Signing with VNPT SmartCA');
+      const signResult = await this.signToCmsPades({
+        pdf: preparedPdf,
+        signatureIndex,
+        userIdOverride,
+        contractId: options.contractId,
+        intervalMs,
+        timeoutMs,
+      });
+
+      if (!signResult.cmsBase64) {
+        throw new Error('Failed to get CMS signature from VNPT');
+      }
+
+      console.log(
+        `[OneShot] Signature obtained: ${signResult.cmsBase64.length} chars CMS`,
+      );
+
+      // Step 3: Embed CMS into PDF
+      console.log('[OneShot] Step 3: Embedding CMS signature');
+      const signedPdf = this.embedCmsAtIndex(
+        preparedPdf,
+        signResult.cmsBase64,
+        signatureIndex,
+      );
+
+      const processingTime = Date.now() - startTime;
+
+      console.log(
+        `[OneShot] ✅ Signing completed successfully in ${processingTime}ms`,
+      );
+      console.log(`[OneShot] Final PDF size: ${signedPdf.length} bytes`);
+
+      return {
+        success: true,
+        signedPdf,
+        transactionId: signResult.transactionId,
+        docId: signResult.docId,
+        metadata: {
+          originalSize: pdfBuffer.length,
+          signedSize: signedPdf.length,
+          signatureIndex,
+          processingTimeMs: processingTime,
+        },
+      };
+    } catch (error) {
+      const processingTime = Date.now() - startTime;
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+
+      console.error('[OneShot] ❌ Signing failed:', errorMessage);
+      console.error(
+        '[OneShot] Processing time before failure:',
+        processingTime + 'ms',
+      );
+
+      return {
+        success: false,
+        error: errorMessage,
+        metadata: {
+          originalSize: options.pdfBuffer.length,
+          signedSize: 0,
+          signatureIndex: options.signatureIndex || 0,
+          processingTimeMs: processingTime,
+        },
+      };
+    }
+  }
+
+  /**
    * Apply safe NEAC compliance normalization to PDF (minimal changes to preserve content)
    */
   /**
@@ -520,6 +659,7 @@ export class SmartCAService {
     pdf: Buffer;
     signatureIndex?: number;
     userIdOverride?: string;
+    contractId?: string;
     intervalMs?: number;
     timeoutMs?: number;
   }) {
@@ -611,38 +751,30 @@ export class SmartCAService {
       fileSize: options.pdf.length,
     });
 
-    // 6) Lấy cert & serial với smart selection logic
+    // 6) Lấy cert & serial với auto-selection logic
     const certResp = await this.getCertificates({
-      userId: this.smartca.smartcaUserId,
+      userId: options.userIdOverride || this.smartca.smartcaUserId,
     });
     if (certResp.status !== 200 || !certResp.certificates?.length) {
       throw new BadRequestException(`get_certificate failed or empty`);
     }
 
-    // Smart certificate selection logic
-    let selectedCert;
-    if (certResp.certificates.length === 1) {
-      // Chỉ có 1 certificate → chọn cái đó
-      selectedCert = certResp.certificates[0];
-      console.log(
-        '[SMART-CERT] Only 1 certificate found, using it:',
-        selectedCert.serial_number,
-      );
-    } else {
-      // ≥2 certificates → chọn cái cuối cùng
-      selectedCert = certResp.certificates[certResp.certificates.length - 1];
-      console.log(
-        `[SMART-CERT] Found ${certResp.certificates.length} certificates, using last one:`,
-        selectedCert.serial_number,
-      );
-
-      // Log all available certificates for debugging
-      certResp.certificates.forEach((cert: any, idx: number) => {
-        console.log(
-          `  ${idx + 1}. ${cert.serial_number} (${cert.cert_status}) ${idx === certResp.certificates.length - 1 ? '← SELECTED' : ''}`,
-        );
-      });
+    // Use auto-selected latest certificate
+    if (!certResp.selectedSerialNumber) {
+      throw new BadRequestException('No certificate available for selection');
     }
+
+    const selectedCert = certResp.certificates.find(
+      (cert: any) => cert.serial_number === certResp.selectedSerialNumber,
+    );
+    if (!selectedCert) {
+      throw new BadRequestException(
+        `Auto-selected certificate ${certResp.selectedSerialNumber} not found`,
+      );
+    }
+    console.log(
+      `🎯 Using auto-selected latest certificate: ${certResp.selectedSerialNumber}`,
+    );
 
     const { signerPem, chainPem, serial } = this.extractPemChainFromGetCertResp(
       [selectedCert],
@@ -661,7 +793,11 @@ export class SmartCAService {
     const derHashB64 = derHashBytes.toString('base64');
 
     const transactionId = 'SP_CA_' + Date.now();
-    const docId = 'doc-' + randomUUID();
+    
+    // Generate docId with new format: 'doc-' + contractId (if provided, else randomUUID) + role
+    const role = signatureIndex === 0 ? 'LANDLORD' : 'TENANT';
+    const baseId = options.contractId?.trim() || randomUUID();
+    const docId = `doc-${baseId}-${role}`;
 
     await this.requestSmartCASignByHash({
       digestHex: derHashHex,
@@ -869,7 +1005,6 @@ export class SmartCAService {
 
   public async getCertificates(options?: {
     userId?: string;
-    serialNumber?: string; // nếu bạn đã biết serial (khuyến nghị truyền vào)
     serviceType?: 'ESEAL' | 'ESIGN'; // nếu biết loại dịch vụ, truyền vào để đỡ fallback
     transactionId?: string;
   }) {
@@ -899,42 +1034,48 @@ export class SmartCAService {
       const certs = Array.isArray(list)
         ? list.map(this.normalizeCertItem.bind(this))
         : [];
+
+      // Auto-select latest certificate if available
+      let selectedSerialNumber: string | undefined;
+      if (certs.length > 0) {
+        // Get the last certificate (newest)
+        const latestCert = certs[certs.length - 1] as any;
+        selectedSerialNumber = latestCert.serial_number;
+        console.log(
+          `🎯 Auto-selected latest certificate: ${selectedSerialNumber}`,
+        );
+      }
+
       return {
         status: res.status,
         url,
         request: payload,
         response: raw,
         certificates: certs,
+        selectedSerialNumber, // Return the auto-selected serial number
       };
     };
 
-    // 1) Ưu tiên theo yêu cầu cụ thể của bạn (serial/service_type)
+    // 1) Try with specified serviceType or no filter
     const first = await attempt({
-      ...(options?.serialNumber ? { serial_number: options.serialNumber } : {}),
       ...(options?.serviceType ? { service_type: options.serviceType } : {}),
     });
     if (first.status === 200 && first.certificates.length) return first;
 
-    // 2) Nếu chưa có kết quả và bạn KHÔNG truyền serviceType: thử ESEAL → ESIGN
+    // 2) If no serviceType specified: try ESEAL → ESIGN
     if (!options?.serviceType) {
       const second = await attempt({
         service_type: 'ESEAL',
-        ...(options?.serialNumber
-          ? { serial_number: options.serialNumber }
-          : {}),
       });
       if (second.status === 200 && second.certificates.length) return second;
 
       const third = await attempt({
         service_type: 'ESIGN',
-        ...(options?.serialNumber
-          ? { serial_number: options.serialNumber }
-          : {}),
       });
       if (third.status === 200 && third.certificates.length) return third;
     }
 
-    // 3) Không tìm thấy -> trả data để bạn debug
+    // 3) No certificates found -> return first attempt data for debugging
     return first;
   }
 

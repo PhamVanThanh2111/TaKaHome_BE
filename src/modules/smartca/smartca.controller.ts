@@ -19,6 +19,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { PreparePDFDto } from '../contract/dto/prepare-pdf.dto';
 import { Response } from 'express';
 import { Place } from './types/smartca.types';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @ApiBearerAuth()
 @Controller('smartca')
@@ -157,6 +159,10 @@ export class SmartCAController {
         intervalMs: { type: 'integer', default: 2000 },
         timeoutMs: { type: 'integer', default: 120000 },
         userIdOverride: { type: 'string' },
+        contractId: {
+          type: 'string',
+          description: 'Contract ID for docId generation',
+        },
       },
     },
   })
@@ -166,6 +172,7 @@ export class SmartCAController {
     @Body('intervalMs') intervalMsRaw?: string,
     @Body('timeoutMs') timeoutMsRaw?: string,
     @Body('userIdOverride') userIdOverride?: string,
+    @Body('contractId') contractId?: string,
   ) {
     if (!file?.buffer?.length)
       throw new BadRequestException('Missing file "pdf"');
@@ -189,6 +196,7 @@ export class SmartCAController {
         pdf: Buffer.from(file.buffer),
         signatureIndex,
         userIdOverride: userIdOverride?.trim() || undefined,
+        contractId: contractId?.trim() || undefined,
         intervalMs,
         timeoutMs,
       });
@@ -385,5 +393,126 @@ export class SmartCAController {
       totalCertificates: certificates.length,
       certificates,
     };
+  }
+
+  @Post('sign-oneshot')
+  @ApiOperation({
+    summary: 'OneShot PDF Signing - Complete flow trong 1 API',
+    description:
+      'Thực hiện toàn bộ flow: prepare → sign via VNPT → poll → embed CMS → return signed PDF sử dụng file PDF từ assets',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        signatureIndex: { type: 'integer', default: 0 },
+        userIdOverride: { type: 'string' },
+        contractId: {
+          type: 'string',
+          description: 'Contract ID for docId generation',
+        },
+        intervalMs: { type: 'integer', default: 2000 },
+        timeoutMs: { type: 'integer', default: 120000 },
+        reason: { type: 'string', default: 'Digitally signed' },
+        location: { type: 'string', default: 'Vietnam' },
+        contactInfo: { type: 'string' },
+        signerName: { type: 'string', default: 'Digital Signature' },
+        creator: { type: 'string', default: 'SmartCA VNPT 2025' },
+      },
+    },
+  })
+  async signOneShot(
+    @Body()
+    body: {
+      signatureIndex?: string;
+      userIdOverride?: string;
+      contractId?: string;
+      intervalMs?: string;
+      timeoutMs?: string;
+      reason?: string;
+      location?: string;
+      contactInfo?: string;
+      signerName?: string;
+      creator?: string;
+    },
+    @Res() res: Response,
+  ) {
+    console.log('[OneShot API] Starting complete PDF signing workflow');
+
+    try {
+      // Read PDF file from assets
+      const pdfPath = path.join(
+        process.cwd(),
+        'src',
+        'assets',
+        'contracts',
+        'HopDongChoThueNhaNguyenCan.pdf',
+      );
+
+      if (!fs.existsSync(pdfPath)) {
+        throw new BadRequestException(`PDF file not found at: ${pdfPath}`);
+      }
+
+      const pdfBuffer = fs.readFileSync(pdfPath);
+      console.log(
+        `[OneShot API] Loaded PDF from assets: ${pdfBuffer.length} bytes`,
+      );
+
+      const result = await this.smartcaService.signPdfOneShot({
+        pdfBuffer,
+        signatureIndex: body.signatureIndex ? Number(body.signatureIndex) : 0,
+        userIdOverride: body.userIdOverride?.trim() || undefined,
+        contractId: body.contractId?.trim() || undefined,
+        intervalMs: body.intervalMs ? Number(body.intervalMs) : 2000,
+        timeoutMs: body.timeoutMs ? Number(body.timeoutMs) : 120000,
+        reason: body.reason?.trim() || 'Digitally signed',
+        location: body.location?.trim() || 'Vietnam',
+        contactInfo: body.contactInfo?.trim() || '',
+        signerName: body.signerName?.trim() || 'Digital Signature',
+        creator: body.creator?.trim() || 'SmartCA VNPT 2025',
+      });
+
+      if (!result.success) {
+        return res.status(500).json({
+          success: false,
+          message: 'SIGNING_FAILED',
+          error: result.error,
+          metadata: result.metadata,
+        });
+      }
+
+      console.log('[OneShot API] ✅ Signing completed successfully');
+
+      // Return signed PDF
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        'attachment; filename="signed-oneshot.pdf"',
+      );
+      res.setHeader('Content-Length', String(result.signedPdf!.length));
+
+      // Add metadata to response headers for debugging
+      res.setHeader('X-Transaction-Id', result.transactionId || '');
+      res.setHeader('X-Doc-Id', result.docId || '');
+      res.setHeader(
+        'X-Processing-Time',
+        String(result.metadata?.processingTimeMs || 0),
+      );
+      res.setHeader(
+        'X-Original-Size',
+        String(result.metadata?.originalSize || 0),
+      );
+      res.setHeader('X-Signed-Size', String(result.metadata?.signedSize || 0));
+
+      return res.end(result.signedPdf);
+    } catch (error) {
+      console.error('[OneShot API] ❌ Error:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: 'ONESHOT_ERROR',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
   }
 }
