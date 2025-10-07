@@ -113,7 +113,7 @@ export class SmartCAController {
     });
 
     console.log('[PREPARE] Starting PDF preparation');
-    
+
     const prepared = this.smartcaService.preparePlaceholder(
       Buffer.from(file.buffer),
       {
@@ -313,5 +313,52 @@ export class SmartCAController {
     return this.smartcaService.debugScanSignatures(file.buffer) as Array<
       Record<string, unknown>
     >;
+  }
+
+  @Post('list-certificates')
+  @ApiOperation({
+    summary: 'Lấy danh sách chứng thư số của user',
+    description:
+      'Liệt kê tất cả certificates để user chọn serial_number cho signing',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        userIdOverride: {
+          type: 'string',
+          description: 'User ID override (optional)',
+        },
+      },
+    },
+  })
+  async listCertificates(@Body('userIdOverride') userIdOverride?: string) {
+    const result = await this.smartcaService.getCertificates({
+      userId: userIdOverride?.trim() || undefined,
+    });
+
+    if (result.status !== 200) {
+      throw new BadRequestException(
+        `Failed to get certificates: ${result.status}`,
+      );
+    }
+
+    // Format response để dễ đọc
+    const certificates = result.certificates.map((cert: any) => ({
+      serial_number: cert.serial_number,
+      cert_status: cert.cert_status,
+      cert_status_code: cert.cert_status_code,
+      valid_from: cert.valid_from,
+      valid_to: cert.valid_to,
+      subject: cert.subject,
+      issuer: cert.issuer,
+      service_type: cert.service_type,
+    }));
+
+    return {
+      message: 'SUCCESS',
+      totalCertificates: certificates.length,
+      certificates,
+    };
   }
 }

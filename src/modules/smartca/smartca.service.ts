@@ -511,15 +511,41 @@ export class SmartCAService {
       fileSize: options.pdf.length,
     });
 
-    // 6) Lấy cert & serial (GIỮ NGUYÊN logic cũ của bạn)
+    // 6) Lấy cert & serial với smart selection logic
     const certResp = await this.getCertificates({
       userId: this.smartca.smartcaUserId,
     });
     if (certResp.status !== 200 || !certResp.certificates?.length) {
       throw new BadRequestException(`get_certificate failed or empty`);
     }
+
+    // Smart certificate selection logic
+    let selectedCert;
+    if (certResp.certificates.length === 1) {
+      // Chỉ có 1 certificate → chọn cái đó
+      selectedCert = certResp.certificates[0];
+      console.log(
+        '[SMART-CERT] Only 1 certificate found, using it:',
+        selectedCert.serial_number,
+      );
+    } else {
+      // ≥2 certificates → chọn cái cuối cùng
+      selectedCert = certResp.certificates[certResp.certificates.length - 1];
+      console.log(
+        `[SMART-CERT] Found ${certResp.certificates.length} certificates, using last one:`,
+        selectedCert.serial_number,
+      );
+
+      // Log all available certificates for debugging
+      certResp.certificates.forEach((cert: any, idx: number) => {
+        console.log(
+          `  ${idx + 1}. ${cert.serial_number} (${cert.cert_status}) ${idx === certResp.certificates.length - 1 ? '← SELECTED' : ''}`,
+        );
+      });
+    }
+
     const { signerPem, chainPem, serial } = this.extractPemChainFromGetCertResp(
-      certResp.certificates,
+      [selectedCert],
     );
     if (!serial) throw new BadRequestException('No serial_number');
 
