@@ -18,6 +18,9 @@ import { SmartCAService } from './smartca.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { PreparePDFDto } from '../contract/dto/prepare-pdf.dto';
 import { Response } from 'express';
+import { Place } from './types/smartca.types';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @ApiBearerAuth()
 @Controller('smartca')
@@ -29,7 +32,7 @@ export class SmartCAController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary:
-      'Chuẩn bị PDF: thêm placeholder chữ ký (2 vị trí) với ByteRange placeholders (*)',
+      'Chuẩn bị PDF: thêm 1 placeholder chữ ký với ByteRange placeholders (*)',
   })
   @ApiBody({ type: PreparePDFDto })
   prepare(
@@ -102,31 +105,24 @@ export class SmartCAController {
       signatureLength?: number;
     }> = [];
 
-    // placeholder #1
-    places.push({
+    // Create single placeholder
+    const place: Place = {
       page: body.page !== undefined ? Number(body.page) : undefined,
       rect: parseRect(body.rect),
       signatureLength:
         body.signatureLength !== undefined
           ? Number(body.signatureLength)
-          : 65536, // Default 64KB for large ByteRange area + signature
-    });
+          : 4096, // Default 4KB - matches NEAC compliance (3993 bytes observed)
+      // NEAC compliance metadata
+      reason: body.reason?.trim() || 'Digitally signed',
+      location: body.location?.trim() || 'Vietnam',
+      contactInfo: body.contactInfo?.trim() || '',
+      name: body.signerName?.trim() || 'Digital Signature',
+      creator: body.creator?.trim() || 'SmartCA VNPT 2025',
+    };
+    places.push(place);
 
-    // placeholder #2 (optional)
-    const hasSecond =
-      body.page2 !== undefined ||
-      body.rect2 !== undefined ||
-      body.signatureLength2 !== undefined;
-    if (hasSecond) {
-      places.push({
-        page: body.page2 !== undefined ? Number(body.page2) : undefined,
-        rect: parseRect(body.rect2),
-        signatureLength:
-          body.signatureLength2 !== undefined
-            ? Number(body.signatureLength2)
-            : 65536, // Default 64KB for large ByteRange area + signature
-      });
-    }
+    console.log('[PREPARE] Starting PDF preparation');
 
     const prepared = this.smartcaService.preparePlaceholder(
       Buffer.from(file.buffer),
@@ -134,6 +130,8 @@ export class SmartCAController {
         places,
       },
     );
+
+    console.log('[PREPARE] PDF preparation completed');
 
     // REMOVED: No longer finalize ByteRange in /prepare - it will be done in /embed-cms
     // const finalized = this.smartcaService.finalizeAllByteRanges(prepared);
@@ -161,6 +159,10 @@ export class SmartCAController {
         intervalMs: { type: 'integer', default: 2000 },
         timeoutMs: { type: 'integer', default: 120000 },
         userIdOverride: { type: 'string' },
+        contractId: {
+          type: 'string',
+          description: 'Contract ID for docId generation',
+        },
       },
     },
   })
@@ -170,6 +172,7 @@ export class SmartCAController {
     @Body('intervalMs') intervalMsRaw?: string,
     @Body('timeoutMs') timeoutMsRaw?: string,
     @Body('userIdOverride') userIdOverride?: string,
+    @Body('contractId') contractId?: string,
   ) {
     if (!file?.buffer?.length)
       throw new BadRequestException('Missing file "pdf"');
@@ -188,25 +191,43 @@ export class SmartCAController {
       `[POST] /contracts/smartca/sign-to-cms with signatureIndex: ${signatureIndex}`,
     );
 
-    const result = await this.smartcaService.signToCmsPades({
-      pdf: Buffer.from(file.buffer),
-      signatureIndex,
-      userIdOverride: userIdOverride?.trim() || undefined,
-      intervalMs,
-      timeoutMs,
-    });
+    try {
+      const result = await this.smartcaService.signToCmsPades({
+        pdf: Buffer.from(file.buffer),
+        signatureIndex,
+        userIdOverride: userIdOverride?.trim() || undefined,
+        contractId: contractId?.trim() || undefined,
+        intervalMs,
+        timeoutMs,
+      });
 
-    // Trả JSON (để client dùng cmsBase64 gọi /embed-cms)
-    return {
-      message: 'CMS_READY',
-      cmsBase64: result.cmsBase64,
-      transactionId: result.transactionId,
-      docId: result.docId,
-      signatureIndex: result.signatureIndex,
-      byteRange: result.byteRange,
-      pdfLength: result.pdfLength,
-      digestHex: result.digestHex,
-    };
+      // Trả JSON (để client dùng cmsBase64 gọi /embed-cms)
+      return {
+        message: 'CMS_READY',
+        cmsBase64: result.cmsBase64,
+        transactionId: result.transactionId,
+        docId: result.docId,
+        signatureIndex: result.signatureIndex,
+        byteRange: result.byteRange,
+        pdfLength: result.pdfLength,
+        digestHex: result.digestHex,
+      };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Unknown error during signing process';
+      const errorStatus = Number((error as any)?.status) || 500;
+
+      console.error('[SIGN-TO-CMS] Error:', errorMessage);
+
+      // Ensure JSON response even on error
+      return {
+        message: 'SIGNING_FAILED',
+        error: errorMessage,
+        code: errorStatus,
+      };
+    }
   }
 
   @Post('embed-cms')
@@ -291,9 +312,207 @@ export class SmartCAController {
       signatureIndex,
     );
 
+    console.log(`[EMBED-CMS] PDF signed successfully`);
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="signed.pdf"');
     res.setHeader('Content-Length', String(signed.length));
     return res.end(signed);
+  }
+
+  @Post('debug/scan')
+  @ApiOperation({
+    summary: 'Quét chữ ký trong PDF (debug)',
+    description:
+      'Đọc PDF và trả thông tin từng chữ ký: vị trí <...>, /ByteRange (bên trong đúng signature dictionary), v.v.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+      },
+      required: ['file'],
+    },
+  })
+  @UseInterceptors(FileInterceptor('file'))
+  scan(
+    @UploadedFile() file: Express.Multer.File,
+  ): Array<Record<string, unknown>> {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('PDF file is required');
+    }
+    return this.smartcaService.debugScanSignatures(file.buffer) as Array<
+      Record<string, unknown>
+    >;
+  }
+
+  @Post('list-certificates')
+  @ApiOperation({
+    summary: 'Lấy danh sách chứng thư số của user',
+    description:
+      'Liệt kê tất cả certificates để user chọn serial_number cho signing',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        userIdOverride: {
+          type: 'string',
+          description: 'User ID override (optional)',
+        },
+      },
+    },
+  })
+  async listCertificates(@Body('userIdOverride') userIdOverride?: string) {
+    const result = await this.smartcaService.getCertificates({
+      userId: userIdOverride?.trim() || undefined,
+    });
+
+    if (result.status !== 200) {
+      throw new BadRequestException(
+        `Failed to get certificates: ${result.status}`,
+      );
+    }
+
+    // Format response để dễ đọc
+    const certificates = result.certificates.map((cert: any) => ({
+      serial_number: cert.serial_number,
+      cert_status: cert.cert_status,
+      cert_status_code: cert.cert_status_code,
+      valid_from: cert.valid_from,
+      valid_to: cert.valid_to,
+      subject: cert.subject,
+      issuer: cert.issuer,
+      service_type: cert.service_type,
+    }));
+
+    return {
+      message: 'SUCCESS',
+      totalCertificates: certificates.length,
+      certificates,
+    };
+  }
+
+  @Post('sign-oneshot')
+  @ApiOperation({
+    summary: 'OneShot PDF Signing - Complete flow trong 1 API',
+    description:
+      'Thực hiện toàn bộ flow: prepare → sign via VNPT → poll → embed CMS → return signed PDF sử dụng file PDF từ assets',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        signatureIndex: { type: 'integer', default: 0 },
+        userIdOverride: { type: 'string' },
+        contractId: {
+          type: 'string',
+          description: 'Contract ID for docId generation',
+        },
+        intervalMs: { type: 'integer', default: 2000 },
+        timeoutMs: { type: 'integer', default: 120000 },
+        reason: { type: 'string', default: 'Digitally signed' },
+        location: { type: 'string', default: 'Vietnam' },
+        contactInfo: { type: 'string' },
+        signerName: { type: 'string', default: 'Digital Signature' },
+        creator: { type: 'string', default: 'SmartCA VNPT 2025' },
+      },
+    },
+  })
+  async signOneShot(
+    @Body()
+    body: {
+      signatureIndex?: string;
+      userIdOverride?: string;
+      contractId?: string;
+      intervalMs?: string;
+      timeoutMs?: string;
+      reason?: string;
+      location?: string;
+      contactInfo?: string;
+      signerName?: string;
+      creator?: string;
+    },
+    @Res() res: Response,
+  ) {
+    console.log('[OneShot API] Starting complete PDF signing workflow');
+
+    try {
+      // Read PDF file from assets
+      const pdfPath = path.join(
+        process.cwd(),
+        'src',
+        'assets',
+        'contracts',
+        'HopDongChoThueNhaNguyenCan.pdf',
+      );
+
+      if (!fs.existsSync(pdfPath)) {
+        throw new BadRequestException(`PDF file not found at: ${pdfPath}`);
+      }
+
+      const pdfBuffer = fs.readFileSync(pdfPath);
+      console.log(
+        `[OneShot API] Loaded PDF from assets: ${pdfBuffer.length} bytes`,
+      );
+
+      const result = await this.smartcaService.signPdfOneShot({
+        pdfBuffer,
+        signatureIndex: body.signatureIndex ? Number(body.signatureIndex) : 0,
+        userIdOverride: body.userIdOverride?.trim() || undefined,
+        contractId: body.contractId?.trim() || undefined,
+        intervalMs: body.intervalMs ? Number(body.intervalMs) : 2000,
+        timeoutMs: body.timeoutMs ? Number(body.timeoutMs) : 120000,
+        reason: body.reason?.trim() || 'Digitally signed',
+        location: body.location?.trim() || 'Vietnam',
+        contactInfo: body.contactInfo?.trim() || '',
+        signerName: body.signerName?.trim() || 'Digital Signature',
+        creator: body.creator?.trim() || 'SmartCA VNPT 2025',
+      });
+
+      if (!result.success) {
+        return res.status(500).json({
+          success: false,
+          message: 'SIGNING_FAILED',
+          error: result.error,
+          metadata: result.metadata,
+        });
+      }
+
+      console.log('[OneShot API] ✅ Signing completed successfully');
+
+      // Return signed PDF
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        'attachment; filename="signed-oneshot.pdf"',
+      );
+      res.setHeader('Content-Length', String(result.signedPdf!.length));
+
+      // Add metadata to response headers for debugging
+      res.setHeader('X-Transaction-Id', result.transactionId || '');
+      res.setHeader('X-Doc-Id', result.docId || '');
+      res.setHeader(
+        'X-Processing-Time',
+        String(result.metadata?.processingTimeMs || 0),
+      );
+      res.setHeader(
+        'X-Original-Size',
+        String(result.metadata?.originalSize || 0),
+      );
+      res.setHeader('X-Signed-Size', String(result.metadata?.signedSize || 0));
+
+      return res.end(result.signedPdf);
+    } catch (error) {
+      console.error('[OneShot API] ❌ Error:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: 'ONESHOT_ERROR',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
   }
 }

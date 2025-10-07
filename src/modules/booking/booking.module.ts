@@ -5,9 +5,16 @@ import { BookingService } from './booking.service';
 import { BookingController } from './booking.controller';
 import { BookingCronService } from './booking-cron.service';
 import { ContractModule } from '../contract/contract.module';
+import { SmartCAModule } from '../smartca/smartca.module';
+import { S3StorageModule } from '../s3-storage/s3-storage.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Booking]), ContractModule],
+  imports: [
+    TypeOrmModule.forFeature([Booking]),
+    ContractModule,
+    SmartCAModule,
+    S3StorageModule,
+  ],
   controllers: [BookingController],
   providers: [BookingService, BookingCronService],
   exports: [BookingService, TypeOrmModule],

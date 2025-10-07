@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsNumberString, IsString } from 'class-validator';
+import { IsOptional, IsNumberString, IsString, IsEmail } from 'class-validator';
 
 export class PreparePDFDto {
   @ApiProperty({
@@ -25,25 +25,50 @@ export class PreparePDFDto {
 
   @ApiPropertyOptional({
     description: 'Độ dài vùng Contents',
-    example: '36864',
+    example: '4096',
   })
   @IsOptional()
   @IsNumberString()
   signatureLength?: string;
 
-  // placeholder #2
-  @ApiPropertyOptional({ example: '0' })
-  @IsOptional()
-  @IsNumberString()
-  page2?: string;
-
-  @ApiPropertyOptional({ example: '[300,50,500,120]' })
+  // === NEAC Compliance Fields ===
+  @ApiPropertyOptional({
+    description: 'Lý do ký (Reason)',
+    example: 'Ký hợp đồng thuê nhà',
+  })
   @IsOptional()
   @IsString()
-  rect2?: string;
+  reason?: string;
 
-  @ApiPropertyOptional({ example: '36864' })
+  @ApiPropertyOptional({
+    description: 'Địa điểm ký (Location)',
+    example: 'Hà Nội, Việt Nam',
+  })
   @IsOptional()
-  @IsNumberString()
-  signatureLength2?: string;
+  @IsString()
+  location?: string;
+
+  @ApiPropertyOptional({
+    description: 'Email liên hệ (ContactInfo)',
+    example: 'thanhpham21dev@gmail.com',
+  })
+  @IsOptional()
+  @IsEmail()
+  contactInfo?: string;
+
+  @ApiPropertyOptional({
+    description: 'Tên người ký (Name)',
+    example: 'Phạm Văn Thành',
+  })
+  @IsOptional()
+  @IsString()
+  signerName?: string;
+
+  @ApiPropertyOptional({
+    description: 'Creator/Application name',
+    example: 'SmartCA VNPT 2025',
+  })
+  @IsOptional()
+  @IsString()
+  creator?: string;
 }
