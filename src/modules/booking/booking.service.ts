@@ -15,6 +15,9 @@ import { Contract } from '../contract/entities/contract.entity';
 import { ContractService } from '../contract/contract.service';
 import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 import { VN_TZ, addDaysVN, addHoursVN, vnNow } from '../../common/datetime';
+import { SmartCAService } from '../smartca/smartca.service';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class BookingService {
@@ -22,6 +25,7 @@ export class BookingService {
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
     private contractService: ContractService,
+    private smartcaService: SmartCAService,
   ) {}
 
   async create(dto: CreateBookingDto): Promise<ResponseCommon<Booking>> {
@@ -38,8 +42,72 @@ export class BookingService {
   async landlordApprove(id: string): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.PENDING_LANDLORD]);
-    booking.status = BookingStatus.PENDING_SIGNATURE;
+
+    // Ensure contract exists before landlord signing
     const contract = await this.ensureContractForBooking(booking);
+    if (!contract) {
+      throw new BadRequestException(
+        'Failed to create or retrieve contract for landlord approval',
+      );
+    }
+
+    console.log('[LandlordApprove] Starting landlord PDF signing process');
+
+    try {
+      // Read PDF file from assets
+      const pdfPath = path.join(
+        process.cwd(),
+        'src',
+        'assets',
+        'contracts',
+        'HopDongChoThueNhaNguyenCan.pdf',
+      );
+
+      if (!fs.existsSync(pdfPath)) {
+        throw new BadRequestException(`PDF file not found at: ${pdfPath}`);
+      }
+
+      const pdfBuffer = fs.readFileSync(pdfPath);
+      console.log(
+        `[LandlordApprove] Loaded PDF from assets: ${pdfBuffer.length} bytes`,
+      );
+
+      // Landlord signs the contract (signatureIndex: 0)
+      const signResult = await this.smartcaService.signPdfOneShot({
+        pdfBuffer,
+        signatureIndex: 0, // Landlord signature index
+        contractId: contract.id,
+        intervalMs: 2000,
+        timeoutMs: 120000,
+        reason: 'Landlord Contract Approval',
+        location: 'Vietnam',
+        contactInfo: '',
+        signerName: 'Landlord Digital Signature',
+        creator: 'SmartCA VNPT 2025',
+      });
+
+      if (!signResult.success) {
+        throw new BadRequestException(
+          `Landlord signing failed: ${signResult.error}`,
+        );
+      }
+
+      console.log(
+        '[LandlordApprove] ✅ Landlord signing completed successfully',
+      );
+
+      // TODO: Save the signed PDF somewhere if needed
+      // For now, we just proceed with the status update
+    } catch (error) {
+      console.error('[LandlordApprove] ❌ Landlord signing failed:', error);
+      throw new BadRequestException(
+        `Failed to complete landlord signing: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+
+    // After successful signing, update booking status
+    booking.status = BookingStatus.PENDING_SIGNATURE;
+
     if (contract) {
       booking.contract = contract;
       booking.contractId = contract.id;
