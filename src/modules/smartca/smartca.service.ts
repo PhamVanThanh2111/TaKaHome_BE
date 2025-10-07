@@ -106,6 +106,10 @@ export class SmartCAService {
         // Try original @signpdf approach first
         out = Buffer.from(plainAddPlaceholder(opts));
         console.log('✅ Placeholder created successfully with @signpdf');
+        
+        // Enhance signature dictionary for NEAC compliance
+        out = this.enhanceSignatureDictForNeac(out, p);
+        console.log('✅ Enhanced signature dictionary for NEAC compliance');
       } catch (error) {
         console.warn(
           '⚠️ @signpdf failed, using safe fallback approach:',
@@ -188,6 +192,102 @@ export class SmartCAService {
   /**
    * Apply safe NEAC compliance normalization to PDF (minimal changes to preserve content)
    */
+  /**
+   * Enhance signature dictionary for NEAC compliance
+   */
+  private enhanceSignatureDictForNeac(pdfBuffer: Buffer, place: Place): Buffer {
+    try {
+      const pdfStr = pdfBuffer.toString('latin1');
+
+      // Find signature dictionary pattern
+      const sigDictPattern =
+        /(\d+\s+\d+\s+obj\s*<<[^>]*\/Type\s*\/Sig[^>]*>>)/g;
+      let match;
+      let modifiedPdfStr = pdfStr;
+
+      while ((match = sigDictPattern.exec(pdfStr)) !== null) {
+        const originalDict = match[1];
+
+        // Extract current dictionary content
+        const dictStart = originalDict.indexOf('<<');
+        const dictEnd = originalDict.lastIndexOf('>>');
+        const dictContent = originalDict.slice(dictStart + 2, dictEnd);
+
+        // Build NEAC-compliant dictionary
+        let enhancedDict = dictContent;
+
+        // Add Creator if specified
+        if (place.creator && !enhancedDict.includes('/Creator')) {
+          enhancedDict += `\n/Creator (${place.creator})`;
+        }
+
+        // Add/update Reason
+        if (place.reason) {
+          if (enhancedDict.includes('/Reason')) {
+            enhancedDict = enhancedDict.replace(
+              /\/Reason\s*\([^)]*\)/,
+              `/Reason (${place.reason})`,
+            );
+          } else {
+            enhancedDict += `\n/Reason (${place.reason})`;
+          }
+        }
+
+        // Add/update Location
+        if (place.location) {
+          if (enhancedDict.includes('/Location')) {
+            enhancedDict = enhancedDict.replace(
+              /\/Location\s*\([^)]*\)/,
+              `/Location (${place.location})`,
+            );
+          } else {
+            enhancedDict += `\n/Location (${place.location})`;
+          }
+        }
+
+        // Add/update ContactInfo with email
+        if (place.contactInfo) {
+          if (enhancedDict.includes('/ContactInfo')) {
+            enhancedDict = enhancedDict.replace(
+              /\/ContactInfo\s*\([^)]*\)/,
+              `/ContactInfo (${place.contactInfo})`,
+            );
+          } else {
+            enhancedDict += `\n/ContactInfo (${place.contactInfo})`;
+          }
+        }
+
+        // Enhance M (timestamp) format for NEAC compliance
+        const currentTime = new Date();
+        const timezone = "+07'00'"; // Vietnam timezone
+        const neacTimestamp = `D:${currentTime.getFullYear()}${String(currentTime.getMonth() + 1).padStart(2, '0')}${String(currentTime.getDate()).padStart(2, '0')}${String(currentTime.getHours()).padStart(2, '0')}${String(currentTime.getMinutes()).padStart(2, '0')}${String(currentTime.getSeconds()).padStart(2, '0')}${timezone}`;
+
+        if (enhancedDict.includes('/M')) {
+          enhancedDict = enhancedDict.replace(
+            /\/M\s*\([^)]*\)/,
+            `/M (${neacTimestamp})`,
+          );
+        } else {
+          enhancedDict += `\n/M (${neacTimestamp})`;
+        }
+
+        // Reconstruct enhanced dictionary
+        const enhancedSigDict = originalDict.replace(dictContent, enhancedDict);
+
+        // Replace in PDF string
+        modifiedPdfStr = modifiedPdfStr.replace(originalDict, enhancedSigDict);
+      }
+
+      console.log(
+        '✅ Enhanced signature dictionary with NEAC-compliant metadata',
+      );
+      return Buffer.from(modifiedPdfStr, 'latin1');
+    } catch (error) {
+      console.warn('⚠️ Failed to enhance signature dictionary:', error.message);
+      return pdfBuffer; // Return original if enhancement fails
+    }
+  }
+
   private applySafeNeacNormalization(pdfBuffer: Buffer): Buffer {
     console.log(
       '[applySafeNeacNormalization] Applying minimal NEAC compliance fixes',
@@ -578,6 +678,13 @@ export class SmartCAService {
       intervalMs: options.intervalMs ?? 2000,
       timeoutMs: options.timeoutMs ?? 180000,
     });
+
+    // Check for polling errors first
+    if ((poll as any).error) {
+      throw new BadRequestException(
+        `SmartCA signing failed: ${(poll as any).error}`,
+      );
+    }
 
     const raw = (poll as any).raw?.data ?? {};
     const st = raw?.status_code;

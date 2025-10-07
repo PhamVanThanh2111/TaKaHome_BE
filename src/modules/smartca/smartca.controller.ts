@@ -18,6 +18,7 @@ import { SmartCAService } from './smartca.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { PreparePDFDto } from '../contract/dto/prepare-pdf.dto';
 import { Response } from 'express';
+import { Place } from './types/smartca.types';
 
 @ApiBearerAuth()
 @Controller('smartca')
@@ -103,14 +104,21 @@ export class SmartCAController {
     }> = [];
 
     // Create single placeholder
-    places.push({
+    const place: Place = {
       page: body.page !== undefined ? Number(body.page) : undefined,
       rect: parseRect(body.rect),
       signatureLength:
         body.signatureLength !== undefined
           ? Number(body.signatureLength)
           : 4096, // Default 4KB - matches NEAC compliance (3993 bytes observed)
-    });
+      // NEAC compliance metadata
+      reason: body.reason?.trim() || 'Digitally signed',
+      location: body.location?.trim() || 'Vietnam',
+      contactInfo: body.contactInfo?.trim() || '',
+      name: body.signerName?.trim() || 'Digital Signature',
+      creator: body.creator?.trim() || 'SmartCA VNPT 2025',
+    };
+    places.push(place);
 
     console.log('[PREPARE] Starting PDF preparation');
 
@@ -176,25 +184,42 @@ export class SmartCAController {
       `[POST] /contracts/smartca/sign-to-cms with signatureIndex: ${signatureIndex}`,
     );
 
-    const result = await this.smartcaService.signToCmsPades({
-      pdf: Buffer.from(file.buffer),
-      signatureIndex,
-      userIdOverride: userIdOverride?.trim() || undefined,
-      intervalMs,
-      timeoutMs,
-    });
+    try {
+      const result = await this.smartcaService.signToCmsPades({
+        pdf: Buffer.from(file.buffer),
+        signatureIndex,
+        userIdOverride: userIdOverride?.trim() || undefined,
+        intervalMs,
+        timeoutMs,
+      });
 
-    // Trả JSON (để client dùng cmsBase64 gọi /embed-cms)
-    return {
-      message: 'CMS_READY',
-      cmsBase64: result.cmsBase64,
-      transactionId: result.transactionId,
-      docId: result.docId,
-      signatureIndex: result.signatureIndex,
-      byteRange: result.byteRange,
-      pdfLength: result.pdfLength,
-      digestHex: result.digestHex,
-    };
+      // Trả JSON (để client dùng cmsBase64 gọi /embed-cms)
+      return {
+        message: 'CMS_READY',
+        cmsBase64: result.cmsBase64,
+        transactionId: result.transactionId,
+        docId: result.docId,
+        signatureIndex: result.signatureIndex,
+        byteRange: result.byteRange,
+        pdfLength: result.pdfLength,
+        digestHex: result.digestHex,
+      };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Unknown error during signing process';
+      const errorStatus = Number((error as any)?.status) || 500;
+
+      console.error('[SIGN-TO-CMS] Error:', errorMessage);
+
+      // Ensure JSON response even on error
+      return {
+        message: 'SIGNING_FAILED',
+        error: errorMessage,
+        code: errorStatus,
+      };
+    }
   }
 
   @Post('embed-cms')

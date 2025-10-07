@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsNumberString, IsString } from 'class-validator';
+import { IsOptional, IsNumberString, IsString, IsEmail } from 'class-validator';
 
 export class PreparePDFDto {
   @ApiProperty({
@@ -30,4 +30,45 @@ export class PreparePDFDto {
   @IsOptional()
   @IsNumberString()
   signatureLength?: string;
+
+  // === NEAC Compliance Fields ===
+  @ApiPropertyOptional({
+    description: 'Lý do ký (Reason)',
+    example: 'Ký hợp đồng thuê nhà',
+  })
+  @IsOptional()
+  @IsString()
+  reason?: string;
+
+  @ApiPropertyOptional({
+    description: 'Địa điểm ký (Location)',
+    example: 'Hà Nội, Việt Nam',
+  })
+  @IsOptional()
+  @IsString()
+  location?: string;
+
+  @ApiPropertyOptional({
+    description: 'Email liên hệ (ContactInfo)',
+    example: 'thanhpham21dev@gmail.com',
+  })
+  @IsOptional()
+  @IsEmail()
+  contactInfo?: string;
+
+  @ApiPropertyOptional({
+    description: 'Tên người ký (Name)',
+    example: 'Phạm Văn Thành',
+  })
+  @IsOptional()
+  @IsString()
+  signerName?: string;
+
+  @ApiPropertyOptional({
+    description: 'Creator/Application name',
+    example: 'SmartCA VNPT 2025',
+  })
+  @IsOptional()
+  @IsString()
+  creator?: string;
 }
