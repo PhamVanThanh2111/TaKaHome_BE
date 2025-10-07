@@ -40,11 +40,13 @@ import { SmartCAModule } from './modules/smartca/smartca.module';
       isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
       load: [vnpayConfig, smartcaConfig], // <— nạp file config/vnpay.config.ts và smartca.config.ts
       validationSchema: Joi.object({
+        // VNPAY validation
         VNP_TMN_CODE: Joi.string().required(),
         VNP_HASH_SECRET: Joi.string().required(),
         VNP_URL: Joi.string().uri().required(),
         VNP_RETURN_URL: Joi.string().uri().required(),
         VNP_IPN_URL: Joi.string().uri().optional(),
+
         // SmartCA validation (optional in case not configured)
         SMARTCA_BASE_URL: Joi.string().uri().optional(),
         SMARTCA_SIGN_PATH: Joi.string().optional(),

@@ -16,6 +16,7 @@ export type Place = {
   reason?: string;
   contactInfo?: string;
   location?: string;
+  creator?: string; // NEAC compliance: Creator/App name
 };
 
 export type PrepareOptions = Place | { places: Place[] };
