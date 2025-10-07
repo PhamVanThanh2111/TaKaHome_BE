@@ -25,8 +25,6 @@ export class BookingService {
   constructor(
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
-    @InjectRepository(Contract)
-    private contractRepository: Repository<Contract>,
     private contractService: ContractService,
     private smartcaService: SmartCAService,
     private s3StorageService: S3StorageService,
@@ -167,12 +165,13 @@ export class BookingService {
     }
     const saved = await this.bookingRepository.save(booking);
 
-    if (signedPdfPresignedUrl) {
-      contract.contractFileUrl = signedPdfPresignedUrl;
-      await this.contractRepository.save(contract);
-    }
+    // Return response with presigned URL
+    const response = {
+      ...saved,
+      signedPdfUrl: signedPdfPresignedUrl, // 5-minute expiry URL
+    };
 
-    return new ResponseCommon(200, 'SUCCESS', saved);
+    return new ResponseCommon(200, 'SUCCESS', response);
   }
 
   async landlordReject(id: string): Promise<ResponseCommon<Booking>> {
