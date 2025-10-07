@@ -16,6 +16,7 @@ import { ContractService } from '../contract/contract.service';
 import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 import { VN_TZ, addDaysVN, addHoursVN, vnNow } from '../../common/datetime';
 import { SmartCAService } from '../smartca/smartca.service';
+import { S3StorageService } from '../s3-storage/s3-storage.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -24,8 +25,11 @@ export class BookingService {
   constructor(
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
+    @InjectRepository(Contract)
+    private contractRepository: Repository<Contract>,
     private contractService: ContractService,
     private smartcaService: SmartCAService,
+    private s3StorageService: S3StorageService,
   ) {}
 
   async create(dto: CreateBookingDto): Promise<ResponseCommon<Booking>> {
@@ -52,6 +56,8 @@ export class BookingService {
     }
 
     console.log('[LandlordApprove] Starting landlord PDF signing process');
+
+    let signedPdfPresignedUrl: string | undefined;
 
     try {
       // Read PDF file from assets
@@ -96,8 +102,55 @@ export class BookingService {
         '[LandlordApprove] ✅ Landlord signing completed successfully',
       );
 
-      // TODO: Save the signed PDF somewhere if needed
-      // For now, we just proceed with the status update
+      // Upload the signed PDF to S3
+      if (signResult.signedPdf) {
+        console.log('[LandlordApprove] Uploading signed PDF to S3...');
+
+        try {
+          const uploadResult = await this.s3StorageService.uploadContractPdf(
+            signResult.signedPdf,
+            {
+              contractId: contract.id,
+              role: 'LANDLORD',
+              signatureIndex: 0,
+              metadata: {
+                bookingId: booking.id,
+                transactionId: signResult.transactionId || '',
+                docId: signResult.docId || '',
+                uploadedBy: 'system',
+                signedAt: new Date().toISOString(),
+              },
+            },
+          );
+
+          console.log(
+            '[LandlordApprove] ✅ PDF uploaded to S3:',
+            uploadResult.key,
+          );
+
+          // Generate presigned URL for 5 minutes access
+          signedPdfPresignedUrl =
+            await this.s3StorageService.getPresignedGetUrl(
+              uploadResult.key,
+              300, // 5 minutes
+            );
+
+          console.log(
+            '[LandlordApprove] 🔗 Generated presigned URL (expires in 5 minutes)',
+          );
+
+          // TODO: Optionally save the S3 key/URL to contract or booking entity
+          // contract.landlordSignedPdfUrl = uploadResult.url;
+          // contract.landlordSignedPdfKey = uploadResult.key;
+        } catch (uploadError) {
+          console.error(
+            '[LandlordApprove] ⚠️ Failed to upload PDF to S3:',
+            uploadError,
+          );
+          // Don't fail the entire operation if S3 upload fails
+          // The signing was successful, just the storage failed
+        }
+      }
     } catch (error) {
       console.error('[LandlordApprove] ❌ Landlord signing failed:', error);
       throw new BadRequestException(
@@ -113,6 +166,12 @@ export class BookingService {
       booking.contractId = contract.id;
     }
     const saved = await this.bookingRepository.save(booking);
+
+    if (signedPdfPresignedUrl) {
+      contract.contractFileUrl = signedPdfPresignedUrl;
+      await this.contractRepository.save(contract);
+    }
+
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
@@ -287,7 +346,7 @@ export class BookingService {
   private async loadBookingOrThrow(id: string): Promise<Booking> {
     const booking = await this.bookingRepository.findOne({
       where: { id },
-      relations: ['tenant', 'property'],
+      relations: ['tenant', 'property', 'property.landlord'],
     });
     if (!booking) throw new NotFoundException('Booking not found');
     return booking;
