@@ -20,7 +20,7 @@ import {
 
 // Import Fabric Network directly
 import { Gateway, Wallets, Contract, Network, X509Identity, Identity } from 'fabric-network';
-import FabricCAServices from 'fabric-ca-client';
+import * as FabricCAServices from 'fabric-ca-client';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
@@ -141,7 +141,7 @@ export class BlockchainService implements OnModuleInit {
       await this.gateway.connect(ccp, {
         wallet: this.wallet,
         identity: identityLabel,
-        discovery: { enabled: true, asLocalhost: true }
+        discovery: { enabled: false, asLocalhost: false }
       });
 
       const fabricConfig = this.blockchainConfig.getFabricConfig();
