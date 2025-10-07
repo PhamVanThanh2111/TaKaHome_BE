@@ -5,14 +5,12 @@ import { LoginDto } from './dto/login.dto';
 import { ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { RegisterResponseDto } from './dto/register-response.dto';
 import { LoginResponseDto } from './dto/login-response.dto';
-import { Public } from './public.decorator';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
-  @Public() // Allow public access without JWT
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Đăng ký tài khoản mới' })
   @ApiResponse({
@@ -29,7 +27,6 @@ export class AuthController {
   }
 
   @Post('login')
-  @Public() // Allow public access without JWT
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Đăng nhập' })
   @ApiResponse({

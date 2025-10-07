@@ -15,6 +15,10 @@ import { Contract } from '../contract/entities/contract.entity';
 import { ContractService } from '../contract/contract.service';
 import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 import { VN_TZ, addDaysVN, addHoursVN, vnNow } from '../../common/datetime';
+import { SmartCAService } from '../smartca/smartca.service';
+import { S3StorageService } from '../s3-storage/s3-storage.service';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class BookingService {
@@ -22,14 +26,13 @@ export class BookingService {
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
     private contractService: ContractService,
+    private smartcaService: SmartCAService,
+    private s3StorageService: S3StorageService,
   ) {}
 
-  async create(
-    dto: CreateBookingDto,
-    tenantId: string,
-  ): Promise<ResponseCommon<Booking>> {
+  async create(dto: CreateBookingDto): Promise<ResponseCommon<Booking>> {
     const booking = this.bookingRepository.create({
-      tenant: { id: tenantId },
+      tenant: { id: dto.tenantId },
       property: { id: dto.propertyId },
       status: BookingStatus.PENDING_LANDLORD,
     });
@@ -40,14 +43,134 @@ export class BookingService {
   async landlordApprove(id: string): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.PENDING_LANDLORD]);
-    booking.status = BookingStatus.PENDING_SIGNATURE;
+
+    // Ensure contract exists before landlord signing
     const contract = await this.ensureContractForBooking(booking);
+    if (!contract) {
+      throw new BadRequestException(
+        'Failed to create or retrieve contract for landlord approval',
+      );
+    }
+
+    console.log('[LandlordApprove] Starting landlord PDF signing process');
+
+    let signedPdfPresignedUrl: string | undefined;
+
+    try {
+      // Read PDF file from assets
+      const pdfPath = path.join(
+        process.cwd(),
+        'src',
+        'assets',
+        'contracts',
+        'HopDongChoThueNhaNguyenCan.pdf',
+      );
+
+      if (!fs.existsSync(pdfPath)) {
+        throw new BadRequestException(`PDF file not found at: ${pdfPath}`);
+      }
+
+      const pdfBuffer = fs.readFileSync(pdfPath);
+      console.log(
+        `[LandlordApprove] Loaded PDF from assets: ${pdfBuffer.length} bytes`,
+      );
+
+      // Landlord signs the contract (signatureIndex: 0)
+      const signResult = await this.smartcaService.signPdfOneShot({
+        pdfBuffer,
+        signatureIndex: 0, // Landlord signature index
+        contractId: contract.id,
+        intervalMs: 2000,
+        timeoutMs: 120000,
+        reason: 'Landlord Contract Approval',
+        location: 'Vietnam',
+        contactInfo: '',
+        signerName: 'Landlord Digital Signature',
+        creator: 'SmartCA VNPT 2025',
+      });
+
+      if (!signResult.success) {
+        throw new BadRequestException(
+          `Landlord signing failed: ${signResult.error}`,
+        );
+      }
+
+      console.log(
+        '[LandlordApprove] ✅ Landlord signing completed successfully',
+      );
+
+      // Upload the signed PDF to S3
+      if (signResult.signedPdf) {
+        console.log('[LandlordApprove] Uploading signed PDF to S3...');
+
+        try {
+          const uploadResult = await this.s3StorageService.uploadContractPdf(
+            signResult.signedPdf,
+            {
+              contractId: contract.id,
+              role: 'LANDLORD',
+              signatureIndex: 0,
+              metadata: {
+                bookingId: booking.id,
+                transactionId: signResult.transactionId || '',
+                docId: signResult.docId || '',
+                uploadedBy: 'system',
+                signedAt: new Date().toISOString(),
+              },
+            },
+          );
+
+          console.log(
+            '[LandlordApprove] ✅ PDF uploaded to S3:',
+            uploadResult.key,
+          );
+
+          // Generate presigned URL for 5 minutes access
+          signedPdfPresignedUrl =
+            await this.s3StorageService.getPresignedGetUrl(
+              uploadResult.key,
+              300, // 5 minutes
+            );
+
+          console.log(
+            '[LandlordApprove] 🔗 Generated presigned URL (expires in 5 minutes)',
+          );
+
+          // TODO: Optionally save the S3 key/URL to contract or booking entity
+          // contract.landlordSignedPdfUrl = uploadResult.url;
+          // contract.landlordSignedPdfKey = uploadResult.key;
+        } catch (uploadError) {
+          console.error(
+            '[LandlordApprove] ⚠️ Failed to upload PDF to S3:',
+            uploadError,
+          );
+          // Don't fail the entire operation if S3 upload fails
+          // The signing was successful, just the storage failed
+        }
+      }
+    } catch (error) {
+      console.error('[LandlordApprove] ❌ Landlord signing failed:', error);
+      throw new BadRequestException(
+        `Failed to complete landlord signing: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+
+    // After successful signing, update booking status
+    booking.status = BookingStatus.PENDING_SIGNATURE;
+
     if (contract) {
       booking.contract = contract;
       booking.contractId = contract.id;
     }
     const saved = await this.bookingRepository.save(booking);
-    return new ResponseCommon(200, 'SUCCESS', saved);
+
+    // Return response with presigned URL
+    const response = {
+      ...saved,
+      signedPdfUrl: signedPdfPresignedUrl, // 5-minute expiry URL
+    };
+
+    return new ResponseCommon(200, 'SUCCESS', response);
   }
 
   async landlordReject(id: string): Promise<ResponseCommon<Booking>> {

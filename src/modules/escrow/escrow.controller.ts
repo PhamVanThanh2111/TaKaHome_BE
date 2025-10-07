@@ -10,10 +10,13 @@ import {
 import { EscrowService } from './escrow.service';
 import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../core/auth/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { RoleEnum } from '../common/enums/role.enum';
 import { EscrowAdjustDto } from './dto/escrow-adjust.dto';
 
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('escrow')
 export class EscrowController {
   constructor(private readonly escrowService: EscrowService) {}
@@ -34,6 +37,7 @@ export class EscrowController {
   }
 
   @Post(':id/deduct')
+  @Roles(RoleEnum.ADMIN)
   @ApiOperation({ summary: 'Khấu trừ tiền cọc (ví dụ: bồi thường hư hại)' })
   @ApiResponse({ status: 200, description: 'Khấu trừ thành công' })
   async deduct(@Param('id') accountId: string, @Body() dto: EscrowAdjustDto) {
@@ -56,7 +60,8 @@ export class EscrowController {
   }
 
   @Post(':id/refund')
-  @ApiOperation({ summary: 'Hoàn trả tiền cọc cho (người thuê + chủ nhà)' })
+  @Roles(RoleEnum.ADMIN)
+  @ApiOperation({ summary: 'Hoàn trả tiền cọc cho người thuê' })
   @ApiResponse({ status: 200, description: 'Hoàn cọc thành công' })
   async refund(@Param('id') accountId: string, @Body() dto: EscrowAdjustDto) {
     const result = await this.escrowService.refund(

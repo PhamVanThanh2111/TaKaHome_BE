@@ -18,8 +18,6 @@ import { PropertyUtilityModule } from './modules/property-utility/property-utili
 import { ChatRoomModule } from './modules/chatroom/chatroom.module';
 import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
 import { AuthModule } from './modules/core/auth/auth.module';
-import { BlockchainModule } from './modules/blockchain/blockchain.module';
-import { SmartCAModule } from './modules/smartca/smartca.module';
 import AppDataSourcePromise from './modules/core/database/data-source';
 
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
@@ -31,9 +29,7 @@ import { WalletModule } from './modules/wallet/wallet.module';
 import { EscrowModule } from './modules/escrow/escrow.module';
 import { InvoiceModule } from './modules/invoice/invoice.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
-import { CronModule } from './cron/cron.module';
-import { PenaltyModule } from './modules/penalty/penalty.module';
-import { AutomationModule } from './modules/automation/automation.module';
+import { SmartCAModule } from './modules/smartca/smartca.module';
 
 @Module({
   imports: [
@@ -42,27 +38,38 @@ import { AutomationModule } from './modules/automation/automation.module';
     }),
     ConfigModule.forRoot({
       isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
-      load: [vnpayConfig, smartcaConfig], // <— nạp file config/vnpay.config.ts
+      load: [vnpayConfig, smartcaConfig], // <— nạp file config/vnpay.config.ts và smartca.config.ts
       validationSchema: Joi.object({
+        // VNPAY validation
         VNP_TMN_CODE: Joi.string().required(),
         VNP_HASH_SECRET: Joi.string().required(),
         VNP_URL: Joi.string().uri().required(),
         VNP_RETURN_URL: Joi.string().uri().required(),
         VNP_IPN_URL: Joi.string().uri().optional(),
+
         // SmartCA validation (optional in case not configured)
+        SMARTCA_BASE_URL: Joi.string().uri().optional(),
+        SMARTCA_SIGN_PATH: Joi.string().optional(),
+        SMARTCA_CERT_PATH: Joi.string().optional(),
+        SMARTCA_SIGN_STATUS_TMPL: Joi.string().optional(),
         SMARTCA_SP_ID: Joi.string().optional(),
         SMARTCA_SP_PASSWORD: Joi.string().optional(),
-        SMARTCA_ENVIRONMENT: Joi.string().valid('production', 'uat').default('production'),
+        SMARTCA_USER_ID: Joi.string().optional(),
+        OID_DATA: Joi.string().optional(),
+        OID_SIGNED_DATA: Joi.string().optional(),
+        OID_CONTENT_TYPE: Joi.string().optional(),
+        OID_MESSAGE_DIGEST: Joi.string().optional(),
+        OID_SIGNING_TIME: Joi.string().optional(),
+        OID_SIGNING_CERT_V2: Joi.string().optional(),
       }),
     }),
     AuthModule,
-    BlockchainModule,
-    SmartCAModule,
     UserModule,
     PropertyModule,
     ContractModule,
     BookingModule,
     PaymentModule,
+    SmartCAModule,
     ReviewModule,
     ReportModule,
     FavoriteModule,
@@ -77,9 +84,6 @@ import { AutomationModule } from './modules/automation/automation.module';
     EscrowModule,
     InvoiceModule,
     MaintenanceModule,
-    CronModule,
-    PenaltyModule,
-    AutomationModule,
   ],
 })
 export class AppModule implements NestModule {

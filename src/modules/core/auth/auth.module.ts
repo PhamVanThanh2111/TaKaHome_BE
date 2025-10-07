@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -7,22 +7,15 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { User } from '../../user/entities/user.entity';
 import { Account } from '../../account/entities/account.entity';
-import { BlockchainModule } from '../../blockchain/blockchain.module';
-import { ConfigModule, ConfigService } from '@nestjs/config';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, Account]),
     PassportModule,
-    JwtModule.registerAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET'),
-        signOptions: { expiresIn: '7d' },
-      }),
+    JwtModule.register({
+      secret: process.env.JWT_SECRET || 'rent_home_khoa_luan_secret',
+      signOptions: { expiresIn: '7d' },
     }),
-    forwardRef(() => BlockchainModule),
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],
