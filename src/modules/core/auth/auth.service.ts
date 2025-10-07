@@ -64,10 +64,40 @@ export class AuthService {
     });
     await this.accountRepo.save(account);
 
+    // Enroll blockchain identity based on user role
+    const orgName = this.determineOrgFromRole(defaultRoles);
+    if (orgName) {
+      try {
+        // Nếu có 2 roles thì lấy role thứ 2 (LANDLORD), ngược lại lấy role đầu tiên (TENANT)
+        const enrollmentRole = defaultRoles.length > 1 ? defaultRoles[1] : defaultRoles[0];
+        
+        await this.blockchainService.enrollUser({
+          userId: user.id.toString(),
+          orgName: orgName,
+          role: enrollmentRole
+        });
+      } catch (error) {
+        // Continue without failing registration - blockchain enrollment is optional
+        this.logger.warn(`Blockchain enrollment failed for user ${user.id}: ${error.message}`);
+      }
+    }
+
     return new ResponseCommon(200, 'SUCCESS', {
       message: 'Register successful!',
     });
   }
+
+  /**
+   * Determine organization name from user roles
+   */
+  private determineOrgFromRole(roles: RoleEnum[]): string | null {
+    if (roles.includes(RoleEnum.LANDLORD)) return 'OrgLandlord';
+    if (roles.includes(RoleEnum.TENANT)) return 'OrgTenant';
+    if (roles.includes(RoleEnum.ADMIN)) return 'OrgProp';
+    return null;
+  }
+
+
 
   async validateAccount(
     email: string,

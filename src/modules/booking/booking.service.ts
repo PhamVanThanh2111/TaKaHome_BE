@@ -35,12 +35,11 @@ export class BookingService {
       tenant: { id: dto.tenantId },
       property: { id: dto.propertyId },
       status: BookingStatus.PENDING_LANDLORD,
-      firstRentDueAt: this.parseOptionalInput(dto.firstRentDueAt),
     });
     const saved = await this.bookingRepository.save(booking);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
-
+  
   async landlordApprove(id: string): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.PENDING_LANDLORD]);
