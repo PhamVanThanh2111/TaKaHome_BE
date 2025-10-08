@@ -300,4 +300,61 @@ export class S3StorageService {
       );
     }
   }
+
+  /**
+   * Download file from S3 as Buffer
+   */
+  async downloadFile(key: string): Promise<Buffer> {
+    try {
+      console.log(`[S3Download] Downloading file: ${key}`);
+
+      const command = new GetObjectCommand({
+        Bucket: this.s3.bucketName,
+        Key: key,
+      });
+
+      const response = await this.s3Client.send(command);
+
+      if (!response.Body) {
+        throw new BadRequestException(`File not found: ${key}`);
+      }
+
+      // Convert ReadableStream to Buffer
+      const chunks: Uint8Array[] = [];
+      const reader = response.Body.transformToWebStream().getReader();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          chunks.push(value as Uint8Array);
+        }
+      }
+
+      const buffer = Buffer.concat(chunks);
+      console.log(`[S3Download] ✅ Downloaded ${key}: ${buffer.length} bytes`);
+
+      return buffer;
+    } catch (error) {
+      console.error('[S3Download] ❌ Failed to download file:', error);
+      throw new BadRequestException(
+        `Failed to download file: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+  }
+
+  /**
+   * Extract S3 key from full S3 URL
+   */
+  extractKeyFromUrl(s3Url: string): string {
+    try {
+      const url = new URL(s3Url);
+      // Remove leading slash
+      const key = url.pathname.substring(1);
+      console.log(`[S3] Extracted key from URL: ${key}`);
+      return key;
+    } catch {
+      throw new BadRequestException(`Invalid S3 URL format: ${s3Url}`);
+    }
+  }
 }

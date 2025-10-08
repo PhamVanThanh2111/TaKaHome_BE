@@ -5,6 +5,7 @@ import {
   Post,
   Res,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import {
@@ -21,8 +22,10 @@ import { Response } from 'express';
 import { Place } from './types/smartca.types';
 import * as fs from 'fs';
 import * as path from 'path';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('smartca')
 export class SmartCAController {
   constructor(private readonly smartcaService: SmartCAService) {}
