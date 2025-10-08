@@ -13,15 +13,20 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RoleEnum } from '../../common/enums/role.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
+import { BlockchainService } from 'src/modules/blockchain/blockchain.service';
+import { Logger } from '@nestjs/common';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     private readonly jwtService: JwtService,
+    private readonly blockchainService: BlockchainService,
   ) {}
 
   async register(
@@ -69,16 +74,19 @@ export class AuthService {
     if (orgName) {
       try {
         // Nếu có 2 roles thì lấy role thứ 2 (LANDLORD), ngược lại lấy role đầu tiên (TENANT)
-        const enrollmentRole = defaultRoles.length > 1 ? defaultRoles[1] : defaultRoles[0];
-        
+        const enrollmentRole =
+          defaultRoles.length > 1 ? defaultRoles[1] : defaultRoles[0];
+
         await this.blockchainService.enrollUser({
           userId: user.id.toString(),
           orgName: orgName,
-          role: enrollmentRole
+          role: enrollmentRole,
         });
       } catch (error) {
         // Continue without failing registration - blockchain enrollment is optional
-        this.logger.warn(`Blockchain enrollment failed for user ${user.id}: ${error.message}`);
+        this.logger.warn(
+          `Blockchain enrollment failed for user ${user.id}: ${error.message}`,
+        );
       }
     }
 
@@ -96,8 +104,6 @@ export class AuthService {
     if (roles.includes(RoleEnum.ADMIN)) return 'OrgProp';
     return null;
   }
-
-
 
   async validateAccount(
     email: string,

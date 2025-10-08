@@ -14,9 +14,7 @@ import { BlockchainService } from '../blockchain/blockchain.service';
 import { FabricUser } from '../blockchain/interfaces/fabric.interface';
 import * as crypto from 'crypto';
 import * as forge from 'node-forge';
-
-
-
+import { Place, PrepareOptions } from '../smartca/types/smartca.types';
 
 @Injectable()
 export class ContractService {
@@ -25,7 +23,7 @@ export class ContractService {
   constructor(
     @InjectRepository(Contract)
     private contractRepository: Repository<Contract>,
-    private blockchainService: BlockchainService 
+    private blockchainService: BlockchainService,
   ) {}
 
   async create(
@@ -110,15 +108,20 @@ export class ContractService {
       status: ContractStatusEnum.PENDING_SIGNATURE,
       contractFileUrl: input.contractFileUrl,
     });
-    
+
     const savedContract = await this.contractRepository.save(contract);
 
     // Tích hợp với blockchain: Tạo contract trên blockchain
     try {
       await this.createContractOnBlockchain(savedContract);
-      this.logger.log(`Contract ${savedContract.contractCode} created on blockchain successfully`);
+      this.logger.log(
+        `Contract ${savedContract.contractCode} created on blockchain successfully`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to create contract ${savedContract.contractCode} on blockchain:`, error);
+      this.logger.error(
+        `Failed to create contract ${savedContract.contractCode} on blockchain:`,
+        error,
+      );
       // Đánh dấu contract cần đồng bộ lại với blockchain
       await this.markForBlockchainSync(savedContract.id, 'CREATE_CONTRACT');
     }
@@ -175,16 +178,21 @@ export class ContractService {
     this.ensureStatus(contract, [ContractStatusEnum.PENDING_SIGNATURE]);
     contract.status = ContractStatusEnum.SIGNED;
     const saved = await this.contractRepository.save(contract);
-    
+
     // Tích hợp với blockchain: Tenant ký hợp đồng
     try {
       await this.tenantSignContractOnBlockchain(saved);
-      this.logger.log(`Contract ${saved.contractCode} signed by tenant on blockchain successfully`);
+      this.logger.log(
+        `Contract ${saved.contractCode} signed by tenant on blockchain successfully`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to sign contract ${saved.contractCode} on blockchain:`, error);
+      this.logger.error(
+        `Failed to sign contract ${saved.contractCode} on blockchain:`,
+        error,
+      );
       await this.markForBlockchainSync(saved.id, 'TENANT_SIGN_CONTRACT');
     }
-    
+
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
@@ -196,7 +204,7 @@ export class ContractService {
     ]);
     contract.status = ContractStatusEnum.ACTIVE;
     const saved = await this.contractRepository.save(contract);
-    
+
     // Tích hợp với blockchain: Kích hoạt hợp đồng
     // try {
     //   await this.activateContractOnBlockchain(saved);
@@ -209,12 +217,17 @@ export class ContractService {
     // Tự động tạo payment schedule sau khi activate
     try {
       await this.createPaymentScheduleOnBlockchain(saved);
-      this.logger.log(`Payment schedule created for contract ${saved.contractCode}`);
+      this.logger.log(
+        `Payment schedule created for contract ${saved.contractCode}`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to create payment schedule for contract ${saved.contractCode}:`, error);
+      this.logger.error(
+        `Failed to create payment schedule for contract ${saved.contractCode}:`,
+        error,
+      );
       await this.markForBlockchainSync(saved.id, 'CREATE_PAYMENT_SCHEDULE');
     }
-    
+
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
@@ -230,11 +243,11 @@ export class ContractService {
   //   ]);
   //   contract.status = ContractStatusEnum.ACTIVE;
   //   const saved = await this.contractRepository.save(contract);
-    
+
   //   // CHỈ cập nhật database - blockchain đã được xử lý bởi recordFirstPayment
   //   // recordFirstPayment tự động: activate contract + create payment schedule
   //   this.logger.log(`Contract ${saved.contractCode} activated from first payment (blockchain sync completed by recordFirstPayment)`);
-    
+
   //   return new ResponseCommon(200, 'SUCCESS', saved);
   // }
 
@@ -243,16 +256,21 @@ export class ContractService {
     this.ensureStatus(contract, [ContractStatusEnum.ACTIVE]);
     contract.status = ContractStatusEnum.COMPLETED;
     const saved = await this.contractRepository.save(contract);
-    
+
     // Tích hợp với blockchain: Hoàn thành hợp đồng
     try {
       await this.completeContractOnBlockchain(saved);
-      this.logger.log(`Contract ${saved.contractCode} completed on blockchain successfully`);
+      this.logger.log(
+        `Contract ${saved.contractCode} completed on blockchain successfully`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to complete contract ${saved.contractCode} on blockchain:`, error);
+      this.logger.error(
+        `Failed to complete contract ${saved.contractCode} on blockchain:`,
+        error,
+      );
       await this.markForBlockchainSync(saved.id, 'COMPLETE_CONTRACT');
     }
-    
+
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
@@ -416,7 +434,10 @@ export class ContractService {
       const landlordSignatureMeta = JSON.stringify({ algorithm: 'RSA-SHA256' });
 
       // Tạo FabricUser cho landlord (người tạo contract)
-      const fabricUser = this.createFabricUser(fullContract.landlord.id, 'OrgLandlordMSP');
+      const fabricUser = this.createFabricUser(
+        fullContract.landlord.id,
+        'OrgLandlordMSP',
+      );
 
       const contractData = {
         contractId: fullContract.contractCode,
@@ -437,7 +458,9 @@ export class ContractService {
 
       await this.blockchainService.createContract(contractData, fabricUser);
 
-      this.logger.log(`✅ Contract ${fullContract.contractCode} created on blockchain`);
+      this.logger.log(
+        `✅ Contract ${fullContract.contractCode} created on blockchain`,
+      );
     } catch (error) {
       this.logger.error(`❌ Failed to create contract on blockchain:`, error);
       throw error;
@@ -447,7 +470,9 @@ export class ContractService {
   /**
    * Tenant ký contract trên blockchain
    */
-  private async tenantSignContractOnBlockchain(contract: Contract): Promise<void> {
+  private async tenantSignContractOnBlockchain(
+    contract: Contract,
+  ): Promise<void> {
     try {
       // Tạo document hash và signature metadata
       // Là mã hash file pdf đã có chữ ký landlord
@@ -455,16 +480,21 @@ export class ContractService {
       const tenantSignatureMeta = JSON.stringify({ algorithm: 'RSA-SHA256' });
 
       // Tạo FabricUser cho tenant
-      const fabricUser = this.createFabricUser(contract.tenant.id, 'OrgTenantMSP');
+      const fabricUser = this.createFabricUser(
+        contract.tenant.id,
+        'OrgTenantMSP',
+      );
 
       await this.blockchainService.tenantSignContract(
         contract.contractCode,
         `full_${documentHash}`,
         tenantSignatureMeta,
-        fabricUser
+        fabricUser,
       );
 
-      this.logger.log(`✅ Contract ${contract.contractCode} signed by tenant on blockchain`);
+      this.logger.log(
+        `✅ Contract ${contract.contractCode} signed by tenant on blockchain`,
+      );
     } catch (error) {
       this.logger.error(`❌ Failed to sign contract on blockchain:`, error);
       throw error;
@@ -474,14 +504,24 @@ export class ContractService {
   /**
    * Kích hoạt contract trên blockchain (sau khi deposit được funding)
    */
-  private async activateContractOnBlockchain(contract: Contract): Promise<void> {
+  private async activateContractOnBlockchain(
+    contract: Contract,
+  ): Promise<void> {
     try {
       // Tạo FabricUser cho landlord (người kích hoạt)
-      const fabricUser = this.createFabricUser(contract.landlord.id, 'OrgLandlordMSP');
+      const fabricUser = this.createFabricUser(
+        contract.landlord.id,
+        'OrgLandlordMSP',
+      );
 
-      await this.blockchainService.activateContract(contract.contractCode, fabricUser);
+      await this.blockchainService.activateContract(
+        contract.contractCode,
+        fabricUser,
+      );
 
-      this.logger.log(`✅ Contract ${contract.contractCode} activated on blockchain`);
+      this.logger.log(
+        `✅ Contract ${contract.contractCode} activated on blockchain`,
+      );
     } catch (error) {
       this.logger.error(`❌ Failed to activate contract on blockchain:`, error);
       throw error;
@@ -491,19 +531,26 @@ export class ContractService {
   /**
    * Hoàn thành contract trên blockchain
    */
-  private async completeContractOnBlockchain(contract: Contract): Promise<void> {
+  private async completeContractOnBlockchain(
+    contract: Contract,
+  ): Promise<void> {
     try {
       // Tạo FabricUser cho landlord
-      const fabricUser = this.createFabricUser(contract.landlord.id, 'OrgLandlordMSP');
+      const fabricUser = this.createFabricUser(
+        contract.landlord.id,
+        'OrgLandlordMSP',
+      );
 
       // Sử dụng terminateContract với reason là "COMPLETED"
       await this.blockchainService.terminateContract(
-        contract.contractCode, 
-        'COMPLETED', 
-        fabricUser
+        contract.contractCode,
+        'COMPLETED',
+        fabricUser,
       );
 
-      this.logger.log(`✅ Contract ${contract.contractCode} completed on blockchain`);
+      this.logger.log(
+        `✅ Contract ${contract.contractCode} completed on blockchain`,
+      );
     } catch (error) {
       this.logger.error(`❌ Failed to complete contract on blockchain:`, error);
       throw error;
@@ -513,19 +560,29 @@ export class ContractService {
   /**
    * Tạo payment schedule trên blockchain sau khi contract active
    */
-  private async createPaymentScheduleOnBlockchain(contract: Contract): Promise<void> {
+  private async createPaymentScheduleOnBlockchain(
+    contract: Contract,
+  ): Promise<void> {
     try {
       // Tạo FabricUser cho landlord (người quản lý contract)
-      const fabricUser = this.createFabricUser(contract.landlord.id, 'OrgLandlordMSP');
+      const fabricUser = this.createFabricUser(
+        contract.landlord.id,
+        'OrgLandlordMSP',
+      );
 
       await this.blockchainService.createMonthlyPaymentSchedule(
         contract.contractCode,
-        fabricUser
+        fabricUser,
       );
 
-      this.logger.log(`✅ Payment schedule created on blockchain for contract ${contract.contractCode}`);
+      this.logger.log(
+        `✅ Payment schedule created on blockchain for contract ${contract.contractCode}`,
+      );
     } catch (error) {
-      this.logger.error(`❌ Failed to create payment schedule on blockchain:`, error);
+      this.logger.error(
+        `❌ Failed to create payment schedule on blockchain:`,
+        error,
+      );
       throw error;
     }
   }
@@ -533,11 +590,16 @@ export class ContractService {
   /**
    * Đánh dấu contract cần đồng bộ lại với blockchain (compensation mechanism)
    */
-  private async markForBlockchainSync(contractId: string, operation: string): Promise<void> {
+  private async markForBlockchainSync(
+    contractId: string,
+    operation: string,
+  ): Promise<void> {
     try {
       // TODO: Lưu vào queue hoặc bảng retry để xử lý sau
-      this.logger.warn(`🔄 Contract ${contractId} marked for blockchain sync: ${operation}`);
-      
+      this.logger.warn(
+        `🔄 Contract ${contractId} marked for blockchain sync: ${operation}`,
+      );
+
       // Có thể implement với Redis queue hoặc database table
       // await this.retryQueueService.addRetryJob({
       //   type: 'BLOCKCHAIN_SYNC',
@@ -565,7 +627,7 @@ export class ContractService {
       endDate: contract.endDate?.toISOString(),
       status: contract.status,
     };
-    
+
     const dataString = JSON.stringify(contractData);
     const crypto = require('crypto');
     return crypto.createHash('sha256').update(dataString).digest('hex');
@@ -577,9 +639,14 @@ export class ContractService {
   private createFabricUser(userId: string, orgMSP: string): FabricUser {
     return {
       userId: userId,
-      orgName: orgMSP === 'OrgLandlordMSP' ? 'OrgLandlord' : 
-               orgMSP === 'OrgTenantMSP' ? 'OrgTenant' : 'OrgProp',
-      mspId: orgMSP};
+      orgName:
+        orgMSP === 'OrgLandlordMSP'
+          ? 'OrgLandlord'
+          : orgMSP === 'OrgTenantMSP'
+            ? 'OrgTenant'
+            : 'OrgProp',
+      mspId: orgMSP,
+    };
   }
   // Tìm tất cả ByteRange có số
   private extractAllNumericByteRanges(pdfBuffer: Buffer): number[][] {

@@ -23,7 +23,7 @@ import { Notification } from '../modules/notification/entities/notification.enti
     ScheduleModule.forRoot(),
     TypeOrmModule.forFeature([Booking, Contract, Notification]),
     BookingModule,
-    ContractModule, 
+    ContractModule,
     NotificationModule,
     BlockchainModule,
     PenaltyModule,

@@ -10,6 +10,7 @@ import { PaymentPurpose } from '../common/enums/payment-purpose.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { vnNow } from '../../common/datetime';
 import { WalletService } from '../wallet/wallet.service';
+import { WalletTxnType } from '../common/enums/wallet-txn-type.enum';
 
 type EscrowBalanceResponse = {
   accountId: string;
@@ -95,7 +96,6 @@ export class EscrowService {
       type: 'DEPOSIT',
       amount: amount.toString(),
       status: 'COMPLETED',
-      refType: 'PAYMENT',
       refId: payment.id,
       note: isTenantDeposit
         ? 'Tenant deposit funded via payment'
@@ -126,7 +126,10 @@ export class EscrowService {
     party: EscrowBalanceParty,
     note?: string,
   ): Promise<ResponseCommon<Escrow>> {
-    const acc = await this.accountRepo.findOne({ where: { id: accountId } });
+    const acc = await this.accountRepo.findOne({
+      where: { id: accountId },
+      relations: ['contract', 'contract.landlord'],
+    });
     if (!acc) throw new Error('Escrow not found');
     const amount = BigInt(amountVnd);
     const current =
@@ -143,7 +146,6 @@ export class EscrowService {
       type: 'DEDUCTION',
       amount: amount.toString(),
       status: 'COMPLETED',
-      refType: 'SETTLEMENT',
       refId: null,
       note:
         note ??
@@ -169,8 +171,7 @@ export class EscrowService {
 
     await this.walletService.credit(counterpartyUserId, {
       amount: amountVnd,
-      type: 'REFUND',
-      refType: 'CONTRACT',
+      type: WalletTxnType.REFUND,
       refId: acc.contractId,
       note:
         note ??
@@ -182,14 +183,17 @@ export class EscrowService {
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  /** Hoàn cọc lại cho người thuê (từ số dư escrow) */
+  /** Hoàn ký quỹ (từ số dư escrow) */
   async refund(
     accountId: string,
     amountVnd: number,
     party: EscrowBalanceParty,
     note?: string,
   ): Promise<ResponseCommon<Escrow>> {
-    const acc = await this.accountRepo.findOne({ where: { id: accountId } });
+    const acc = await this.accountRepo.findOne({
+      where: { id: accountId },
+      relations: ['contract', 'contract.landlord'],
+    });
     if (!acc) throw new Error('Escrow not found');
     const amount = BigInt(amountVnd);
     const current =
@@ -199,6 +203,7 @@ export class EscrowService {
     const next = current - amount;
     if (next < BigInt(0)) throw new Error('Insufficient escrow balance');
 
+    // 1. Ghi giao dịch escrow
     const txn = this.txnRepo.create({
       escrow: { id: acc.id },
       escrowId: acc.id,
@@ -206,7 +211,6 @@ export class EscrowService {
       type: 'REFUND',
       amount: amount.toString(),
       status: 'COMPLETED',
-      refType: 'ADJUSTMENT',
       refId: null,
       note:
         note ??
@@ -216,12 +220,25 @@ export class EscrowService {
       completedAt: vnNow(),
     });
     await this.txnRepo.save(txn);
+
+    // 2. Cập nhật số dư escrow
     if (party === 'TENANT') {
       acc.currentBalanceTenant = next.toString();
     } else {
       acc.currentBalanceLandlord = next.toString();
     }
     const saved = await this.accountRepo.save(acc);
+
+    // 3. Hoàn tiền vào ví
+    const partyUserId =
+      party === 'TENANT' ? acc.tenantId : acc.contract?.landlord?.id;
+    await this.walletService.credit(partyUserId, {
+      amount: amountVnd,
+      type: WalletTxnType.REFUND,
+      refId: acc.id,
+      note: 'Compensation received from escrow',
+    });
+
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 

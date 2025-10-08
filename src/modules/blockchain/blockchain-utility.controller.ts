@@ -1,25 +1,24 @@
-import { 
-  Controller, 
+import {
+  Controller,
   Get,
   Post,
   Body,
   Query,
   Logger,
-  UseGuards
+  UseGuards,
 } from '@nestjs/common';
-import { 
-  ApiTags, 
-  ApiOperation, 
+import {
+  ApiTags,
+  ApiOperation,
   ApiResponse,
   ApiBearerAuth,
-  ApiBody
 } from '@nestjs/swagger';
 
 import { BlockchainService } from './blockchain.service';
 import { BlockchainConfigService } from './blockchain-config.service';
 import { JwtBlockchainAuthGuard } from './guards/jwt-blockchain-auth.guard';
-import { Public } from '../core/auth/public.decorator';
 import { EnrollUserDto } from './dto/enroll-user.dto';
+import { Public } from 'src/common/decorators/public.decorator';
 
 /**
  * Blockchain Utility Controller
@@ -34,7 +33,7 @@ export class BlockchainUtilityController {
 
   constructor(
     private readonly blockchainService: BlockchainService,
-    private readonly configService: BlockchainConfigService
+    private readonly configService: BlockchainConfigService,
   ) {}
 
   /**
@@ -42,31 +41,31 @@ export class BlockchainUtilityController {
    */
   @Get('health')
   @Public() // Make health check public
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Blockchain health check',
-    description: 'Checks the status and connectivity of the blockchain network'
+    description: 'Checks the status and connectivity of the blockchain network',
   })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Health check completed',
     schema: {
       example: {
-        status: "healthy",
-        network: "rentalchannel/real-estate-cc",
+        status: 'healthy',
+        network: 'rentalchannel/real-estate-cc',
         isConnected: true,
-        timestamp: "2025-08-28T07:00:00.000Z",
-        organizations: ["OrgProp", "OrgTenant", "OrgLandlord"]
-      }
-    }
+        timestamp: '2025-08-28T07:00:00.000Z',
+        organizations: ['OrgProp', 'OrgTenant', 'OrgLandlord'],
+      },
+    },
   })
   async healthCheck() {
     const healthStatus = await this.blockchainService.healthCheck();
     const organizations = this.blockchainService.getSupportedOrganizations();
-    
+
     return {
       ...healthStatus,
       timestamp: new Date().toISOString(),
-      organizations
+      organizations,
     };
   }
 
@@ -75,49 +74,49 @@ export class BlockchainUtilityController {
    */
   @Get('organizations')
   @Public() // Public endpoint for organization information
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get supported organizations',
-    description: 'Returns list of supported blockchain organizations'
+    description: 'Returns list of supported blockchain organizations',
   })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Organizations retrieved successfully',
     schema: {
       example: {
         organizations: [
           {
-            name: "OrgProp",
-            mspId: "OrgPropMSP",
+            name: 'OrgProp',
+            mspId: 'OrgPropMSP',
             users: {
-              admin: "admin-OrgProp",
-              user: "appUserProp"
-            }
+              admin: 'admin-OrgProp',
+              user: 'appUserProp',
+            },
           },
           {
-            name: "OrgTenant", 
-            mspId: "OrgTenantMSP",
+            name: 'OrgTenant',
+            mspId: 'OrgTenantMSP',
             users: {
-              admin: "admin-OrgTenant",
-              user: "appUserTenant"
-            }
+              admin: 'admin-OrgTenant',
+              user: 'appUserTenant',
+            },
           },
           {
-            name: "OrgLandlord",
-            mspId: "OrgLandlordMSP",
+            name: 'OrgLandlord',
+            mspId: 'OrgLandlordMSP',
             users: {
-              admin: "admin-OrgLandlord",
-              user: "appUserLandlord"
-            }
-          }
-        ]
-      }
-    }
+              admin: 'admin-OrgLandlord',
+              user: 'appUserLandlord',
+            },
+          },
+        ],
+      },
+    },
   })
   async getSupportedOrganizations() {
     const organizations = this.configService.getOrganizations();
-    
+
     return {
-      organizations: Object.values(organizations)
+      organizations: Object.values(organizations),
     };
   }
 
@@ -125,34 +124,35 @@ export class BlockchainUtilityController {
    * Get network configuration
    */
   @Get('config')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get network configuration',
-    description: 'Returns current blockchain network configuration (non-sensitive data)'
+    description:
+      'Returns current blockchain network configuration (non-sensitive data)',
   })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Configuration retrieved successfully',
     schema: {
       example: {
-        channelName: "rentalchannel",
-        chaincodeName: "real-estate-cc",
-        defaultOrg: "OrgProp",
+        channelName: 'rentalchannel',
+        chaincodeName: 'real-estate-cc',
+        defaultOrg: 'OrgProp',
         discoveryAsLocalhost: false,
-        supportedOrganizations: ["OrgProp", "OrgTenant", "OrgLandlord"]
-      }
-    }
+        supportedOrganizations: ['OrgProp', 'OrgTenant', 'OrgLandlord'],
+      },
+    },
   })
   async getNetworkConfig() {
     const config = this.configService.getFabricConfig();
     const organizations = this.blockchainService.getSupportedOrganizations();
-    
+
     // Return only non-sensitive configuration data
     return {
       channelName: config.channelName,
       chaincodeName: config.chaincodeName,
       defaultOrg: config.orgName,
       discoveryAsLocalhost: config.discoveryAsLocalhost,
-      supportedOrganizations: organizations
+      supportedOrganizations: organizations,
     };
   }
 
@@ -161,12 +161,13 @@ export class BlockchainUtilityController {
    */
   @Post('enroll-user')
   @Public() // Public endpoint for user enrollment
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Enroll blockchain user',
-    description: 'Enrolls a user for blockchain operations with specified organization'
+    description:
+      'Enrolls a user for blockchain operations with specified organization',
   })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'User enrolled successfully',
     schema: {
       example: {
@@ -174,24 +175,24 @@ export class BlockchainUtilityController {
         message: 'User enrolled successfully',
         userId: '123',
         orgName: 'OrgTenant',
-        role: 'TENANT'
-      }
-    }
+        role: 'TENANT',
+      },
+    },
   })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'Invalid request data or user already enrolled'
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid request data or user already enrolled',
   })
   async enrollUser(@Body() enrollUserDto: EnrollUserDto) {
     const success = await this.blockchainService.enrollUser(enrollUserDto);
-    
+
     if (success) {
       return {
         success: true,
         message: 'User enrolled successfully',
         userId: enrollUserDto.userId,
         orgName: enrollUserDto.orgName,
-        role: enrollUserDto.role
+        role: enrollUserDto.role,
       };
     } else {
       return {
@@ -199,7 +200,7 @@ export class BlockchainUtilityController {
         message: 'Failed to enroll user',
         userId: enrollUserDto.userId,
         orgName: enrollUserDto.orgName,
-        role: enrollUserDto.role
+        role: enrollUserDto.role,
       };
     }
   }
@@ -209,33 +210,34 @@ export class BlockchainUtilityController {
    */
   @Get('check-enrollment')
   @Public() // Make check-enrollment public
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Check user enrollment status',
-    description: 'Checks if a user is enrolled in blockchain for the specified organization'
+    description:
+      'Checks if a user is enrolled in blockchain for the specified organization',
   })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Enrollment status retrieved',
     schema: {
       example: {
         userId: '123',
         orgName: 'OrgTenant',
         isEnrolled: true,
-        message: 'User is enrolled'
-      }
-    }
+        message: 'User is enrolled',
+      },
+    },
   })
   async checkEnrollment(
     @Query('userId') userId: string,
-    @Query('orgName') orgName: string
+    @Query('orgName') orgName: string,
   ) {
     const isEnrolled = await this.blockchainService.isUserEnrolled(userId);
-    
+
     return {
       userId,
       orgName,
       isEnrolled,
-      message: isEnrolled ? 'User is enrolled' : 'User is not enrolled'
+      message: isEnrolled ? 'User is enrolled' : 'User is not enrolled',
     };
   }
 }

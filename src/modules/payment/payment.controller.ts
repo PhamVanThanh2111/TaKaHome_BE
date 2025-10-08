@@ -22,9 +22,9 @@ import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { Request, Response } from 'express';
-import { Public } from '../core/auth/public.decorator';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { JwtUser } from '../core/auth/strategies/jwt.strategy';
+import { Public } from 'src/common/decorators/public.decorator';
 
 @Controller('payments')
 @ApiBearerAuth()

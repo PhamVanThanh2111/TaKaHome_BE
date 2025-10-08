@@ -2,7 +2,7 @@ import { Injectable, CanActivate, ExecutionContext, BadRequestException, Unautho
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { BlockchainConfigService } from '../blockchain-config.service';
-import { IS_PUBLIC_KEY } from '../../core/auth/public.decorator';
+import { IS_PUBLIC_KEY } from 'src/common/decorators/public.decorator';
 
 /**
  * JWT + Blockchain Combined Auth Guard

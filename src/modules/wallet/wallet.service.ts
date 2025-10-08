@@ -11,6 +11,8 @@ import { WalletTransaction } from './entities/wallet-transaction.entity';
 import { Wallet } from './entities/wallet.entity';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { vnNow } from '../../common/datetime';
+import { WalletDirection } from '../common/enums/wallet-txn-direction.enum';
+import { WalletTxnStatus } from '../common/enums/wallet-txn-status.enum';
 
 @Injectable()
 export class WalletService {
@@ -51,7 +53,7 @@ export class WalletService {
   ): Promise<
     ResponseCommon<{ walletId: string; balance: number; txnId: string }>
   > {
-    const { amount, type, refType, refId, note } = dto;
+    const { amount, type, refId, note } = dto;
     if (amount <= 0) throw new BadRequestException('Amount must be > 0');
 
     const runner = this.dataSource.createQueryRunner();
@@ -81,15 +83,10 @@ export class WalletService {
 
       const txn = runner.manager.create(WalletTransaction, {
         walletId: wallet.id,
-        direction: 'CREDIT',
+        direction: WalletDirection.CREDIT,
         type,
         amount: amount.toString(),
-        status: 'COMPLETED',
-        ...(refType !== undefined && refType !== null
-          ? { refType }
-          : type === 'TOPUP'
-            ? { refType: 'TOPUP' }
-            : {}),
+        status: WalletTxnStatus.COMPLETED,
         ...(refId !== undefined && refId !== null ? { refId } : {}),
         ...(note !== undefined && note !== null ? { note } : {}),
         completedAt: vnNow(),
@@ -117,7 +114,7 @@ export class WalletService {
   ): Promise<
     ResponseCommon<{ walletId: string; balance: number; txnId: string }>
   > {
-    const { amount, type, refType, refId, note } = dto;
+    const { amount, type, refId, note } = dto;
     if (amount <= 0) throw new BadRequestException('Amount must be > 0');
 
     const runner = this.dataSource.createQueryRunner();
@@ -142,11 +139,10 @@ export class WalletService {
 
       const txn = runner.manager.create(WalletTransaction, {
         walletId: wallet.id,
-        direction: 'DEBIT',
+        direction: WalletDirection.DEBIT,
         type, // CONTRACT_PAYMENT
         amount: amount.toString(),
-        status: 'COMPLETED',
-        refType,
+        status: WalletTxnStatus.COMPLETED,
         refId,
         note: note ?? null,
         completedAt: vnNow(),

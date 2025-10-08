@@ -24,6 +24,7 @@ import {
   vnNow,
   vnpFormatYYYYMMDDHHmmss,
 } from '../../common/datetime';
+import { WalletTxnType } from '../common/enums/wallet-txn-type.enum';
 
 @Injectable()
 export class PaymentService {
@@ -70,8 +71,7 @@ export class PaymentService {
       // 2A) Thanh toán bằng ví: trừ ví và chuyển sang PAID
       await this.walletService.debit(ctx.userId, {
         amount,
-        type: 'CONTRACT_PAYMENT',
-        refType: 'PAYMENT',
+        type: WalletTxnType.CONTRACT_PAYMENT,
         refId: payment.id,
         note: `Pay contract ${contractId} by wallet`,
       });
@@ -246,11 +246,6 @@ export class PaymentService {
     const query = qs.stringify(vnp_Params, '&', '=');
     const paymentUrl = `${vnpUrl}?${query}`;
 
-    // Debug:
-    // console.log('signData =', signData);
-    // console.log('vnp_SecureHash =', vnp_SecureHash);
-    // console.log('paymentUrl =', paymentUrl);
-
     return Promise.resolve(
       new ResponseCommon(200, 'SUCCESS', { paymentUrl, txnRef }),
     );
@@ -357,7 +352,6 @@ export class PaymentService {
         .toLowerCase();
 
       if (signed !== receivedHash) {
-        console.log('signed !== receivedHash');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -366,7 +360,6 @@ export class PaymentService {
       }
 
       if (vnpParams['vnp_TmnCode'] !== tmnCode) {
-        console.log('!== tmnCode');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -376,7 +369,6 @@ export class PaymentService {
 
       const txnRef = vnpParams['vnp_TxnRef'];
       if (!txnRef) {
-        console.log('!txnRef');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -386,11 +378,15 @@ export class PaymentService {
 
       const payment = await this.paymentRepository.findOne({
         where: { gatewayTxnRef: txnRef },
-        relations: ['contract', 'contract.tenant', 'contract.property'],
+        relations: [
+          'contract',
+          'contract.tenant',
+          'contract.property',
+          'contract.landlord',
+        ],
       });
 
       if (!payment) {
-        console.log('!payment');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -400,7 +396,6 @@ export class PaymentService {
 
       const amountFromGateway = Number(vnpParams['vnp_Amount'] || 0);
       if (!Number.isFinite(amountFromGateway)) {
-        console.log('!Number.isFinite(amountFromGateway)');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -410,7 +405,6 @@ export class PaymentService {
 
       const expected = Math.round(Number(payment.amount) * 100);
       if (expected !== amountFromGateway) {
-        console.log('expected !== amountFromGateway');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -419,7 +413,6 @@ export class PaymentService {
       }
 
       if (payment.status === PaymentStatusEnum.PAID) {
-        console.log('PaymentStatusEnum.PAID');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -442,7 +435,6 @@ export class PaymentService {
 
         await this.onPaymentPaid(payment.id, payment);
 
-        console.log('onPaymentPaid chay xong');
         return new ResponseCommon(
           200,
           'SUCCESS',
@@ -450,7 +442,6 @@ export class PaymentService {
         );
       }
 
-      console.log('failed');
       payment.status = PaymentStatusEnum.FAILED;
       await this.paymentRepository.save(payment);
 
@@ -471,16 +462,25 @@ export class PaymentService {
 
   private async onPaymentPaid(paymentId: string, loaded?: Payment) {
     console.log(`🔔 onPaymentPaid called for payment: ${paymentId}`);
-    
+
     const payment =
       loaded ??
       (await this.paymentRepository.findOne({
         where: { id: paymentId },
-        relations: ['contract', 'contract.tenant', 'contract.property'],
+        relations: [
+          'contract',
+          'contract.tenant',
+          'contract.property',
+          'contract.landlord',
+        ],
       }));
 
     if (!payment || !payment.contract) {
-      console.log(`❌ Payment or contract not found`, { paymentId, hasPayment: !!payment, hasContract: !!payment?.contract });
+      console.log(`❌ Payment or contract not found`, {
+        paymentId,
+        hasPayment: !!payment,
+        hasContract: !!payment?.contract,
+      });
       return;
     }
 
@@ -503,7 +503,7 @@ export class PaymentService {
       payment.purpose === PaymentPurpose.TENANT_ESCROW_DEPOSIT ||
       payment.purpose === PaymentPurpose.LANDLORD_ESCROW_DEPOSIT
     ) {
-     await this.escrowService.creditDepositFromPayment(payment.id);
+      await this.escrowService.creditDepositFromPayment(payment.id);
 
       try {
         await this.recordDepositOnBlockchain(payment);
@@ -537,7 +537,7 @@ export class PaymentService {
 
     if (payment.purpose === PaymentPurpose.FIRST_MONTH_RENT) {
       await this.creditFirstMonthRentToLandlord(payment);
-      
+
       // Sync first payment to blockchain
       try {
         await this.recordFirstPaymentOnBlockchain(payment);
@@ -545,7 +545,7 @@ export class PaymentService {
         console.error('Failed to record first payment on blockchain:', error);
         // Continue execution - blockchain sync failure shouldn't block payment processing
       }
-      
+
       const tenantId = payment.contract.tenant?.id;
       const propertyId = payment.contract.property?.id;
       if (tenantId && propertyId) {
@@ -560,7 +560,7 @@ export class PaymentService {
       }
       return;
     }
-    
+
     // Xử lý MONTHLY_RENT payment
     if (payment.purpose === PaymentPurpose.MONTHLY_RENT) {
       await this.processMonthlyRentPayment(payment);
@@ -605,7 +605,9 @@ export class PaymentService {
    * Record first payment on blockchain
    * NOTE: blockchainService.recordFirstPayment() tự động activate contract trên blockchain
    */
-  private async recordFirstPaymentOnBlockchain(payment: Payment): Promise<void> {
+  private async recordFirstPaymentOnBlockchain(
+    payment: Payment,
+  ): Promise<void> {
     try {
       const contract = payment.contract;
       if (!contract?.contractCode) {
@@ -625,10 +627,12 @@ export class PaymentService {
         contract.contractCode,
         payment.amount.toString(),
         payment.id, // Use payment ID as transaction reference
-        fabricUser
+        fabricUser,
       );
 
-      console.log(`✅ First payment recorded on blockchain for contract ${contract.contractCode} (contract auto-activated)`);
+      console.log(
+        `✅ First payment recorded on blockchain for contract ${contract.contractCode} (contract auto-activated)`,
+      );
     } catch (error) {
       console.error('❌ Failed to record first payment on blockchain:', error);
       throw error;
@@ -646,7 +650,9 @@ export class PaymentService {
       // 2. Record payment on blockchain
       await this.recordMonthlyPaymentOnBlockchain(payment);
 
-      console.log(`✅ Monthly rent payment processed for contract ${payment.contract?.contractCode}`);
+      console.log(
+        `✅ Monthly rent payment processed for contract ${payment.contract?.contractCode}`,
+      );
     } catch (error) {
       console.error('❌ Failed to process monthly rent payment:', error);
       throw error;
@@ -689,7 +695,9 @@ export class PaymentService {
   /**
    * Record monthly payment on blockchain
    */
-  private async recordMonthlyPaymentOnBlockchain(payment: Payment): Promise<void> {
+  private async recordMonthlyPaymentOnBlockchain(
+    payment: Payment,
+  ): Promise<void> {
     try {
       const contract = payment.contract;
       if (!contract?.contractCode) {
@@ -713,12 +721,17 @@ export class PaymentService {
         period,
         payment.amount.toString(),
         fabricUser,
-        payment.id // orderRef
+        payment.id, // orderRef
       );
 
-      console.log(`✅ Monthly payment recorded on blockchain for contract ${contract.contractCode}, period ${period}`);
+      console.log(
+        `✅ Monthly payment recorded on blockchain for contract ${contract.contractCode}, period ${period}`,
+      );
     } catch (error) {
-      console.error('❌ Failed to record monthly payment on blockchain:', error);
+      console.error(
+        '❌ Failed to record monthly payment on blockchain:',
+        error,
+      );
       throw error;
     }
   }
@@ -732,11 +745,10 @@ export class PaymentService {
       if (!contract?.contractCode) {
         console.warn('❌ Cannot record deposit: missing contract code', {
           paymentId: payment.id,
-          contractId: payment.contract?.id
+          contractId: payment.contract?.id,
         });
         return;
       }
-
 
       // Determine party based on payment purpose
       let party: 'tenant' | 'landlord';
@@ -749,7 +761,9 @@ export class PaymentService {
           orgName: 'OrgTenant',
           mspId: 'OrgTenantMSP',
         };
-        console.log(`👤 Tenant deposit detected, userId: ${contract.tenant.id}`);
+        console.log(
+          `👤 Tenant deposit detected, userId: ${contract.tenant.id}`,
+        );
       } else if (payment.purpose === PaymentPurpose.LANDLORD_ESCROW_DEPOSIT) {
         party = 'landlord';
         fabricUser = {
@@ -757,9 +771,14 @@ export class PaymentService {
           orgName: 'OrgLandlord',
           mspId: 'OrgLandlordMSP',
         };
-        console.log(`🏠 Landlord deposit detected, userId: ${contract.landlord.id}`);
+        console.log(
+          `🏠 Landlord deposit detected, userId: ${contract.landlord.id}`,
+        );
       } else {
-        console.warn('❌ Invalid payment purpose for deposit recording:', payment.purpose);
+        console.warn(
+          '❌ Invalid payment purpose for deposit recording:',
+          payment.purpose,
+        );
         return;
       }
 
@@ -768,9 +787,11 @@ export class PaymentService {
         party,
         payment.amount.toString(),
         payment.id, // Use payment ID as deposit transaction reference
-        fabricUser
+        fabricUser,
       );
-      console.log(`✅ ${party} deposit recorded on blockchain for contract ${contract.contractCode}`);
+      console.log(
+        `✅ ${party} deposit recorded on blockchain for contract ${contract.contractCode}`,
+      );
     } catch (error) {
       console.error('❌ Failed to record deposit on blockchain:', error);
       throw error;
