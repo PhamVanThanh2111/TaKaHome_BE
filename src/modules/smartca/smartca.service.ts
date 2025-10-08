@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
@@ -83,10 +84,6 @@ export class SmartCAService {
         );
       }
 
-      console.log(
-        `[NEAC] Using compact signature length: ${signatureLength} bytes`,
-      );
-
       const opts: PlainAddPlaceholderInput = {
         pdfBuffer: out,
         reason: p.reason ?? 'Digitally signed',
@@ -98,18 +95,12 @@ export class SmartCAService {
         page: p.page,
       };
 
-      console.log(
-        `Creating placeholder with signatureLength: ${signatureLength}`,
-      );
-
       try {
         // Try original @signpdf approach first
         out = Buffer.from(plainAddPlaceholder(opts));
-        console.log('✅ Placeholder created successfully with @signpdf');
-        
+
         // Enhance signature dictionary for NEAC compliance
         out = this.enhanceSignatureDictForNeac(out, p);
-        console.log('✅ Enhanced signature dictionary for NEAC compliance');
       } catch (error) {
         console.warn(
           '⚠️ @signpdf failed, using safe fallback approach:',
@@ -118,18 +109,10 @@ export class SmartCAService {
 
         // Fallback: Return original PDF with minimal safe normalization
         out = this.applySafeNeacNormalization(out);
-        console.log('Applied safe NEAC normalization (bypass mode)');
 
-        // Early return for bypass mode - skip ByteRange parsing
-        console.log('=== BYPASS MODE: Returning safely normalized PDF ===');
         return out;
       }
     }
-
-    // 1.5) REMOVED: Không cần expand ByteRange cho file nhỏ (<500KB)
-    console.log(
-      '=== Using original ByteRange format (no expansion needed) ===',
-    );
 
     // 2) Parse ALL /ByteRange (placeholders) & /Contents <...> for signatures only
     const s = out.toString('latin1');
@@ -154,35 +137,14 @@ export class SmartCAService {
       const lt = s.indexOf('<', localStart);
       const gt = s.indexOf('>', lt + 1);
       if (lt < 0 || gt < 0) continue;
-      // skip images/streams: they usually aren’t in dictionaries with /ByteRange nearby,
-      // but we still only pair as many as byteRanges length later.
       const hex = s.slice(lt + 1, gt).replace(/\s+/g, '');
       if (!hex.length) continue;
       contents.push({ hexStart: lt + 1, hexLenChars: hex.length });
     }
 
-    // We only need as many /Contents as /ByteRange (pair in order of appearance)
     if (contents.length < byteRanges.length) {
       throw new BadRequestException(
         `Found ${byteRanges.length} /ByteRange but only ${contents.length} /Contents`,
-      );
-    }
-
-    // 3) REMOVED: No longer calculate/fill ByteRange in /prepare API
-    // ByteRange will remain as placeholders (*) and will be calculated in /embed-cms API
-    console.log('=== PREPARE API: Leaving ByteRange as placeholders (*) ===');
-    console.log(
-      `Created ${byteRanges.length} signature placeholders with ${contents.length} contents placeholders`,
-    );
-
-    // Log placeholder positions for debugging
-    for (let i = 0; i < byteRanges.length; i += 1) {
-      const br = byteRanges[i];
-      const ct = contents[i];
-      console.log(`Placeholder #${i}:`);
-      console.log(`  ByteRange position: ${br.start}`);
-      console.log(
-        `  Contents hex start: ${ct.hexStart}, length: ${ct.hexLenChars}`,
       );
     }
 
@@ -221,8 +183,6 @@ export class SmartCAService {
   }> {
     const startTime = Date.now();
 
-    console.log('[OneShot] Starting complete PDF signing flow');
-
     try {
       const {
         pdfBuffer,
@@ -238,7 +198,6 @@ export class SmartCAService {
       } = options;
 
       // Step 1: Prepare PDF with placeholder
-      console.log('[OneShot] Step 1: Preparing PDF placeholder');
       const preparedPdf = this.preparePlaceholder(pdfBuffer, {
         places: [
           {
@@ -254,12 +213,7 @@ export class SmartCAService {
         ],
       });
 
-      console.log(
-        `[OneShot] PDF prepared: ${pdfBuffer.length} -> ${preparedPdf.length} bytes`,
-      );
-
       // Step 2: Sign to CMS using VNPT SmartCA
-      console.log('[OneShot] Step 2: Signing with VNPT SmartCA');
       const signResult = await this.signToCmsPades({
         pdf: preparedPdf,
         signatureIndex,
@@ -273,12 +227,7 @@ export class SmartCAService {
         throw new Error('Failed to get CMS signature from VNPT');
       }
 
-      console.log(
-        `[OneShot] Signature obtained: ${signResult.cmsBase64.length} chars CMS`,
-      );
-
       // Step 3: Embed CMS into PDF
-      console.log('[OneShot] Step 3: Embedding CMS signature');
       const signedPdf = this.embedCmsAtIndex(
         preparedPdf,
         signResult.cmsBase64,
@@ -286,11 +235,6 @@ export class SmartCAService {
       );
 
       const processingTime = Date.now() - startTime;
-
-      console.log(
-        `[OneShot] ✅ Signing completed successfully in ${processingTime}ms`,
-      );
-      console.log(`[OneShot] Final PDF size: ${signedPdf.length} bytes`);
 
       return {
         success: true,
@@ -417,9 +361,6 @@ export class SmartCAService {
         modifiedPdfStr = modifiedPdfStr.replace(originalDict, enhancedSigDict);
       }
 
-      console.log(
-        '✅ Enhanced signature dictionary with NEAC-compliant metadata',
-      );
       return Buffer.from(modifiedPdfStr, 'latin1');
     } catch (error) {
       console.warn('⚠️ Failed to enhance signature dictionary:', error.message);
@@ -428,10 +369,6 @@ export class SmartCAService {
   }
 
   private applySafeNeacNormalization(pdfBuffer: Buffer): Buffer {
-    console.log(
-      '[applySafeNeacNormalization] Applying minimal NEAC compliance fixes',
-    );
-
     let content = pdfBuffer.toString('latin1');
 
     // Only apply essential fixes that don't risk corrupting PDF content
@@ -439,16 +376,11 @@ export class SmartCAService {
     // 1. Ensure PDF version 1.7 for NEAC compatibility (safe change)
     if (!content.startsWith('%PDF-1.7')) {
       content = content.replace(/^%PDF-[0-9.]+/, '%PDF-1.7');
-      console.log('[SAFE-NEAC] Updated PDF version to 1.7');
     }
 
-    // 2. Ensure proper incremental update structure for NEAC
-    content = this.ensureIncrementalUpdateStructure(content);
-
-    // 3. Only fix EOF if it's clearly broken (conservative approach)
+    // 2. Only fix EOF if it's clearly broken (conservative approach)
     if (!content.includes('%%EOF')) {
       content += '\n%%EOF\n';
-      console.log('[SAFE-NEAC] Added missing EOF');
     } else {
       // Ensure exactly one newline after final EOF (NEAC requirement)
       const lastEofIndex = content.lastIndexOf('%%EOF');
@@ -456,43 +388,9 @@ export class SmartCAService {
         const beforeEof = content.substring(0, lastEofIndex + 5);
         // Replace any trailing content with exactly one newline
         content = beforeEof + '\n';
-        console.log('[SAFE-NEAC] Fixed EOF trailing content');
       }
     }
-
-    console.log(
-      '[applySafeNeacNormalization] Safe NEAC normalization completed',
-    );
     return Buffer.from(content, 'latin1');
-  }
-
-  /**
-   * Ensure proper incremental update structure for NEAC compliance
-   */
-  private ensureIncrementalUpdateStructure(content: string): string {
-    // Check if we have proper xref/trailer/startxref structure
-    const xrefCount = (content.match(/xref\s*\n/g) || []).length;
-    const trailerCount = (content.match(/trailer\s*<</g) || []).length;
-    const startxrefCount = (content.match(/startxref\s*\n\s*\d+/g) || [])
-      .length;
-
-    console.log(
-      `[NEAC] Current structure: xref(${xrefCount}) trailer(${trailerCount}) startxref(${startxrefCount})`,
-    );
-
-    // NEAC requires consistent incremental update structure
-    // For now, just ensure basic structure is present
-    if (xrefCount === 0 || trailerCount === 0 || startxrefCount === 0) {
-      console.log(
-        '[NEAC] Missing incremental update structure - keeping original',
-      );
-      // Don't attempt to fix complex PDF structure automatically
-      // This would require full PDF parsing and reconstruction
-    } else {
-      console.log('[NEAC] Incremental update structure appears valid');
-    }
-
-    return content;
   }
 
   /**
@@ -504,10 +402,6 @@ export class SmartCAService {
     signingTime: forge.asn1.Asn1,
     signingCertV2: forge.asn1.Asn1,
   ): void {
-    console.log(
-      '[validateNeacCmsAttributes] Validating ASN.1 structure for NEAC compliance',
-    );
-
     // Verify each attribute has proper ASN.1 structure
     const attrs = [
       { name: 'contentType', attr: contentType },
@@ -541,118 +435,6 @@ export class SmartCAService {
         );
       }
     }
-
-    console.log(
-      '[validateNeacCmsAttributes] All attributes validated for NEAC compliance',
-    );
-  }
-
-  /**
-   * Ensure ASN.1 CMS structure compliance for NEAC validation
-   */
-  private ensureCmsNeacCompliance(signedAttrsDER: Buffer): Buffer {
-    console.log(
-      '[ensureCmsNeacCompliance] Verifying CMS structure for NEAC compliance',
-    );
-
-    try {
-      // Parse existing signed attributes to verify structure
-      const signedAttrsAsn1 = forge.asn1.fromDer(
-        signedAttrsDER.toString('binary'),
-      );
-
-      // Verify required attributes for NEAC compliance
-      const attrs = signedAttrsAsn1.value;
-      const requiredOids = [
-        this.smartca.oidContentType, // contentType (required)
-        this.smartca.oidMessageDigest, // messageDigest (required)
-        this.smartca.oidSigningTime, // signingTime (required for NEAC)
-        this.smartca.oidSigningCertV2, // signingCertificateV2 (required for NEAC)
-      ];
-
-      let hasAllRequired = true;
-      for (const requiredOid of requiredOids) {
-        const found = attrs.some((attr: any) => {
-          const oid = forge.asn1.derToOid(attr.value[0].value);
-          return oid === requiredOid;
-        });
-
-        if (!found) {
-          console.warn(`[NEAC-CMS] Missing required attribute: ${requiredOid}`);
-          hasAllRequired = false;
-        }
-      }
-
-      if (hasAllRequired) {
-        console.log(
-          '[ensureCmsNeacCompliance] CMS structure compliant with NEAC',
-        );
-        return signedAttrsDER;
-      } else {
-        console.warn(
-          '[ensureCmsNeacCompliance] Rebuilding CMS with NEAC-compliant attributes',
-        );
-        // Would need to rebuild signed attributes with proper NEAC structure
-        return signedAttrsDER; // For now, return as-is
-      }
-    } catch (error) {
-      console.warn(
-        '[ensureCmsNeacCompliance] Error verifying CMS structure:',
-        error.message,
-      );
-      return signedAttrsDER;
-    }
-  }
-
-  /**
-   * Apply basic NEAC compliance normalization to PDF
-   */
-  private applyBasicNeacNormalization(pdfBuffer: Buffer): Buffer {
-    console.log('[applyBasicNeacNormalization] Applying NEAC compliance fixes');
-
-    let content = pdfBuffer.toString('latin1');
-
-    // 1. Ensure PDF version 1.7 for NEAC compatibility
-    if (!content.startsWith('%PDF-1.7')) {
-      content = content.replace(/^%PDF-[0-9.]+/, '%PDF-1.7');
-      console.log('[NEAC] Updated PDF version to 1.7');
-    }
-
-    // 2. Fix line endings for NEAC
-    content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-
-    // 3. Remove null bytes that can cause parsing issues
-    content = content.replace(/\0/g, '');
-
-    // 4. Fix EOF format for NEAC validation
-    content = this.fixEofForNeacCompliance(content);
-
-    console.log('[applyBasicNeacNormalization] NEAC normalization completed');
-    return Buffer.from(content, 'latin1');
-  }
-
-  private fixEofForNeacCompliance(content: string): string {
-    // Remove trailing whitespace
-    content = content.replace(/\s+$/, '');
-
-    // Ensure proper EOF termination
-    if (!content.endsWith('%%EOF')) {
-      const lastEofIndex = content.lastIndexOf('%%EOF');
-      if (lastEofIndex >= 0) {
-        // Remove incomplete EOF and add proper one
-        content = content.substring(0, lastEofIndex + 5);
-      } else {
-        // No EOF found, add it
-        content += '\n%%EOF';
-      }
-    }
-
-    // Ensure single newline at end for NEAC
-    if (!content.endsWith('\n')) {
-      content += '\n';
-    }
-
-    return content;
   }
 
   public async signToCmsPades(options: {
@@ -670,16 +452,6 @@ export class SmartCAService {
     const b = gap.start; // vị trí '<'
     const c = gap.end; // ngay sau '>'
     const d = options.pdf.length - c; // phần đuôi
-    console.log('[sign-to-cms]', {
-      idx: signatureIndex,
-      fileSize: options.pdf.length,
-      lt: gap.start,
-      gtPlus1: gap.end,
-      excludedLen: gap.end - gap.start,
-      innerRawLen: gap.innerRawLen,
-      innerHexLen: gap.innerHexLen,
-      byteRangeShouldBe: [0, b, c, d],
-    });
 
     // 2) Xác định CHUỖI /ByteRange [...] đúng của chính từ điển chữ ký này
     const s0 = options.pdf.toString('latin1');
@@ -743,13 +515,6 @@ export class SmartCAService {
     h.update(simulated.subarray(0, b));
     h.update(simulated.subarray(c));
     const pdfDigestHex = h.digest('hex');
-    console.log('[sign-to-cms/digestAfterBR]', pdfDigestHex, {
-      idx: signatureIndex,
-      b,
-      c,
-      d,
-      fileSize: options.pdf.length,
-    });
 
     // 6) Lấy cert & serial với auto-selection logic
     const certResp = await this.getCertificates({
@@ -772,9 +537,6 @@ export class SmartCAService {
         `Auto-selected certificate ${certResp.selectedSerialNumber} not found`,
       );
     }
-    console.log(
-      `🎯 Using auto-selected latest certificate: ${certResp.selectedSerialNumber}`,
-    );
 
     const { signerPem, chainPem, serial } = this.extractPemChainFromGetCertResp(
       [selectedCert],
@@ -793,7 +555,7 @@ export class SmartCAService {
     const derHashB64 = derHashBytes.toString('base64');
 
     const transactionId = 'SP_CA_' + Date.now();
-    
+
     // Generate docId with new format: 'doc-' + contractId (if provided, else randomUUID) + role
     const role = signatureIndex === 0 ? 'LANDLORD' : 'TENANT';
     const baseId = options.contractId?.trim() || randomUUID();
@@ -896,23 +658,6 @@ export class SmartCAService {
       );
     }
 
-    // DEBUG
-
-    console.log('[embed-cms/before]', {
-      idx: signatureIndex,
-      fileSize: work.length,
-      ltPos,
-      gtPos,
-      reservedLen,
-      cmsLen: cmsHex.length,
-      aroundLT: work
-        .subarray(Math.max(0, ltPos - 8), Math.min(work.length, ltPos + 2))
-        .toString('latin1'),
-      aroundGT: work
-        .subarray(Math.max(0, gtPos - 1), Math.min(work.length, gtPos + 8))
-        .toString('latin1'),
-    });
-
     // 2) Put CMS hex in-place BETWEEN < >
     const padded = cmsHex.padEnd(reservedLen, '0');
     const beforeContents = work.subarray(0, ltPos + 1); // includes '<'
@@ -953,19 +698,10 @@ export class SmartCAService {
         `Post-embed /ByteRange mismatch: wrote [${a} ${b} ${c} ${d}] but file has [${got.join(' ')}]`,
       );
     }
-    console.log('[verify/byteRange-exact]', { got, expect: [a, b, c, d] });
 
     // ========= VERIFY BLOCK (2): check sentinel bytes at b and c-1 =========
     const byteAtB = work[b];
     const byteAtCm1 = work[c - 1];
-    console.log('[verify/sentinels]', {
-      b,
-      c,
-      byteAtB,
-      charB: String.fromCharCode(byteAtB),
-      byteAtCm1,
-      charCm1: String.fromCharCode(byteAtCm1),
-    });
     if (byteAtB !== 0x3c || byteAtCm1 !== 0x3e) {
       // '<' and '>'
       throw new BadRequestException(
@@ -973,36 +709,10 @@ export class SmartCAService {
       );
     }
 
-    // ========= VERIFY BLOCK (3): recompute digest over two ranges =========
-    const digestHexAfterEmbed = this.hashTwoRanges(work, b, c);
-
-    console.log('[verify/digestAfterEmbed]', digestHexAfterEmbed);
-
-    // Done
     return work;
   }
 
   // --- Helpers ---
-
-  // Đọc /ByteRange đã khai báo trong file ở signatureIndex
-  private readDeclaredByteRange(pdf: Buffer, signatureIndex = 0) {
-    const s = pdf.toString('latin1');
-    const re = /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/g;
-    let m: RegExpExecArray | null;
-    let idx = 0;
-    while ((m = re.exec(s))) {
-      if (idx === signatureIndex) {
-        const a = Number(m[1]),
-          b = Number(m[2]),
-          c = Number(m[3]),
-          d = Number(m[4]);
-        return { a, b, c, d, text: m[0], start: m.index, end: re.lastIndex };
-      }
-      idx++;
-    }
-    return null; // có thể là prepare chưa viết ByteRange
-  }
-
   public async getCertificates(options?: {
     userId?: string;
     serviceType?: 'ESEAL' | 'ESIGN'; // nếu biết loại dịch vụ, truyền vào để đỡ fallback
@@ -1041,9 +751,6 @@ export class SmartCAService {
         // Get the last certificate (newest)
         const latestCert = certs[certs.length - 1] as any;
         selectedSerialNumber = latestCert.serial_number;
-        console.log(
-          `🎯 Auto-selected latest certificate: ${selectedSerialNumber}`,
-        );
       }
 
       return {
@@ -1819,7 +1526,6 @@ export class SmartCAService {
       });
     }
 
-    console.log('[scan]', list);
     return list;
   }
 
@@ -1830,7 +1536,7 @@ export class SmartCAService {
     const [a, b, c, d] = gap.byteRangeShouldBe; // = [0, b, c, fileLen - c]
 
     // 2) Tạo BẢN COPY và GHI /ByteRange NGAY BÂY GIỜ
-    let work = Buffer.from(pdf);
+    let work: Buffer = Buffer.from(pdf);
     work = this.writeByteRangeInSigDict(work, signatureIndex, [a, b, c, d]);
 
     // 3) VERIFY nhanh trên bản copy (để bắt lỗi sớm)
@@ -1853,7 +1559,6 @@ export class SmartCAService {
 
     // 4) BĂM trên bản copy đã có /ByteRange đúng
     const mdHex = this.hashTwoRanges(work, b, c);
-    console.log('[sign-to-cms/digestAfterBR]', mdHex);
 
     // 5) Trả digest để gửi SmartCA ký
     const digest = Buffer.from(mdHex, 'hex'); // tuỳ SDK bạn cần Buffer hay hex
@@ -1916,15 +1621,6 @@ export class SmartCAService {
       innerHexLen,
       byteRangeShouldBe: [0, start, end, pdf.length - end],
     };
-  }
-
-  /** Hash 2 segments: [0..start) + [end..EOF] (exclude the whole `<...>`) */
-  private hashForSignatureByGap(pdf: Buffer, gap: Gap) {
-    const md = crypto.createHash('sha256');
-    md.update(pdf.subarray(0, gap.start)); // trước '<'
-    md.update(pdf.subarray(gap.end)); // sau '>'
-    const digest = md.digest();
-    return { digest, digestHex: Buffer.from(digest).toString('hex') };
   }
 
   /** Re-hash two ranges (used for post-embed verification). */
@@ -1990,10 +1686,6 @@ export class SmartCAService {
       );
     }
 
-    console.log(
-      `[NEAC] ByteRange validation passed: [${a}, ${b}, ${c}, ${d}] for file size ${pdf.length} ✓`,
-    );
-
     const s = pdf.toString('latin1');
     const reCont = /\/Contents\s*<([\s\S]*?)>/g;
     const hits = Array.from(s.matchAll(reCont));
@@ -2021,233 +1713,11 @@ export class SmartCAService {
         newBR.slice(0, -1) + ' '.repeat(oldBR.length - newBR.length) + ']';
     }
 
-    console.log(
-      `[NEAC] Writing ByteRange: ${newBR.trim()} (format: [${a}, ${b}, ${c}, ${d}], file:${pdf.length}) ✓`,
-    );
-
     const absStart = dictStart + relBR.index;
     const absEnd = absStart + oldBR.length;
     return Buffer.from(
       s.slice(0, absStart) + newBR + s.slice(absEnd),
       'latin1',
-    ) as Buffer;
+    );
   }
-
-  /**
-   * Chuẩn hóa PDF structure để pass NEAC validation
-   */
-  // normalizePdfStructure(pdfBuffer: Buffer): Buffer {
-  //   let pdfContent = pdfBuffer.toString('latin1');
-
-  //   console.log(
-  //     '[normalizePdfStructure] Starting PDF normalization for NEAC compliance',
-  //   );
-
-  //   // 1. Đảm bảo PDF version đúng
-  //   pdfContent = this.ensurePdfVersion(pdfContent);
-
-  //   // 2. Chuẩn hóa Catalog Object
-  //   pdfContent = this.normalizeCatalogStructure(pdfContent);
-
-  //   // 3. Thêm Microsoft metadata
-  //   pdfContent = this.addMicrosoftMetadata(pdfContent);
-
-  //   // 4. Chuẩn hóa Font Objects
-  //   pdfContent = this.normalizeFontStructures(pdfContent);
-
-  //   // 5. Chuẩn hóa Object spacing
-  //   pdfContent = this.normalizeObjectSpacing(pdfContent);
-
-  //   console.log('[normalizePdfStructure] PDF normalization completed');
-
-  //   return Buffer.from(pdfContent, 'latin1');
-  // }
-
-  // private ensurePdfVersion(content: string): string {
-  //   // Đảm bảo PDF version 1.7
-  //   if (!content.startsWith('%PDF-1.7')) {
-  //     content = content.replace(/^%PDF-[0-9.]+/, '%PDF-1.7');
-  //     console.log('[ensurePdfVersion] Updated PDF version to 1.7');
-  //   }
-  //   return content;
-  // }
-
-  // private normalizeCatalogStructure(content: string): string {
-  //   // Tìm Catalog object
-  //   const catalogRegex = /<<[^<>]*\/Type\s*\/Catalog[^<>]*>>/g;
-
-  //   return content.replace(catalogRegex, (match) => {
-  //     console.log(
-  //       '[normalizeCatalogStructure] Found catalog:',
-  //       match.substring(0, 100) + '...',
-  //     );
-
-  //     // Extract attributes từ catalog hiện tại
-  //     const attributes = this.extractCatalogAttributes(match);
-
-  //     // Tạo catalog structure theo chuẩn Microsoft
-  //     const normalizedCatalog = this.buildStandardCatalog(attributes);
-
-  //     console.log('[normalizeCatalogStructure] Normalized catalog');
-  //     return normalizedCatalog;
-  //   });
-  // }
-
-  // private extractCatalogAttributes(
-  //   catalogString: string,
-  // ): Record<string, string> {
-  //   const attributes: Record<string, string> = {};
-
-  //   // Extract các attributes chính
-  //   const patterns = {
-  //     '/Type': /\/Type\s*\/Catalog/,
-  //     '/Pages': /\/Pages\s+(\d+\s+0\s+R)/,
-  //     '/Lang': /\/Lang\s*\(([^)]+)\)/,
-  //     '/StructTreeRoot': /\/StructTreeRoot\s+(\d+\s+0\s+R)/,
-  //     '/MarkInfo': /\/MarkInfo\s*<<[^>]*>>/,
-  //     '/Metadata': /\/Metadata\s+(\d+\s+0\s+R)/,
-  //     '/ViewerPreferences': /\/ViewerPreferences\s+(\d+\s+0\s+R)/,
-  //   };
-
-  //   Object.entries(patterns).forEach(([key, pattern]) => {
-  //     const match = catalogString.match(pattern);
-  //     if (match) {
-  //       if (key === '/Type') {
-  //         attributes[key] = '/Catalog';
-  //       } else if (key === '/Lang') {
-  //         attributes[key] = `(${match[1]})`;
-  //       } else if (key === '/MarkInfo') {
-  //         attributes[key] = match[0].replace('/MarkInfo', '').trim();
-  //       } else if (match[1]) {
-  //         attributes[key] = match[1];
-  //       }
-  //     }
-  //   });
-
-  //   return attributes;
-  // }
-
-  // private buildStandardCatalog(attributes: Record<string, string>): string {
-  //   // Thứ tự chuẩn theo Microsoft Word
-  //   const result = [
-  //     '<<',
-  //     attributes['/Lang'] ? `/Lang${attributes['/Lang']}` : '/Lang(en)',
-  //     attributes['/MarkInfo']
-  //       ? `/MarkInfo${attributes['/MarkInfo']}`
-  //       : '/MarkInfo<</Marked true>>',
-  //     attributes['/Metadata']
-  //       ? `/Metadata ${attributes['/Metadata']} `
-  //       : '/Metadata 191 0 R ',
-  //     attributes['/Pages']
-  //       ? `/Pages ${attributes['/Pages']} `
-  //       : '/Pages 2 0 R ',
-  //     attributes['/StructTreeRoot']
-  //       ? `/StructTreeRoot ${attributes['/StructTreeRoot']} `
-  //       : '/StructTreeRoot 46 0 R ',
-  //     '/Type/Catalog',
-  //     attributes['/ViewerPreferences']
-  //       ? `/ViewerPreferences ${attributes['/ViewerPreferences']} `
-  //       : '/ViewerPreferences 192 0 R ',
-  //     '/msxpdf:bookmarks[]',
-  //     '>>',
-  //   ];
-
-  //   return result.join('');
-  // }
-
-  // private addMicrosoftMetadata(content: string): string {
-  //   // Thêm Microsoft metadata nếu chưa có
-  //   if (!content.includes('/msxpdf:bookmarks[]')) {
-  //     console.log('[addMicrosoftMetadata] Adding Microsoft metadata');
-  //     // Đã được thêm trong buildStandardCatalog
-  //   }
-
-  //   // Ensure Producer và Creator metadata
-  //   if (!content.includes('/Producer')) {
-  //     content = content.replace(
-  //       '/Creator',
-  //       '/Producer(Microsoft Word for Microsoft 365)/Creator',
-  //     );
-  //   }
-
-  //   return content;
-  // }
-
-  // private normalizeFontStructures(content: string): string {
-  //   // Tìm và chuẩn hóa Font objects
-  //   const fontRegex = /<<[^<>]*\/Type\s*\/Font[^<>]*>>/g;
-
-  //   return content.replace(fontRegex, (match) => {
-  //     return this.reorderFontAttributes(match);
-  //   });
-  // }
-
-  // private reorderFontAttributes(fontObject: string): string {
-  //   const attributes = this.extractFontAttributes(fontObject);
-
-  //   // Thứ tự chuẩn cho Font object
-  //   const orderedKeys = [
-  //     '/BaseFont',
-  //     '/DescendantFonts',
-  //     '/Encoding',
-  //     '/Subtype',
-  //     '/ToUnicode',
-  //     '/Type',
-  //   ];
-
-  //   let result = '<<';
-  //   orderedKeys.forEach((key) => {
-  //     if (attributes[key]) {
-  //       result += key + attributes[key];
-  //     }
-  //   });
-  //   result += '>>';
-
-  //   return result;
-  // }
-
-  // private extractFontAttributes(fontString: string): Record<string, string> {
-  //   const attributes: Record<string, string> = {};
-
-  //   const patterns = {
-  //     '/Type': /\/Type\s*\/Font/,
-  //     '/Subtype': /\/Subtype\s*\/([A-Za-z0-9]+)/,
-  //     '/BaseFont': /\/BaseFont\s*\/([A-Za-z0-9+\-]+)/,
-  //     '/Encoding': /\/Encoding\s*\/([A-Za-z0-9\-]+)/,
-  //     '/DescendantFonts': /\/DescendantFonts\s+(\d+\s+0\s+R)/,
-  //     '/ToUnicode': /\/ToUnicode\s+(\d+\s+0\s+R)/,
-  //   };
-
-  //   Object.entries(patterns).forEach(([key, pattern]) => {
-  //     const match = fontString.match(pattern);
-  //     if (match) {
-  //       if (key === '/Type') {
-  //         attributes[key] = '/Font';
-  //       } else if (key === '/BaseFont') {
-  //         attributes[key] = `/${match[1]}`;
-  //       } else if (key === '/Subtype') {
-  //         attributes[key] = `/${match[1]}`;
-  //       } else if (key === '/Encoding') {
-  //         attributes[key] = `/${match[1]}`;
-  //       } else if (match[1]) {
-  //         attributes[key] = ` ${match[1]} `;
-  //       }
-  //     }
-  //   });
-
-  //   return attributes;
-  // }
-
-  // private normalizeObjectSpacing(content: string): string {
-  //   // Chuẩn hóa spacing theo format Microsoft
-  //   return content
-  //     .replace(/\s+/g, ' ') // Normalize whitespace
-  //     .replace(/\[\s*/g, '[ ') // Array opening spacing
-  //     .replace(/\s*\]/g, ' ]') // Array closing spacing
-  //     .replace(/(\d+)\s+0\s+R/g, '$1 0 R ') // Reference spacing
-  //     .replace(/<<\s*/g, '<<') // Dict opening
-  //     .replace(/\s*>>/g, '>>') // Dict closing
-  //     .replace(/\s+/g, ' ') // Final cleanup
-  //     .trim();
-  // }
 }
