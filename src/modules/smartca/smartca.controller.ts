@@ -125,19 +125,12 @@ export class SmartCAController {
     };
     places.push(place);
 
-    console.log('[PREPARE] Starting PDF preparation');
-
     const prepared = this.smartcaService.preparePlaceholder(
       Buffer.from(file.buffer),
       {
         places,
       },
     );
-
-    console.log('[PREPARE] PDF preparation completed');
-
-    // REMOVED: No longer finalize ByteRange in /prepare - it will be done in /embed-cms
-    // const finalized = this.smartcaService.finalizeAllByteRanges(prepared);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="prepared.pdf"');
@@ -190,10 +183,6 @@ export class SmartCAController {
       ? Number(timeoutMsRaw)
       : 120000;
 
-    console.log(
-      `[POST] /contracts/smartca/sign-to-cms with signatureIndex: ${signatureIndex}`,
-    );
-
     try {
       const result = await this.smartcaService.signToCmsPades({
         pdf: Buffer.from(file.buffer),
@@ -220,7 +209,7 @@ export class SmartCAController {
         error instanceof Error
           ? error.message
           : 'Unknown error during signing process';
-      const errorStatus = Number((error as any)?.status) || 500;
+      const errorStatus = Number((error as { status?: number })?.status) || 500;
 
       console.error('[SIGN-TO-CMS] Error:', errorMessage);
 
@@ -285,10 +274,6 @@ export class SmartCAController {
       throw new BadRequestException('Invalid signatureIndex');
     }
 
-    console.log(
-      `[POST] /contracts/embed-cms with signatureIndex: ${signatureIndex}`,
-    );
-
     const cmsBase64 = (body.cmsBase64 || '').trim();
     const cmsHex = (body.cmsHex || '').trim();
 
@@ -314,8 +299,6 @@ export class SmartCAController {
       cmsHexString,
       signatureIndex,
     );
-
-    console.log(`[EMBED-CMS] PDF signed successfully`);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="signed.pdf"');
@@ -379,8 +362,21 @@ export class SmartCAController {
       );
     }
 
+    // Define a type for certificate to avoid 'any'
+    type Certificate = {
+      serial_number: string;
+      cert_status: string;
+      cert_status_code: string;
+      valid_from: string;
+      valid_to: string;
+      subject: string;
+      issuer: string;
+      service_type: string;
+      [key: string]: unknown;
+    };
+
     // Format response để dễ đọc
-    const certificates = result.certificates.map((cert: any) => ({
+    const certificates = (result.certificates as Certificate[]).map((cert) => ({
       serial_number: cert.serial_number,
       cert_status: cert.cert_status,
       cert_status_code: cert.cert_status_code,
@@ -440,8 +436,6 @@ export class SmartCAController {
     },
     @Res() res: Response,
   ) {
-    console.log('[OneShot API] Starting complete PDF signing workflow');
-
     try {
       // Read PDF file from assets
       const pdfPath = path.join(
@@ -457,9 +451,6 @@ export class SmartCAController {
       }
 
       const pdfBuffer = fs.readFileSync(pdfPath);
-      console.log(
-        `[OneShot API] Loaded PDF from assets: ${pdfBuffer.length} bytes`,
-      );
 
       const result = await this.smartcaService.signPdfOneShot({
         pdfBuffer,
@@ -483,8 +474,6 @@ export class SmartCAController {
           metadata: result.metadata,
         });
       }
-
-      console.log('[OneShot API] ✅ Signing completed successfully');
 
       // Return signed PDF
       res.setHeader('Content-Type', 'application/pdf');

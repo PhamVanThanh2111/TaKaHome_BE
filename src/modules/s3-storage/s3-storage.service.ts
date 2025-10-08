@@ -55,10 +55,6 @@ export class S3StorageService {
       },
       ...(this.s3.endpoint && { endpoint: this.s3.endpoint }),
     });
-
-    console.log(
-      `✅ S3StorageService initialized - Region: ${this.s3.region}, Bucket: ${this.s3.bucketName}`,
-    );
   }
 
   /**
@@ -106,10 +102,6 @@ export class S3StorageService {
         CacheControl: 'private, no-cache',
       };
 
-      console.log(
-        `[S3Upload] Uploading ${role} contract PDF: ${key} (${pdfBuffer.length} bytes)`,
-      );
-
       // Upload to S3
       const command = new PutObjectCommand(uploadParams);
       const result = await this.s3Client.send(command);
@@ -125,10 +117,6 @@ export class S3StorageService {
         size: pdfBuffer.length,
       };
 
-      console.log(
-        `[S3Upload] ✅ Upload successful: ${key} (ETag: ${result.ETag})`,
-      );
-
       return uploadResult;
     } catch (error) {
       console.error('[S3Upload] ❌ Upload failed:', error);
@@ -138,20 +126,20 @@ export class S3StorageService {
       }
 
       // AWS S3 specific errors
-      if (error.name === 'NoSuchBucket') {
+      if (error instanceof Error && error.name === 'NoSuchBucket') {
         throw new BadRequestException(
           `S3 bucket '${this.s3.bucketName}' does not exist`,
         );
       }
 
-      if (error.name === 'AccessDenied') {
+      if (error instanceof Error && error.name === 'AccessDenied') {
         throw new BadRequestException(
           'Access denied to S3 bucket. Check AWS credentials and permissions.',
         );
       }
 
       throw new BadRequestException(
-        `Failed to upload PDF to S3: ${error.message}`,
+        `Failed to upload PDF to S3: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
     }
   }
@@ -173,15 +161,11 @@ export class S3StorageService {
         expiresIn: expiresInSeconds,
       });
 
-      console.log(
-        `[S3Download] Generated signed URL for ${key} (expires in ${expiresInSeconds}s)`,
-      );
-
       return signedUrl;
     } catch (error) {
       console.error('[S3Download] ❌ Failed to generate signed URL:', error);
       throw new BadRequestException(
-        `Failed to generate download URL: ${error.message}`,
+        `Failed to generate download URL: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
     }
   }
@@ -197,12 +181,10 @@ export class S3StorageService {
       });
 
       await this.s3Client.send(command);
-
-      console.log(`[S3Delete] ✅ Deleted contract PDF: ${key}`);
     } catch (error) {
       console.error('[S3Delete] ❌ Failed to delete PDF:', error);
       throw new BadRequestException(
-        `Failed to delete PDF from S3: ${error.message}`,
+        `Failed to delete PDF from S3: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
     }
   }
@@ -222,15 +204,11 @@ export class S3StorageService {
       const result = await this.s3Client.send(command);
       const keys = result.Contents?.map((obj) => obj.Key).filter(Boolean) || [];
 
-      console.log(
-        `[S3List] Found ${keys.length} PDFs for contract ${contractId}`,
-      );
-
       return keys as string[];
     } catch (error) {
       console.error('[S3List] ❌ Failed to list contract PDFs:', error);
       throw new BadRequestException(
-        `Failed to list contract PDFs: ${error.message}`,
+        `Failed to list contract PDFs: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
     }
   }
@@ -252,10 +230,6 @@ export class S3StorageService {
       const signedUrl = await getSignedUrl(this.s3Client, command, {
         expiresIn: expiresInSeconds,
       });
-
-      console.log(
-        `[S3GetUrl] Generated presigned GET URL for ${key} (expires in ${expiresInSeconds}s)`,
-      );
 
       return signedUrl;
     } catch (error) {
@@ -288,10 +262,6 @@ export class S3StorageService {
         expiresIn: expiresInSeconds,
       });
 
-      console.log(
-        `[S3Upload] Generated presigned upload URL for ${key} (expires in ${expiresInSeconds}s)`,
-      );
-
       return signedUrl;
     } catch (error) {
       console.error('[S3Upload] ❌ Failed to generate upload URL:', error);
@@ -306,8 +276,6 @@ export class S3StorageService {
    */
   async downloadFile(key: string): Promise<Buffer> {
     try {
-      console.log(`[S3Download] Downloading file: ${key}`);
-
       const command = new GetObjectCommand({
         Bucket: this.s3.bucketName,
         Key: key,
@@ -324,15 +292,14 @@ export class S3StorageService {
       const reader = response.Body.transformToWebStream().getReader();
 
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          chunks.push(value as Uint8Array);
+        const result = await reader.read();
+        if (result.done) break;
+        if (result.value) {
+          chunks.push(result.value as Uint8Array);
         }
       }
 
       const buffer = Buffer.concat(chunks);
-      console.log(`[S3Download] ✅ Downloaded ${key}: ${buffer.length} bytes`);
 
       return buffer;
     } catch (error) {
@@ -351,7 +318,6 @@ export class S3StorageService {
       const url = new URL(s3Url);
       // Remove leading slash
       const key = url.pathname.substring(1);
-      console.log(`[S3] Extracted key from URL: ${key}`);
       return key;
     } catch {
       throw new BadRequestException(`Invalid S3 URL format: ${s3Url}`);

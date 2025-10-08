@@ -57,8 +57,6 @@ export class BookingService {
       );
     }
 
-    console.log('[LandlordApprove] Starting landlord PDF signing process');
-
     let signedPdfPresignedUrl: string | undefined;
     let keyUrl: string | undefined;
 
@@ -77,9 +75,6 @@ export class BookingService {
       }
 
       const pdfBuffer = fs.readFileSync(pdfPath);
-      console.log(
-        `[LandlordApprove] Loaded PDF from assets: ${pdfBuffer.length} bytes`,
-      );
 
       // Landlord signs the contract (signatureIndex: 0)
       const signResult = await this.smartcaService.signPdfOneShot({
@@ -101,14 +96,8 @@ export class BookingService {
         );
       }
 
-      console.log(
-        '[LandlordApprove] ✅ Landlord signing completed successfully',
-      );
-
       // Upload the signed PDF to S3
       if (signResult.signedPdf) {
-        console.log('[LandlordApprove] Uploading signed PDF to S3...');
-
         try {
           const uploadResult = await this.s3StorageService.uploadContractPdf(
             signResult.signedPdf,
@@ -126,11 +115,6 @@ export class BookingService {
             },
           );
 
-          console.log(
-            '[LandlordApprove] ✅ PDF uploaded to S3:',
-            uploadResult.key,
-          );
-
           keyUrl = uploadResult.url;
 
           // Generate presigned URL for 5 minutes access
@@ -139,21 +123,11 @@ export class BookingService {
               uploadResult.key,
               300, // 5 minutes
             );
-
-          console.log(
-            '[LandlordApprove] 🔗 Generated presigned URL (expires in 5 minutes)',
-          );
-
-          // TODO: Optionally save the S3 key/URL to contract or booking entity
-          // contract.landlordSignedPdfUrl = uploadResult.url;
-          // contract.landlordSignedPdfKey = uploadResult.key;
         } catch (uploadError) {
           console.error(
             '[LandlordApprove] ⚠️ Failed to upload PDF to S3:',
             uploadError,
           );
-          // Don't fail the entire operation if S3 upload fails
-          // The signing was successful, just the storage failed
         }
       }
     } catch (error) {
@@ -163,16 +137,20 @@ export class BookingService {
       );
     }
 
-    // After successful signing, update booking status
-    booking.status = BookingStatus.PENDING_SIGNATURE;
-
     if (contract) {
       booking.contract = contract;
       booking.contractId = contract.id;
     }
     const saved = await this.bookingRepository.save(booking);
-    contract.contractFileUrl = keyUrl ?? '';
+
+    if (!keyUrl) {
+      throw new BadRequestException('Failed to upload signed PDF to storage');
+    }
+    contract.contractFileUrl = keyUrl;
     await this.contractRepository.save(contract);
+
+    // After successful signing, update booking status
+    booking.status = BookingStatus.PENDING_SIGNATURE;
 
     // Return response with presigned URL
     const response = {
@@ -216,26 +194,16 @@ export class BookingService {
       );
     }
 
-    console.log('[TenantSign] Starting tenant PDF signing process');
-
     let signedPdfPresignedUrl: string | undefined;
 
     try {
-      // Step 1: Download landlord-signed PDF from S3
-      console.log(
-        '[TenantSign] Step 1: Downloading landlord-signed PDF from S3',
-      );
+      // 1. Download landlord-signed PDF from S3
       const s3Key = this.s3StorageService.extractKeyFromUrl(
         contract.contractFileUrl,
       );
       const landlordSignedPdf = await this.s3StorageService.downloadFile(s3Key);
-      
-      console.log(
-        `[TenantSign] Downloaded PDF from S3: ${landlordSignedPdf.length} bytes`,
-      );
 
-      // Step 2: Tenant signs the PDF (signatureIndex: 1)
-      console.log('[TenantSign] Step 2: Tenant signing PDF');
+      // 2. Tenant signs the PDF (signatureIndex: 1)
       const signResult = await this.smartcaService.signPdfOneShot({
         pdfBuffer: landlordSignedPdf,
         signatureIndex: 1, // Tenant signature index
@@ -255,12 +223,8 @@ export class BookingService {
         );
       }
 
-      console.log('[TenantSign] ✅ Tenant signing completed successfully');
-
-      // Step 3: Upload the fully-signed PDF to S3
+      // 3. Upload the fully-signed PDF to S3
       if (signResult.signedPdf) {
-        console.log('[TenantSign] Step 3: Uploading fully-signed PDF to S3...');
-
         const uploadResult = await this.s3StorageService.uploadContractPdf(
           signResult.signedPdf,
           {
@@ -278,19 +242,10 @@ export class BookingService {
           },
         );
 
-        console.log(
-          '[TenantSign] ✅ Fully-signed PDF uploaded to S3:',
-          uploadResult.key,
-        );
-
-        // Step 4: Generate presigned URL for response
+        // 4. Generate presigned URL for response
         signedPdfPresignedUrl = await this.s3StorageService.getPresignedGetUrl(
           uploadResult.key,
           300, // 5 minutes
-        );
-
-        console.log(
-          '[TenantSign] 🔗 Generated presigned URL (expires in 5 minutes)',
         );
 
         // Update contract with new URL (fully-signed PDF)
