@@ -1623,15 +1623,6 @@ export class SmartCAService {
     };
   }
 
-  /** Hash 2 segments: [0..start) + [end..EOF] (exclude the whole `<...>`) */
-  private hashForSignatureByGap(pdf: Buffer, gap: Gap) {
-    const md = crypto.createHash('sha256');
-    md.update(pdf.subarray(0, gap.start)); // trước '<'
-    md.update(pdf.subarray(gap.end)); // sau '>'
-    const digest = md.digest();
-    return { digest, digestHex: Buffer.from(digest).toString('hex') };
-  }
-
   /** Re-hash two ranges (used for post-embed verification). */
   private hashTwoRanges(buf: Buffer, b: number, c: number): string {
     const md = crypto.createHash('sha256');
