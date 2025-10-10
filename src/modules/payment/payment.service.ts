@@ -685,8 +685,8 @@ export class PaymentService {
   ): Promise<void> {
     try {
       const contract = payment.contract;
-      if (!contract?.contractCode) {
-        console.warn('Cannot record monthly payment: missing contract code');
+      if (!contract?.contractCode || !contract.startDate) {
+        console.warn('Cannot record monthly payment: missing contract code or start date');
         return;
       }
 
@@ -697,9 +697,9 @@ export class PaymentService {
         mspId: 'OrgTenantMSP',
       };
 
-      // Generate period string (e.g., "2025-01" for January 2025)
-      const paymentDate = new Date();
-      const period = `${paymentDate.getFullYear()}-${(paymentDate.getMonth() + 1).toString().padStart(2, '0')}`;
+      // Calculate period based on contract start date and payment date
+      const paymentDate = vnNow();
+      const period = this.calculatePaymentPeriod(contract, paymentDate);
 
       await this.blockchainService.recordPayment(
         contract.contractCode,
@@ -784,6 +784,23 @@ export class PaymentService {
   }
 
   /** ===== Helpers ===== */
+
+  /**
+   * Calculate payment period based on contract start date
+   * Period 1 = First month payment (handled separately)
+   * Period 2, 3, 4... = Monthly payments
+   */
+  private calculatePaymentPeriod(contract: { startDate: Date }, paymentDate: Date): string {
+    const startDate = contract.startDate;
+    const monthsDiff = Math.floor(
+      (paymentDate.getFullYear() - startDate.getFullYear()) * 12 +
+      (paymentDate.getMonth() - startDate.getMonth())
+    );
+    
+    // Period starts from 2 since first payment is period 1
+    const period = Math.max(2, monthsDiff + 2);
+    return period.toString();
+  }
 
   private generateVnpTxnRef() {
     // YYMMDDHHmmss + 6 số ngẫu nhiên — đủ uniqueness cho TEST/DEV

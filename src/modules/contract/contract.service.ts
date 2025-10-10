@@ -13,6 +13,8 @@ import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
 import { Contract } from './entities/contract.entity';
+import { ContractTerminationService, TerminationResult } from './contract-termination.service';
+import { DisputeHandlingService, DisputeDetails } from './dispute-handling.service';
 
 @Injectable()
 export class ContractService {
@@ -23,6 +25,8 @@ export class ContractService {
     private contractRepository: Repository<Contract>,
     private blockchainService: BlockchainService,
     private s3StorageService: S3StorageService,
+    private terminationService: ContractTerminationService,
+    private disputeService: DisputeHandlingService,
   ) {}
 
   async create(
@@ -683,5 +687,93 @@ export class ContractService {
             : 'OrgProp',
       mspId: orgMSP,
     };
+  }
+
+  /**
+   * Terminate contract with proper refund calculation
+   */
+  async terminateContract(
+    id: string, 
+    reason: string, 
+    terminatedBy: string
+  ): Promise<ResponseCommon<TerminationResult>> {
+    try {
+      const contract = await this.loadContractOrThrow(id);
+      
+      // Validate contract can be terminated
+      this.ensureStatus(contract, [
+        ContractStatusEnum.ACTIVE,
+        ContractStatusEnum.SIGNED,
+      ]);
+
+      const result = await this.terminationService.terminateContract(
+        id, 
+        reason, 
+        terminatedBy
+      );
+
+      return new ResponseCommon(200, 'SUCCESS', result);
+    } catch (error) {
+      this.logger.error(`Failed to terminate contract ${id}:`, error);
+      throw new BadRequestException(`Contract termination failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Raise a dispute for a contract
+   */
+  async raiseDispute(
+    contractId: string,
+    disputeReason: string,
+    initiatedBy: 'tenant' | 'landlord' = 'tenant',
+    disputeType: 'PAYMENT' | 'PROPERTY_CONDITION' | 'CONTRACT_VIOLATION' | 'EARLY_TERMINATION' | 'OTHER' = 'OTHER'
+  ): Promise<ResponseCommon<DisputeDetails>> {
+    try {
+      const contract = await this.loadContractOrThrow(contractId);
+      
+      // Validate contract status
+      this.ensureStatus(contract, [
+        ContractStatusEnum.ACTIVE,
+        ContractStatusEnum.SIGNED,
+      ]);
+
+      const disputeDetails = await this.disputeService.raiseDispute(
+        contractId,
+        disputeReason,
+        initiatedBy,
+        disputeType
+      );
+
+      return new ResponseCommon(200, 'SUCCESS', disputeDetails);
+    } catch (error) {
+      this.logger.error(`Failed to raise dispute for contract ${contractId}:`, error);
+      throw new BadRequestException(`Dispute creation failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Resolve a dispute for a contract
+   */
+  async resolveDispute(
+    contractId: string,
+    resolution: string,
+    resolvedBy: string,
+    outcome: 'TENANT_FAVOR' | 'LANDLORD_FAVOR' | 'MUTUAL_AGREEMENT' | 'DISMISSED'
+  ): Promise<ResponseCommon<boolean>> {
+    try {
+      const contract = await this.loadContractOrThrow(contractId);
+
+      const resolved = await this.disputeService.resolveDispute(
+        contractId,
+        resolution,
+        resolvedBy,
+        outcome
+      );
+
+      return new ResponseCommon(200, 'SUCCESS', resolved);
+    } catch (error) {
+      this.logger.error(`Failed to resolve dispute for contract ${contractId}:`, error);
+      throw new BadRequestException(`Dispute resolution failed: ${error.message}`);
+    }
   }
 }

@@ -20,7 +20,6 @@ import { Notification } from '../modules/notification/entities/notification.enti
 
 @Module({
   imports: [
-    ScheduleModule.forRoot(),
     TypeOrmModule.forFeature([Booking, Contract, Notification]),
     BookingModule,
     ContractModule,

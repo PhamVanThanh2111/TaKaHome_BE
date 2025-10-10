@@ -75,8 +75,9 @@ export class PaymentReminderCron {
         }
       }
 
-      // Check deposit reminders
+      // Check deposit reminders and cancel overdue deposits
       await this.sendDepositReminders();
+      await this.cancelOverdueDeposits();
       
       this.logger.log(`✅ Processed ${upcomingPayments.length} upcoming payments`);
     } catch (error) {
@@ -215,6 +216,44 @@ export class PaymentReminderCron {
 
     } catch (error) {
       this.logger.error(`❌ Failed to process overdue payment for booking ${booking.id}:`, error);
+    }
+  }
+
+  /**
+   * Cancel bookings where deposit is more than 24 hours overdue
+   */
+  private async cancelOverdueDeposits(): Promise<void> {
+    try {
+      const now = vnNow();
+      
+      // Find bookings awaiting deposit that are more than 24 hours overdue
+      const overdueDeposits = await this.bookingRepository.find({
+        where: {
+          status: BookingStatus.AWAITING_DEPOSIT,
+          escrowDepositFundedAt: IsNull(),
+          escrowDepositDueAt: LessThanOrEqual(addDays(now, -1)), // 24+ hours overdue
+        },
+        relations: ['tenant', 'property', 'property.landlord'],
+      });
+
+      for (const booking of overdueDeposits) {
+        try {
+          const result = await this.automatedPenaltyService.cancelBookingForLateDeposit(booking);
+          
+          if (result?.cancelled) {
+            this.logger.log(`🚫 Cancelled booking ${booking.id} for late deposit: ${result.reason}`);
+          }
+        } catch (error) {
+          this.logger.error(`❌ Failed to cancel booking ${booking.id} for late deposit:`, error);
+        }
+      }
+
+      if (overdueDeposits.length > 0) {
+        this.logger.log(`📋 Processed ${overdueDeposits.length} overdue deposit bookings`);
+      }
+
+    } catch (error) {
+      this.logger.error('❌ Error in cancelOverdueDeposits:', error);
     }
   }
 }

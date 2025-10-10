@@ -21,6 +21,7 @@ import AppDataSourcePromise from './modules/core/database/data-source';
 
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import * as Joi from 'joi';
 import vnpayConfig from './config/vnpay.config';
 import smartcaConfig from './config/smartca.config';
@@ -29,12 +30,14 @@ import { EscrowModule } from './modules/escrow/escrow.module';
 import { InvoiceModule } from './modules/invoice/invoice.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { SmartCAModule } from './modules/smartca/smartca.module';
+import { CronModule } from './cron/cron.module';
 
 @Module({
   imports: [
     TypeOrmModule.forRootAsync({
       useFactory: async () => (await AppDataSourcePromise).options,
     }),
+    ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
       load: [vnpayConfig, smartcaConfig], // <— nạp file config/vnpay.config.ts và smartca.config.ts
@@ -82,6 +85,7 @@ import { SmartCAModule } from './modules/smartca/smartca.module';
     EscrowModule,
     InvoiceModule,
     MaintenanceModule,
+    CronModule,
   ],
 })
 export class AppModule implements NestModule {
