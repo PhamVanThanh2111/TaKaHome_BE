@@ -141,16 +141,28 @@ export class BookingService {
       booking.contract = contract;
       booking.contractId = contract.id;
     }
-    const saved = await this.bookingRepository.save(booking);
 
     if (!keyUrl) {
       throw new BadRequestException('Failed to upload signed PDF to storage');
     }
-    contract.contractFileUrl = keyUrl;
-    await this.contractRepository.save(contract);
+
+    // Update contract status to PENDING_SIGNATURE and integrate with blockchain
+    try {
+      await this.contractService.markPendingSignatureWithBlockchain(
+        contract.id,
+        keyUrl,
+      );
+    } catch (error) {
+      console.error('[LandlordApprove] ❌ Failed to mark contract as pending signature:', error);
+      // Still continue with the process even if blockchain integration fails
+      // The blockchain sync will be retried later
+      contract.contractFileUrl = keyUrl;
+      await this.contractRepository.save(contract);
+    }
 
     // After successful signing, update booking status
     booking.status = BookingStatus.PENDING_SIGNATURE;
+    const saved = await this.bookingRepository.save(booking);
 
     // Return response with presigned URL
     const response = {
