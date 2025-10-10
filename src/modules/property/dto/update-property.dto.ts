@@ -11,7 +11,7 @@ export class UpdatePropertyDto extends PartialType(CreatePropertyDto) {
   id?: string;
 
   @ApiPropertyOptional({
-    example: PropertyTypeEnum.HOUSE,
+    example: PropertyTypeEnum.HOUSING,
     enum: PropertyTypeEnum,
   })
   type?: PropertyTypeEnum;
