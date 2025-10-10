@@ -461,8 +461,6 @@ export class PaymentService {
   }
 
   private async onPaymentPaid(paymentId: string, loaded?: Payment) {
-    console.log(`🔔 onPaymentPaid called for payment: ${paymentId}`);
-
     const payment =
       loaded ??
       (await this.paymentRepository.findOne({
@@ -476,21 +474,8 @@ export class PaymentService {
       }));
 
     if (!payment || !payment.contract) {
-      console.log(`❌ Payment or contract not found`, {
-        paymentId,
-        hasPayment: !!payment,
-        hasContract: !!payment?.contract,
-      });
       return;
     }
-
-    console.log(`📋 Payment details:`, {
-      id: payment.id,
-      purpose: payment.purpose,
-      amount: payment.amount,
-      contractId: payment.contract.id,
-      contractCode: payment.contract.contractCode,
-    });
 
     // Xử lý theo mục đích payment
     // Hiện có 3 mục đích chính:
@@ -508,7 +493,7 @@ export class PaymentService {
       try {
         await this.recordDepositOnBlockchain(payment);
       } catch (error) {
-        console.error('❌ Failed to record deposit on blockchain:', error);
+        console.error('Failed to record deposit on blockchain:', error);
       }
 
       const tenantId = payment.contract.tenant?.id;
