@@ -59,6 +59,30 @@ export class PaymentController {
     });
   }
 
+  @Post('invoice/:invoiceId')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Tạo payment từ hóa đơn' })
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    type: PaymentResponseDto,
+    description: 'Tạo payment từ hóa đơn thành công',
+  })
+  createFromInvoice(
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: { method: 'VNPAY' | 'WALLET' },
+    @CurrentUser() user: JwtUser,
+    @Req() req: Request,
+  ) {
+    const ip =
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+      req.socket.remoteAddress;
+
+    return this.paymentService.createPaymentFromInvoice(invoiceId, body.method as any, {
+      userId: user.id,
+      ipAddr: String(ip),
+    });
+  }
+
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách payment' })
   @ApiResponse({ status: HttpStatus.OK, type: [PaymentResponseDto] })

@@ -2,6 +2,8 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -14,9 +16,10 @@ import { ResponseCommon } from 'src/common/dto/response.dto';
 import { Contract } from '../contract/entities/contract.entity';
 import { ContractService } from '../contract/contract.service';
 import { ContractStatusEnum } from '../common/enums/contract-status.enum';
-import { VN_TZ, addDaysVN, addHoursVN, vnNow } from '../../common/datetime';
+import { VN_TZ, addDaysVN, addHoursVN, vnNow, formatVN } from '../../common/datetime';
 import { SmartCAService } from '../smartca/smartca.service';
 import { S3StorageService } from '../s3-storage/s3-storage.service';
+import { InvoiceService } from '../invoice/invoice.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -30,6 +33,8 @@ export class BookingService {
     private contractService: ContractService,
     private smartcaService: SmartCAService,
     private s3StorageService: S3StorageService,
+    @Inject(forwardRef(() => InvoiceService))
+    private invoiceService: InvoiceService,
   ) {}
 
   async create(
@@ -314,7 +319,7 @@ export class BookingService {
     ]);
     booking.escrowDepositFundedAt = vnNow();
     if (booking.landlordEscrowDepositFundedAt) {
-      this.maybeMarkDualEscrowFunded(booking);
+      await this.maybeMarkDualEscrowFunded(booking);
     } else {
       booking.status = BookingStatus.ESCROW_FUNDED_T;
     }
@@ -336,7 +341,7 @@ export class BookingService {
     ]);
     booking.landlordEscrowDepositFundedAt = vnNow();
     if (booking.escrowDepositFundedAt) {
-      this.maybeMarkDualEscrowFunded(booking);
+      await this.maybeMarkDualEscrowFunded(booking);
     } else {
       booking.status = BookingStatus.ESCROW_FUNDED_L;
     }
@@ -506,12 +511,76 @@ export class BookingService {
     return this.parseInput(value);
   }
 
-  private maybeMarkDualEscrowFunded(b: Booking) {
+  private async maybeMarkDualEscrowFunded(b: Booking) {
     if (b.escrowDepositFundedAt && b.landlordEscrowDepositFundedAt) {
       b.status = BookingStatus.DUAL_ESCROW_FUNDED;
       if (!b.firstRentDueAt) {
         b.firstRentDueAt = addDaysVN(vnNow(), 3);
       }
+      
+      // Automatically create first month rent invoice when dual escrow is funded
+      await this.createFirstMonthRentInvoice(b);
+    }
+  }
+
+  /**
+   * Create first month rent invoice when dual escrow is funded
+   */
+  private async createFirstMonthRentInvoice(booking: Booking): Promise<void> {
+    try {
+      // Load contract if not already loaded
+      const contract = booking.contract || booking.contractId 
+        ? await this.contractRepository.findOne({
+            where: { id: booking.contractId },
+            relations: ['property'],
+          })
+        : null;
+
+      if (!contract) {
+        console.warn(`Cannot create first month rent invoice: missing contract for booking ${booking.id}`);
+        return;
+      }
+
+      // Check if invoice already exists for this contract (first month rent)
+      const existingInvoices = await this.invoiceService.findByContract(contract.id);
+      const hasFirstMonthInvoice = existingInvoices.data?.some(invoice =>
+        invoice.items?.some(item => 
+          item.description.toLowerCase().includes('first month') ||
+          item.description.toLowerCase().includes('tháng đầu')
+        )
+      );
+
+      if (hasFirstMonthInvoice) {
+        console.log(`First month rent invoice already exists for contract ${contract.id}`);
+        return;
+      }
+
+      // Calculate monthly rent amount from property
+      const monthlyRent = contract.property?.price || 0;
+      if (!monthlyRent) {
+        console.warn(`Cannot create invoice: missing price for property ${contract.property?.id}`);
+        return;
+      }
+
+      // Set due date to firstRentDueAt
+      const dueDate = booking.firstRentDueAt || addDaysVN(vnNow(), 3);
+
+      // Create invoice
+      await this.invoiceService.create({
+        contractId: contract.id,
+        dueDate: formatVN(dueDate, 'yyyy-MM-dd'),
+        items: [
+          {
+            description: 'First month rent payment',
+            amount: monthlyRent,
+          },
+        ],
+      });
+
+      console.log(`✅ Created first month rent invoice for contract ${contract.id}, amount: ${monthlyRent}`);
+    } catch (error) {
+      console.error('❌ Failed to create first month rent invoice:', error);
+      // Don't throw - invoice creation failure shouldn't block dual escrow funding
     }
   }
 

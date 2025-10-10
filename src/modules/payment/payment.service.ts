@@ -5,6 +5,8 @@ import { Repository } from 'typeorm';
 import { Payment } from './entities/payment.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
+import { Invoice } from '../invoice/entities/invoice.entity';
+import { InvoiceStatusEnum } from '../common/enums/invoice-status.enum';
 import { ConfigType } from '@nestjs/config';
 import * as crypto from 'crypto';
 import * as qs from 'querystring';
@@ -32,6 +34,8 @@ export class PaymentService {
   constructor(
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
+    @InjectRepository(Invoice)
+    private readonly invoiceRepository: Repository<Invoice>,
     @Inject(vnpayConfig.KEY)
     private readonly vnpay: ConfigType<typeof vnpayConfig>,
     private readonly walletService: WalletService,
@@ -39,6 +43,60 @@ export class PaymentService {
     private readonly bookingService: BookingService,
     private readonly blockchainService: BlockchainService,
   ) {}
+
+  /** API chính để khởi tạo thanh toán từ invoice */
+  async createPaymentFromInvoice(
+    invoiceId: string,
+    method: PaymentMethodEnum,
+    ctx: { userId: string; ipAddr: string },
+  ): Promise<
+    ResponseCommon<{
+      id: string;
+      contractId: string;
+      amount: number;
+      method: PaymentMethodEnum;
+      status: PaymentStatusEnum;
+      paymentUrl?: string;
+      txnRef?: string;
+    }>
+  > {
+    // Load invoice and validate
+    const invoice = await this.invoiceRepository.findOne({
+      where: { id: invoiceId },
+      relations: ['contract', 'contract.tenant'],
+    });
+
+    if (!invoice) {
+      throw new Error(`Invoice ${invoiceId} not found`);
+    }
+
+    if (invoice.status !== InvoiceStatusEnum.PENDING) {
+      throw new Error(`Invoice ${invoiceId} is not pending payment`);
+    }
+
+    if (invoice.contract?.tenant?.id !== ctx.userId) {
+      throw new Error(`User ${ctx.userId} is not authorized to pay invoice ${invoiceId}`);
+    }
+
+    // Determine payment purpose based on invoice description
+    let purpose: PaymentPurpose;
+    const firstMonthKeywords = ['first month', 'tháng đầu', 'first rent'];
+    const isFirstMonth = invoice.items?.some(item =>
+      firstMonthKeywords.some(keyword => 
+        item.description.toLowerCase().includes(keyword.toLowerCase())
+      )
+    );
+
+    purpose = isFirstMonth ? PaymentPurpose.FIRST_MONTH_RENT : PaymentPurpose.MONTHLY_RENT;
+
+    // Create payment with existing logic
+    return this.createPayment({
+      contractId: invoice.contract!.id,
+      amount: invoice.totalAmount,
+      method,
+      purpose,
+    }, ctx);
+  }
 
   /** API chính để khởi tạo thanh toán */
   async createPayment(
@@ -477,6 +535,9 @@ export class PaymentService {
       return;
     }
 
+    // Link payment with corresponding invoice if exists
+    await this.linkPaymentWithInvoice(payment);
+
     // Xử lý theo mục đích payment
     // Hiện có 3 mục đích chính:
     // - Tenant đặt cọc vào Escrow (PaymentPurpose.TENANT_ESCROW_DEPOSIT)
@@ -521,6 +582,9 @@ export class PaymentService {
     }
 
     if (payment.purpose === PaymentPurpose.FIRST_MONTH_RENT) {
+      // Link with existing invoice (invoice should be created when dual escrow funded)
+      await this.linkPaymentWithInvoice(payment);
+
       await this.creditFirstMonthRentToLandlord(payment);
 
       // Sync first payment to blockchain
@@ -785,6 +849,84 @@ export class PaymentService {
 
   /** ===== Helpers ===== */
 
+
+
+  /**
+   * Link payment with corresponding invoice based on contract and payment purpose
+   */
+  private async linkPaymentWithInvoice(payment: Payment): Promise<void> {
+    try {
+      // Link both FIRST_MONTH_RENT and MONTHLY_RENT payments with invoices
+      if (payment.purpose !== PaymentPurpose.MONTHLY_RENT && payment.purpose !== PaymentPurpose.FIRST_MONTH_RENT) {
+        return;
+      }
+
+      const contract = payment.contract;
+      if (!contract?.id) {
+        console.warn(`Cannot link payment: missing contract for payment ${payment.id}`);
+        return;
+      }
+
+      // For FIRST_MONTH_RENT, find invoice with "first month" description
+      // For MONTHLY_RENT, calculate period and match
+      let searchCriteria: string;
+      
+      if (payment.purpose === PaymentPurpose.FIRST_MONTH_RENT) {
+        searchCriteria = 'first month';
+      } else {
+        // MONTHLY_RENT - calculate period
+        if (!contract.startDate) {
+          console.warn(`Cannot calculate period: missing contract start date for payment ${payment.id}`);
+          return;
+        }
+        const paymentDate = payment.paidAt || new Date();
+        const period = this.calculatePaymentPeriod(contract, paymentDate);
+        searchCriteria = `period ${period}`;
+      }
+
+      // Find matching invoice for this contract and amount
+      const invoices = await this.invoiceRepository.find({
+        where: {
+          contract: { id: contract.id },
+          status: InvoiceStatusEnum.PENDING,
+          totalAmount: payment.amount,
+        },
+        relations: ['items'],
+        order: { createdAt: 'ASC' }, // Link to oldest unpaid invoice first
+      });
+
+      if (invoices.length === 0) {
+        console.warn(`No matching invoice found for payment ${payment.id} (contract: ${contract.id}, amount: ${payment.amount})`);
+        return;
+      }
+
+      // Try to match invoice by search criteria in description
+      let targetInvoice = invoices.find(inv => 
+        inv.items?.some(item => 
+          item.description.toLowerCase().includes(searchCriteria.toLowerCase())
+        )
+      );
+
+      // If no specific match, use the oldest invoice
+      if (!targetInvoice) {
+        targetInvoice = invoices[0];
+      }
+
+      // Link payment to the target invoice
+      payment.invoice = targetInvoice;
+      await this.paymentRepository.save(payment);
+
+      // Update invoice status to PAID
+      targetInvoice.status = InvoiceStatusEnum.PAID;
+      await this.invoiceRepository.save(targetInvoice);
+
+      console.log(`✅ Linked payment ${payment.id} with invoice ${targetInvoice.id} (${searchCriteria})`);
+    } catch (error) {
+      console.error('❌ Failed to link payment with invoice:', error);
+      // Don't throw - linking failure shouldn't block payment processing
+    }
+  }
+
   /**
    * Calculate payment period based on contract start date
    * Period 1 = First month payment (handled separately)
@@ -800,6 +942,16 @@ export class PaymentService {
     // Period starts from 2 since first payment is period 1
     const period = Math.max(2, monthsDiff + 2);
     return period.toString();
+  }
+
+  /**
+   * Generate unique invoice code
+   */
+  private generateInvoiceCode(): string {
+    const now = vnNow();
+    const yyyymmdd = formatVN(now, 'yyyyMMdd');
+    const rand = Math.random().toString(36).slice(2, 6).toUpperCase(); // 4 kí tự
+    return `INV-${yyyymmdd}-${rand}`;
   }
 
   private generateVnpTxnRef() {
