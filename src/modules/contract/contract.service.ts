@@ -1,16 +1,18 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import * as crypto from 'crypto';
 import { addMonths as addMonthsFn } from 'date-fns';
 import { utcToZonedTime, zonedTimeToUtc } from 'date-fns-tz';
-import { Contract } from './entities/contract.entity';
-import { CreateContractDto } from './dto/create-contract.dto';
-import { UpdateContractDto } from './dto/update-contract.dto';
-import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
+import { Repository } from 'typeorm';
 import { VN_TZ, formatVN, vnNow } from '../../common/datetime';
 import { BlockchainService } from '../blockchain/blockchain.service';
 import { FabricUser } from '../blockchain/interfaces/fabric.interface';
+import { ContractStatusEnum } from '../common/enums/contract-status.enum';
+import { S3StorageService } from '../s3-storage/s3-storage.service';
+import { CreateContractDto } from './dto/create-contract.dto';
+import { UpdateContractDto } from './dto/update-contract.dto';
+import { Contract } from './entities/contract.entity';
 
 @Injectable()
 export class ContractService {
@@ -20,6 +22,7 @@ export class ContractService {
     @InjectRepository(Contract)
     private contractRepository: Repository<Contract>,
     private blockchainService: BlockchainService,
+    private s3StorageService: S3StorageService,
   ) {}
 
   async create(
@@ -101,26 +104,14 @@ export class ContractService {
       property: { id: input.propertyId } as unknown as Contract['property'],
       startDate: start,
       endDate: end,
-      status: ContractStatusEnum.PENDING_SIGNATURE,
+      status: ContractStatusEnum.DRAFT,
       contractFileUrl: input.contractFileUrl,
     });
 
     const savedContract = await this.contractRepository.save(contract);
 
-    // Tích hợp với blockchain: Tạo contract trên blockchain
-    try {
-      await this.createContractOnBlockchain(savedContract);
-      this.logger.log(
-        `Contract ${savedContract.contractCode} created on blockchain successfully`,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Failed to create contract ${savedContract.contractCode} on blockchain:`,
-        error,
-      );
-      // Đánh dấu contract cần đồng bộ lại với blockchain
-      await this.markForBlockchainSync(savedContract.id, 'CREATE_CONTRACT');
-    }
+    // Note: Blockchain integration moved to markPendingSignatureWithBlockchain()
+    // which is called after landlord approves and signs PDF successfully
 
     return savedContract;
   }
@@ -164,6 +155,43 @@ export class ContractService {
         `Invalid state: ${contract.status}. Expected: ${expected.join(', ')}`,
       );
     }
+  }
+
+  /**
+   * Cập nhật contract thành PENDING_SIGNATURE và tích hợp blockchain
+   * Được gọi sau khi landlord approve và ký PDF thành công
+   */
+  async markPendingSignatureWithBlockchain(
+    id: string,
+    contractFileUrl?: string,
+  ): Promise<ResponseCommon<Contract>> {
+    const contract = await this.loadContractOrThrow(id);
+    this.ensureStatus(contract, [ContractStatusEnum.DRAFT]);
+    
+    // Cập nhật status và contractFileUrl nếu có
+    contract.status = ContractStatusEnum.PENDING_SIGNATURE;
+    if (contractFileUrl) {
+      contract.contractFileUrl = contractFileUrl;
+    }
+    
+    const saved = await this.contractRepository.save(contract);
+
+    // Tích hợp với blockchain: Tạo contract trên blockchain
+    try {
+      await this.createContractOnBlockchain(saved);
+      this.logger.log(
+        `Contract ${saved.contractCode} created on blockchain successfully after landlord approval`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create contract ${saved.contractCode} on blockchain after landlord approval:`,
+        error,
+      );
+      // Đánh dấu contract cần đồng bộ lại với blockchain
+      await this.markForBlockchainSync(saved.id, 'CREATE_CONTRACT');
+    }
+
+    return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
   async markSigned(id: string): Promise<ResponseCommon<Contract>> {
@@ -373,7 +401,7 @@ export class ContractService {
       // Tạo document hash và signature metadata
       // Là mã hash file pdf đã có chữ ký landlord
       const documentHash = await this.generateDocumentHash(fullContract);
-      const landlordSignatureMeta = JSON.stringify({ algorithm: 'RSA-SHA256' });
+      const landlordSignatureMeta = this.generateSimpleSignatureMeta(fullContract, 0, 'landlord');
 
       // Tạo FabricUser cho landlord (người tạo contract)
       const fabricUser = this.createFabricUser(
@@ -417,9 +445,9 @@ export class ContractService {
   ): Promise<void> {
     try {
       // Tạo document hash và signature metadata
-      // Là mã hash file pdf đã có chữ ký landlord
+      // Là mã hash file pdf đã có chữ ký của cả landlord và tenant
       const documentHash = await this.generateDocumentHash(contract);
-      const tenantSignatureMeta = JSON.stringify({ algorithm: 'RSA-SHA256' });
+      const tenantSignatureMeta = this.generateSimpleSignatureMeta(contract, 1, 'tenant');
 
       // Tạo FabricUser cho tenant
       const fabricUser = this.createFabricUser(
@@ -429,7 +457,7 @@ export class ContractService {
 
       await this.blockchainService.tenantSignContract(
         contract.contractCode,
-        `full_${documentHash}`,
+        documentHash,
         tenantSignatureMeta,
         fabricUser,
       );
@@ -557,9 +585,73 @@ export class ContractService {
   }
 
   /**
+   * Tạo signature metadata đơn giản và ngắn gọn
+   * Không cần parse PDF phức tạp, chỉ dùng thông tin có sẵn
+   */
+  private generateSimpleSignatureMeta(
+    contract: Contract,
+    signatureIndex = 0,
+    signerRole: 'landlord' | 'tenant' = 'landlord',
+  ): string {
+    const timestamp = new Date().toISOString();
+    const signerInfo = signatureIndex === 0 
+      ? { role: 'landlord', userId: contract.landlord?.id, name: 'Landlord Digital Signature' }
+      : { role: 'tenant', userId: contract.tenant?.id, name: 'Tenant Digital Signature' };
+
+    const metadata = {
+      algorithm: 'RSA-SHA256',
+      source: 'SmartCA-VNPT',
+      signatureIndex,
+      timestamp,
+      signer: {
+        role: signerInfo.role,
+        userId: signerInfo.userId,
+        name: signerInfo.name,
+      },
+      contract: {
+        code: contract.contractCode,
+        status: contract.status,
+      },
+      fileUrl: contract.contractFileUrl ? 'available' : 'not-available',
+    };
+
+    this.logger.log(
+      `🔐 Generated simple signature metadata for contract ${contract.contractCode}, ${signerInfo.role} signature`,
+    );
+
+    return JSON.stringify(metadata);
+  }
+
+
+
+  /**
    * Tạo document hash cho contract
+   * Ưu tiên hash từ file PDF đã ký, fallback về metadata nếu không có file
    */
   private async generateDocumentHash(contract: Contract): Promise<string> {
+    // Nếu có contractFileUrl (file PDF đã ký), hash từ file thực tế
+    if (contract.contractFileUrl) {
+      try {
+        // Extract S3 key từ URL và download file
+        const s3Key = this.s3StorageService.extractKeyFromUrl(contract.contractFileUrl);
+        const pdfBuffer = await this.s3StorageService.downloadFile(s3Key);
+        
+        // Hash toàn bộ file PDF đã ký
+        const fileHash = crypto.createHash('sha256').update(pdfBuffer).digest('hex');
+        
+        this.logger.log(`📄 Generated hash from signed PDF file for contract ${contract.contractCode}: ${fileHash.substring(0, 16)}...`);
+        return fileHash;
+        
+      } catch (error) {
+        this.logger.warn(
+          `⚠️ Failed to hash PDF file for contract ${contract.contractCode}, falling back to metadata hash:`, 
+          error instanceof Error ? error.message : error
+        );
+        // Fallback về hash metadata nếu không thể download file
+      }
+    }
+
+    // Fallback: Hash từ contract metadata (như cũ)
     const contractData = {
       contractCode: contract.contractCode,
       landlordId: contract.landlord?.id,
@@ -571,8 +663,10 @@ export class ContractService {
     };
 
     const dataString = JSON.stringify(contractData);
-    const crypto = require('crypto');
-    return crypto.createHash('sha256').update(dataString).digest('hex');
+    const metadataHash = crypto.createHash('sha256').update(dataString).digest('hex');
+    
+    this.logger.log(`📋 Generated hash from contract metadata for contract ${contract.contractCode}: ${metadataHash.substring(0, 16)}...`);
+    return metadataHash;
   }
 
   /**
