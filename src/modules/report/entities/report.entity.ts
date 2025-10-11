@@ -7,6 +7,7 @@ import {
 } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { Property } from '../../property/entities/property.entity';
+import { Room } from 'src/modules/property/entities/room.entity';
 
 @Entity()
 export class Report {
@@ -18,6 +19,9 @@ export class Report {
 
   @ManyToOne(() => Property, (property) => property.reports)
   property: Property;
+
+  @ManyToOne(() => Room, (room) => room.reports)
+  room: Room;
 
   @Column({ type: 'text' })
   content: string;

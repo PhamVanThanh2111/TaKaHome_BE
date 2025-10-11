@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { PropertyTypeEnum } from '../../common/enums/property-type.enum';
 import { StatusEnum } from '../../common/enums/status.enum';
-import { FloorResponseDto } from './floor-response.dto';
+import { RoomResponseDto } from './room-response.dto';
 import { RoomTypeResponseDto } from './room-type-response.dto';
 
 export class PropertyResponseDto {
@@ -87,8 +87,8 @@ export class PropertyResponseDto {
   unit?: string;
 
   // BOARDING-specific fields
-  @ApiProperty({ type: [FloorResponseDto], required: false })
-  floors?: FloorResponseDto[];
+  @ApiProperty({ type: [RoomResponseDto], required: false })
+  floors?: RoomResponseDto[];
 
   @ApiProperty({ type: [RoomTypeResponseDto], required: false })
   roomTypes?: RoomTypeResponseDto[];

@@ -11,7 +11,7 @@ import {
 import { Type } from 'class-transformer';
 import { PropertyTypeEnum } from '../../common/enums/property-type.enum';
 import { ApiProperty } from '@nestjs/swagger';
-import { CreateFloorDto } from './create-floor.dto';
+import { CreateRoomDto } from './create-room.dto';
 import { CreateRoomTypeDto } from './create-room-type.dto';
 
 export class CreatePropertyDto {
@@ -60,11 +60,13 @@ export class CreatePropertyDto {
   address: string;
 
   @IsString()
+  @IsOptional()
   @ApiProperty({
     example: 'Đầy đủ',
-    description: 'Tình trạng nội thất',
+    description: 'Tình trạng nội thất (không cần cho BOARDING)',
+    required: false,
   })
-  furnishing: string;
+  furnishing?: string;
 
   @IsOptional()
   @IsNumber()
@@ -178,17 +180,17 @@ export class CreatePropertyDto {
   })
   unit?: string;
 
-  // === BOARDING-specific fields ===
+  // New fields for BOARDING type
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => CreateFloorDto)
+  @Type(() => CreateRoomDto)
   @ApiProperty({
-    type: [CreateFloorDto],
-    description: 'Danh sách tầng (chỉ cho loại BOARDING)',
+    type: [CreateRoomDto],
+    description: 'Danh sách phòng (chỉ cho loại BOARDING)',
     required: false,
   })
-  floors?: CreateFloorDto[];
+  rooms?: CreateRoomDto[];
 
   @IsOptional()
   @IsArray()

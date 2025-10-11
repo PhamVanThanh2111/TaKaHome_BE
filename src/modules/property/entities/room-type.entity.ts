@@ -2,11 +2,11 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
-  ManyToOne,
   CreateDateColumn,
   UpdateDateColumn,
+  OneToMany,
 } from 'typeorm';
-import { Property } from './property.entity';
+import { Room } from './room.entity';
 
 @Entity()
 export class RoomType {
@@ -31,23 +31,20 @@ export class RoomType {
   @Column({ type: 'decimal', precision: 15, scale: 2 })
   deposit: number;
 
-  @Column({ type: 'int', default: 1 })
-  count: number;
-
-  @Column('text', { array: true })
-  locations: string[];
+  @Column()
+  furnishing: string;
 
   @Column('text', { array: true })
   images: string[];
 
-  @Column({ default: true })
-  isActive: boolean;
-
   @Column({ nullable: true })
   description?: string;
 
-  @ManyToOne(() => Property, (property) => property.roomTypes)
-  property: Property;
+  @OneToMany(() => Room, (room) => room.roomType)
+  rooms?: Room[];
+
+  @Column({ nullable: true })
+  heroImage?: string;
 
   @CreateDateColumn({
     type: 'timestamptz',

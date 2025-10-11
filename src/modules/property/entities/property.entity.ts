@@ -15,8 +15,7 @@ import { Booking } from '../../booking/entities/booking.entity';
 import { Review } from '../../review/entities/review.entity';
 import { Favorite } from '../../favorite/entities/favorite.entity';
 import { Report } from '../../report/entities/report.entity';
-import { Floor } from './floor.entity';
-import { RoomType } from './room-type.entity';
+import { Room } from './room.entity';
 
 @Entity()
 export class Property {
@@ -48,8 +47,8 @@ export class Property {
   @Column({ nullable: true })
   block?: string;
 
-  @Column()
-  furnishing: string;
+  @Column({ nullable: true })
+  furnishing?: string;
 
   @Column({ nullable: true })
   legalDoc?: string;
@@ -109,11 +108,8 @@ export class Property {
   reports: Report[];
 
   // === BOARDING-SPECIFIC RELATIONSHIPS ===
-  @OneToMany(() => Floor, (floor) => floor.property)
-  floors: Floor[];
-
-  @OneToMany(() => RoomType, (roomType) => roomType.property)
-  roomTypes: RoomType[];
+  @OneToMany(() => Room, (room) => room.property)
+  rooms: Room[];
 
   @Column({ nullable: true })
   unit?: string;

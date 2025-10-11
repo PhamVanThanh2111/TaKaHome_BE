@@ -1,71 +1,91 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNumber, IsArray, IsOptional } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsArray,
+  IsOptional,
+  IsNotEmpty,
+} from 'class-validator';
 
 export class CreateRoomTypeDto {
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   @ApiProperty({
     example: 'Phòng đơn có WC riêng',
     description: 'Tên loại phòng',
   })
-  name?: string;
+  name: string;
+
+  @IsString()
+  @IsOptional()
+  @ApiProperty({
+    example: 'Phòng trọ với đầy đủ tiện nghi',
+    description: 'Mô tả loại phòng',
+    required: false,
+  })
+  description?: string;
 
   @IsNumber()
-  @IsOptional()
   @ApiProperty({
     example: 1,
     description: 'Số phòng ngủ',
   })
-  bedrooms?: number;
+  bedrooms: number;
 
   @IsNumber()
-  @IsOptional()
   @ApiProperty({
     example: 1,
     description: 'Số phòng tắm',
   })
-  bathrooms?: number;
+  bathrooms: number;
 
   @IsNumber()
-  @IsOptional()
   @ApiProperty({
     example: 25,
     description: 'Diện tích (m2)',
   })
-  area?: number;
+  area: number;
 
   @IsNumber()
-  @IsOptional()
   @ApiProperty({
     example: 3500000,
     description: 'Giá thuê (VND)',
   })
-  price?: number;
+  price: number;
 
   @IsNumber()
-  @IsOptional()
   @ApiProperty({
     example: 3500000,
     description: 'Tiền đặt cọc (VND)',
   })
-  deposit?: number;
+  deposit: number;
 
-  @IsNumber()
+  @IsString()
   @IsOptional()
   @ApiProperty({
-    example: 4,
-    description: 'Số lượng phòng loại này',
+    example: 'Đầy đủ',
+    description: 'Tình trạng nội thất',
+    required: false,
   })
-  count?: number;
+  furnishing?: string;
 
-  @IsArray()
+  @IsString()
   @IsOptional()
-  @IsString({ each: true })
   @ApiProperty({
-    example: ['0-A101', '0-A102', '1-A201', '1-A202'],
-    description: 'Vị trí các phòng (floorIndex-roomNumber)',
+    example: 'Sổ hồng',
+    description: 'Giấy tờ pháp lý',
+    required: false,
   })
-  locations?: string[];
+  legalDoc?: string;
+
+  @IsString()
+  @IsOptional()
+  @ApiProperty({
+    example: 'https://example.com/hero-image.jpg',
+    description: 'Hình ảnh đại diện',
+    required: false,
+  })
+  heroImage?: string;
 
   @IsOptional()
   @IsArray()

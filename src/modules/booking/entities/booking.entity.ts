@@ -14,6 +14,7 @@ import { Property } from '../../property/entities/property.entity';
 import { BookingStatus } from 'src/modules/common/enums/booking-status.enum';
 import { MaintenanceTicket } from 'src/modules/maintenance/entities/maintenance-ticket.entity';
 import { Contract } from '../../contract/entities/contract.entity';
+import { Room } from 'src/modules/property/entities/room.entity';
 
 @Entity()
 export class Booking {
@@ -25,6 +26,9 @@ export class Booking {
 
   @ManyToOne(() => Property, (property) => property.bookings)
   property: Property;
+
+  @ManyToOne(() => Room, (room) => room.bookings)
+  room: Room;
 
   @Column({
     type: 'enum',

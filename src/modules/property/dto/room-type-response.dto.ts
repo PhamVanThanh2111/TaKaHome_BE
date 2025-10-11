@@ -22,12 +22,6 @@ export class RoomTypeResponseDto {
   @ApiProperty({ example: 3500000 })
   deposit: number;
 
-  @ApiProperty({ example: 6 })
-  count: number;
-
-  @ApiProperty({ example: ['0-A101', '0-A102', '1-A201', '1-A202'] })
-  locations: string[];
-
   @ApiProperty({
     example: [
       'https://example.com/images/room-type1-1.jpg',
