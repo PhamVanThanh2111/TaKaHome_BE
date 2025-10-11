@@ -58,9 +58,9 @@ export class InvoiceService {
 
   async findPendingByUser(userId: string): Promise<ResponseCommon<Invoice[]>> {
     const invoices = await this.invoiceRepository.find({
-      where: { 
+      where: {
         status: InvoiceStatusEnum.PENDING,
-        contract: { tenant: { id: userId } }
+        contract: { tenant: { id: userId } },
       },
       relations: ['items', 'contract', 'contract.property', 'payments'],
       order: { dueDate: 'ASC' },

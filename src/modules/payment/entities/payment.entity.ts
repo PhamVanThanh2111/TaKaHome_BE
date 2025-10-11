@@ -5,6 +5,7 @@ import {
   ManyToOne,
   CreateDateColumn,
   UpdateDateColumn,
+  OneToOne,
 } from 'typeorm';
 import { Contract } from '../../contract/entities/contract.entity';
 import { PaymentMethodEnum } from '../../common/enums/payment-method.enum';
@@ -20,7 +21,7 @@ export class Payment {
   @ManyToOne(() => Contract, (contract) => contract.id)
   contract?: Contract;
 
-  @ManyToOne(() => Invoice, (invoice) => invoice.payments, { nullable: true })
+  @OneToOne(() => Invoice, (invoice) => invoice.payment, { nullable: true })
   invoice: Invoice;
 
   @Column()
