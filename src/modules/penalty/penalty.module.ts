@@ -7,10 +7,11 @@ import { Contract } from '../contract/entities/contract.entity';
 import { BlockchainModule } from '../blockchain/blockchain.module';
 import { NotificationModule } from '../notification/notification.module';
 import { EscrowModule } from '../escrow/escrow.module';
+import { PenaltyRecord } from './entities/penalty-record.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Booking, Contract]),
+    TypeOrmModule.forFeature([Booking, Contract, PenaltyRecord]),
     forwardRef(() => BlockchainModule),
     NotificationModule,
     EscrowModule,
