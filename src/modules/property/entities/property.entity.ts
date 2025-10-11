@@ -37,14 +37,14 @@ export class Property {
   })
   type: PropertyTypeEnum;
 
-  @Column({ nullable: true })
-  province?: string;
+  @Column()
+  province: string;
 
-  @Column({ nullable: true })
-  ward?: string;
+  @Column()
+  ward: string;
 
-  @Column({ nullable: true })
-  address?: string;
+  @Column()
+  address: string;
 
   @Column({ nullable: true })
   block?: string;
@@ -55,8 +55,8 @@ export class Property {
   @Column({ nullable: true })
   unit?: string;
 
-  @Column({ nullable: true })
-  furnishing?: string;
+  @Column()
+  furnishing: string;
 
   @Column({ nullable: true })
   legalDoc?: string;
@@ -70,8 +70,8 @@ export class Property {
   @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
   waterPricePerM3?: number;
 
-  @Column({ nullable: true })
-  deposit?: number;
+  @Column()
+  deposit: number;
 
   @Column({ nullable: true })
   area?: number;
@@ -86,7 +86,7 @@ export class Property {
   mapLocation?: string;
 
   @Column({ default: true })
-  isVisible?: boolean;
+  isVisible: boolean;
 
   @Column({ type: 'enum', enum: StatusEnum, default: StatusEnum.ACTIVE })
   status: StatusEnum;
