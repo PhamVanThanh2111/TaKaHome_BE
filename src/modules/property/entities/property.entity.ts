@@ -9,7 +9,6 @@ import {
 } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { PropertyTypeEnum } from '../../common/enums/property-type.enum';
-import { StatusEnum } from '../../common/enums/status.enum';
 import { PropertyUtility } from '../../property-utility/entities/property-utility.entity';
 import { Contract } from '../../contract/entities/contract.entity';
 import { Booking } from '../../booking/entities/booking.entity';
@@ -49,29 +48,23 @@ export class Property {
   @Column({ nullable: true })
   block?: string;
 
-  @Column({ nullable: true })
-  floor?: string;
-
-  @Column({ nullable: true })
-  unit?: string;
-
   @Column()
   furnishing: string;
 
   @Column({ nullable: true })
   legalDoc?: string;
 
-  @Column()
-  price: number;
+  @Column({ nullable: true })
+  price?: number;
+
+  @Column({ nullable: true })
+  deposit?: number;
 
   @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
   electricityPricePerKwh?: number;
 
   @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
   waterPricePerM3?: number;
-
-  @Column()
-  deposit: number;
 
   @Column({ nullable: true })
   area?: number;
@@ -87,9 +80,6 @@ export class Property {
 
   @Column({ default: true })
   isVisible: boolean;
-
-  @Column({ type: 'enum', enum: StatusEnum, default: StatusEnum.ACTIVE })
-  status: StatusEnum;
 
   @Column({ nullable: true })
   heroImage?: string;
@@ -118,11 +108,15 @@ export class Property {
   @OneToMany(() => Report, (report) => report.property)
   reports: Report[];
 
+  // === BOARDING-SPECIFIC RELATIONSHIPS ===
   @OneToMany(() => Floor, (floor) => floor.property)
   floors: Floor[];
 
   @OneToMany(() => RoomType, (roomType) => roomType.property)
   roomTypes: RoomType[];
+
+  @Column({ nullable: true })
+  unit?: string;
 
   @CreateDateColumn({
     type: 'timestamptz',

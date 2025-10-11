@@ -423,8 +423,8 @@ export class ContractService {
         tenantCertId: `${fullContract.tenant.id}-cert`,
         signedContractFileHash: documentHash,
         landlordSignatureMeta,
-        rentAmount: property.price.toString(), // Default rent amount - should come from property
-        depositAmount: property.price.toString(), // Default deposit amount - should come from property
+        rentAmount: (property.price ?? 0).toString(), // Default rent amount - should come from property
+        depositAmount: (property.deposit ?? 0).toString(), // Default deposit amount - should come from property
         currency: 'VND',
         startDate: fullContract.startDate.toISOString(),
         endDate: fullContract.endDate.toISOString(),

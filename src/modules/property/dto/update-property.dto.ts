@@ -2,6 +2,7 @@ import { PartialType } from '@nestjs/mapped-types';
 import { CreatePropertyDto } from './create-property.dto';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PropertyTypeEnum } from 'src/modules/common/enums/property-type.enum';
+import { StatusEnum } from 'src/modules/common/enums/status.enum';
 
 export class UpdatePropertyDto extends PartialType(CreatePropertyDto) {
   @ApiPropertyOptional({
@@ -15,4 +16,11 @@ export class UpdatePropertyDto extends PartialType(CreatePropertyDto) {
     enum: PropertyTypeEnum,
   })
   type?: PropertyTypeEnum;
+
+  @ApiPropertyOptional({
+    example: StatusEnum.ACTIVE,
+    enum: StatusEnum,
+    description: 'Trạng thái property',
+  })
+  status?: StatusEnum;
 }
