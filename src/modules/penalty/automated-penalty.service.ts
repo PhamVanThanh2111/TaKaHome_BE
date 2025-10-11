@@ -723,7 +723,6 @@ export class AutomatedPenaltyService {
     try {
       const penaltyRecord = this.penaltyRecordRepository.create({
         contractId: data.contractId,
-        bookingId: data.bookingId,
         tenantId: data.tenantId,
         penaltyType: data.penaltyType,
         period: data.period,

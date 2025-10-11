@@ -21,10 +21,6 @@ export class PenaltyRecord {
   @Index()
   contractId: string;
 
-  @Column({ type: 'uuid', nullable: true })
-  @Index()
-  bookingId?: string;
-
   @Column({ type: 'varchar', length: 100 })
   @Index()
   tenantId: string;
