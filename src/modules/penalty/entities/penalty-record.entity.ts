@@ -8,7 +8,6 @@ import {
   Index,
 } from 'typeorm';
 import { Contract } from '../../contract/entities/contract.entity';
-import { Booking } from '../../booking/entities/booking.entity';
 
 @Entity('penalty_records')
 export class PenaltyRecord {
@@ -21,9 +20,6 @@ export class PenaltyRecord {
   @Column({ type: 'uuid' })
   @Index()
   contractId: string;
-
-  @ManyToOne(() => Booking, { onDelete: 'CASCADE', nullable: true })
-  booking?: Booking;
 
   @Column({ type: 'uuid', nullable: true })
   @Index()

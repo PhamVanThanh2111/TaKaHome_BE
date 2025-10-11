@@ -755,7 +755,7 @@ export class AutomatedPenaltyService {
       return await this.penaltyRecordRepository.find({
         where: { contractId },
         order: { createdAt: 'DESC' },
-        relations: ['contract', 'booking'],
+        relations: ['contract'], // Removed 'booking' relation - use bookingId if needed
       });
     } catch (error) {
       this.logger.error(`❌ Failed to get penalty history for contract ${contractId}:`, error);
