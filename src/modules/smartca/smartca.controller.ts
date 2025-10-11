@@ -17,12 +17,12 @@ import {
 
 import { SmartCAService } from './smartca.service';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { PreparePDFDto } from '../contract/dto/prepare-pdf.dto';
 import { Response } from 'express';
 import { Place } from './types/smartca.types';
 import * as fs from 'fs';
 import * as path from 'path';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { PreparePDFDto } from './dto/prepare-pdf.dto';
 
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
