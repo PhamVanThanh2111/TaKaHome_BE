@@ -64,6 +64,12 @@ export class Property {
   @Column()
   price: number;
 
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  electricityPricePerKwh?: number;
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  waterPricePerM3?: number;
+
   @Column({ nullable: true })
   deposit?: number;
 
