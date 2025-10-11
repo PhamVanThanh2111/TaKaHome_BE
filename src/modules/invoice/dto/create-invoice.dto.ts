@@ -5,7 +5,9 @@ import {
   IsDateString,
   IsNotEmpty,
   IsNumber,
+  IsOptional,
   IsString,
+  Matches,
   ValidateNested,
 } from 'class-validator';
 
@@ -37,4 +39,10 @@ export class CreateInvoiceDto {
   @ValidateNested({ each: true })
   @Type(() => CreateInvoiceItemDto)
   items: CreateInvoiceItemDto[];
+
+  @IsOptional()
+  @Matches(/^\d{4}-(0[1-9]|1[0-2])$/, {
+    message: 'billingPeriod phải là YYYY-MM',
+  })
+  billingPeriod?: string;
 }

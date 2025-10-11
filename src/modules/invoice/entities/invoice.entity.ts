@@ -42,6 +42,9 @@ export class Invoice {
   })
   status: InvoiceStatusEnum;
 
+  @Column({ type: 'varchar', length: 7, nullable: true })
+  billingPeriod?: string;
+
   @CreateDateColumn({
     type: 'timestamptz',
     default: () => 'CURRENT_TIMESTAMP',
