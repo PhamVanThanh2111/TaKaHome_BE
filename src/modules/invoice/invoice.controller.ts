@@ -57,6 +57,13 @@ export class InvoiceController {
     return this.invoiceService.findByContract(contractId);
   }
 
+  @Get('pending/user/:userId')
+  @ApiOperation({ summary: 'Lấy hóa đơn chưa thanh toán của user' })
+  @ApiResponse({ status: HttpStatus.OK, type: [InvoiceResponseDto] })
+  findPendingByUser(@Param('userId') userId: string) {
+    return this.invoiceService.findPendingByUser(userId);
+  }
+
   @Patch(':id/pay')
   @ApiOperation({ summary: 'Thanh toán hóa đơn' })
   @ApiResponse({ status: HttpStatus.OK, type: InvoiceResponseDto })

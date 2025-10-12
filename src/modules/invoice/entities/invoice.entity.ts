@@ -6,6 +6,7 @@ import {
   OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
+  OneToOne,
 } from 'typeorm';
 import { Contract } from '../../contract/entities/contract.entity';
 import { Payment } from '../../payment/entities/payment.entity';
@@ -26,8 +27,8 @@ export class Invoice {
   @OneToMany(() => InvoiceItem, (item) => item.invoice, { cascade: true })
   items: InvoiceItem[];
 
-  @OneToMany(() => Payment, (payment) => payment.invoice)
-  payments: Payment[];
+  @OneToOne(() => Payment, (payment) => payment.invoice)
+  payment: Payment;
 
   @Column()
   totalAmount: number;
@@ -41,6 +42,9 @@ export class Invoice {
     default: InvoiceStatusEnum.PENDING,
   })
   status: InvoiceStatusEnum;
+
+  @Column({ type: 'varchar', length: 7, nullable: true })
+  billingPeriod?: string;
 
   @CreateDateColumn({
     type: 'timestamptz',

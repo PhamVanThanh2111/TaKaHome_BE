@@ -33,4 +33,7 @@ export class InvoiceResponseDto {
 
   @ApiProperty({ example: InvoiceStatusEnum.PENDING, enum: InvoiceStatusEnum })
   status: InvoiceStatusEnum;
+
+  @ApiProperty({ example: '2024-08' })
+  billingPeriod?: string;
 }

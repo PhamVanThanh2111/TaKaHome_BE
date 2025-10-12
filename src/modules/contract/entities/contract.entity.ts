@@ -9,6 +9,7 @@ import {
 import { User } from '../../user/entities/user.entity';
 import { Property } from '../../property/entities/property.entity';
 import { ContractStatusEnum } from '../../common/enums/contract-status.enum';
+import { Room } from 'src/modules/property/entities/room.entity';
 
 @Entity()
 export class Contract {
@@ -26,6 +27,9 @@ export class Contract {
 
   @ManyToOne(() => Property, (property) => property.contracts)
   property: Property;
+
+  @ManyToOne(() => Room, (room) => room.contracts)
+  room: Room;
 
   @Column({ type: 'timestamptz' })
   startDate: Date;

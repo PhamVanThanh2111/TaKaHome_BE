@@ -18,6 +18,8 @@ import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { RoleEnum } from '../common/enums/role.enum';
+import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 
 @Controller('bookings')
 @ApiBearerAuth()
@@ -37,8 +39,11 @@ export class BookingController {
     status: HttpStatus.BAD_REQUEST,
     description: 'Request không hợp lệ',
   })
-  create(@Body() createBookingDto: CreateBookingDto) {
-    return this.bookingService.create(createBookingDto);
+  create(
+    @Body() createBookingDto: CreateBookingDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.bookingService.create(createBookingDto, user.id);
   }
 
   @Get()

@@ -38,10 +38,6 @@ export class EscrowTransaction {
   @Column({ type: 'varchar', length: 12, default: 'COMPLETED' })
   status: EscrowTxnStatus;
 
-  // Liên kết nghiệp vụ (Payment/Settlement/Adjustment)
-  @Column({ type: 'varchar', length: 24, nullable: true })
-  refType: 'PAYMENT' | 'SETTLEMENT' | 'ADJUSTMENT' | null;
-
   @Column({ type: 'uuid', nullable: true })
   refId: string | null;
 

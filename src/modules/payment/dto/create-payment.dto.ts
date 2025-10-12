@@ -15,6 +15,7 @@ import { PaymentPurpose } from 'src/modules/common/enums/payment-purpose.enum';
 
 export class CreatePaymentDto {
   @IsOptional()
+  @ApiProperty({ example: 'contract_123', description: 'ID hợp đồng' })
   contractId?: string;
 
   @IsNumber()
@@ -52,4 +53,6 @@ export class CreatePaymentDto {
   @IsInt()
   @Min(5)
   expireIn?: number; // minutes
+
+  
 }

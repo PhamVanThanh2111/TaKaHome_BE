@@ -9,14 +9,13 @@ import {
 } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { PropertyTypeEnum } from '../../common/enums/property-type.enum';
-import { StatusEnum } from '../../common/enums/status.enum';
-import { PropertyImage } from '../../property-image/entities/property-image.entity';
 import { PropertyUtility } from '../../property-utility/entities/property-utility.entity';
 import { Contract } from '../../contract/entities/contract.entity';
 import { Booking } from '../../booking/entities/booking.entity';
 import { Review } from '../../review/entities/review.entity';
 import { Favorite } from '../../favorite/entities/favorite.entity';
 import { Report } from '../../report/entities/report.entity';
+import { Room } from './room.entity';
 
 @Entity()
 export class Property {
@@ -29,54 +28,69 @@ export class Property {
   @Column('text')
   description: string;
 
-  @Column()
-  address: string;
-
   @Column({
     type: 'enum',
     enum: PropertyTypeEnum,
-    default: PropertyTypeEnum.HOUSE,
+    default: PropertyTypeEnum.HOUSING,
   })
   type: PropertyTypeEnum;
 
   @Column()
-  price: number;
+  province: string;
+
+  @Column()
+  ward: string;
+
+  @Column()
+  address: string;
 
   @Column({ nullable: true })
-  area: number;
+  block?: string;
 
   @Column({ nullable: true })
-  bedrooms: number;
+  furnishing?: string;
 
   @Column({ nullable: true })
-  bathrooms: number;
+  legalDoc?: string;
 
   @Column({ nullable: true })
-  mapLocation: string;
+  price?: number;
+
+  @Column({ nullable: true })
+  deposit?: number;
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  electricityPricePerKwh?: number;
+
+  @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
+  waterPricePerM3?: number;
+
+  @Column({ nullable: true })
+  area?: number;
+
+  @Column({ nullable: true })
+  bedrooms?: number;
+
+  @Column({ nullable: true })
+  bathrooms?: number;
+
+  @Column({ nullable: true })
+  mapLocation?: string;
 
   @Column({ default: true })
   isVisible: boolean;
 
-  @Column({ type: 'enum', enum: StatusEnum, default: StatusEnum.ACTIVE })
-  status: StatusEnum;
+  @Column({ default: false })
+  isApproved: boolean;
 
-  @CreateDateColumn({
-    type: 'timestamptz',
-    default: () => 'CURRENT_TIMESTAMP',
-  })
-  createdAt: Date;
-
-  @UpdateDateColumn({
-    type: 'timestamptz',
-    default: () => 'CURRENT_TIMESTAMP',
-  })
-  updatedAt: Date;
+  @Column({ nullable: true })
+  heroImage?: string;
 
   @ManyToOne(() => User, (user) => user.id)
   landlord: User;
 
-  @OneToMany(() => PropertyImage, (img) => img.property)
-  images: PropertyImage[];
+  @Column('text', { array: true, nullable: true })
+  images?: string[];
 
   @OneToMany(() => PropertyUtility, (util) => util.property)
   utilities: PropertyUtility[];
@@ -95,4 +109,23 @@ export class Property {
 
   @OneToMany(() => Report, (report) => report.property)
   reports: Report[];
+
+  // === BOARDING-SPECIFIC RELATIONSHIPS ===
+  @OneToMany(() => Room, (room) => room.property)
+  rooms: Room[];
+
+  @Column({ nullable: true })
+  unit?: string;
+
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
+  createdAt: Date;
+
+  @UpdateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
+  updatedAt: Date;
 }

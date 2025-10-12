@@ -22,9 +22,9 @@ import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { Request, Response } from 'express';
-import { Public } from '../core/auth/public.decorator';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { JwtUser } from '../core/auth/strategies/jwt.strategy';
+import { Public } from 'src/common/decorators/public.decorator';
 
 @Controller('payments')
 @ApiBearerAuth()
@@ -54,6 +54,30 @@ export class PaymentController {
       req.socket.remoteAddress;
 
     return this.paymentService.createPayment(dto, {
+      userId: user.id,
+      ipAddr: String(ip),
+    });
+  }
+
+  @Post('invoice/:invoiceId')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Tạo payment từ hóa đơn' })
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    type: PaymentResponseDto,
+    description: 'Tạo payment từ hóa đơn thành công',
+  })
+  createFromInvoice(
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: { method: 'VNPAY' | 'WALLET' },
+    @CurrentUser() user: JwtUser,
+    @Req() req: Request,
+  ) {
+    const ip =
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+      req.socket.remoteAddress;
+
+    return this.paymentService.createPaymentFromInvoice(invoiceId, body.method as any, {
       userId: user.id,
       ipAddr: String(ip),
     });
