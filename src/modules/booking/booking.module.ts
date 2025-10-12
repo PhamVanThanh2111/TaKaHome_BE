@@ -9,10 +9,12 @@ import { SmartCAModule } from '../smartca/smartca.module';
 import { S3StorageModule } from '../s3-storage/s3-storage.module';
 import { InvoiceModule } from '../invoice/invoice.module';
 import { Contract } from '../contract/entities/contract.entity';
+import { Property } from '../property/entities/property.entity';
+import { Room } from '../property/entities/room.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Booking, Contract]),
+    TypeOrmModule.forFeature([Booking, Contract, Property, Room]),
     ContractModule,
     SmartCAModule,
     S3StorageModule,
