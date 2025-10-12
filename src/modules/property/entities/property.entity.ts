@@ -80,6 +80,9 @@ export class Property {
   @Column({ default: true })
   isVisible: boolean;
 
+  @Column({ default: false })
+  isApproved: boolean;
+
   @Column({ nullable: true })
   heroImage?: string;
 
