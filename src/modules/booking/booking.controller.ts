@@ -69,8 +69,8 @@ export class BookingController {
   @ApiOperation({ summary: 'Chủ nhà duyệt booking' })
   @Roles(RoleEnum.LANDLORD, RoleEnum.ADMIN)
   @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
-  approve(@Param('id') id: string) {
-    return this.bookingService.landlordApprove(id);
+  approve(@Param('id') id: string, @CurrentUser() user: JwtUser) {
+    return this.bookingService.landlordApprove(id, user.id);
   }
 
   @Post(':id/reject')
@@ -85,8 +85,8 @@ export class BookingController {
   @ApiOperation({ summary: 'Người thuê ký hợp đồng (digital signature)' })
   @Roles(RoleEnum.TENANT, RoleEnum.ADMIN)
   @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
-  tenantSign(@Param('id') id: string) {
-    return this.bookingService.tenantSign(id);
+  tenantSign(@Param('id') id: string, @CurrentUser() user: JwtUser) {
+    return this.bookingService.tenantSign(id, user.id);
   }
 
   @Post(':id/handover')
