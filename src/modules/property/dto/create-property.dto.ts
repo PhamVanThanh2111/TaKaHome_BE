@@ -10,8 +10,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PropertyTypeEnum } from '../../common/enums/property-type.enum';
-import { ApiProperty } from '@nestjs/swagger';
-import { CreateRoomDto } from './create-room.dto';
+import { ApiHideProperty, ApiProperty } from '@nestjs/swagger';
 import { CreateRoomTypeDto } from './create-room-type.dto';
 
 export class CreatePropertyDto {
@@ -141,13 +140,13 @@ export class CreatePropertyDto {
 
   @IsOptional()
   @IsBoolean()
-  @ApiProperty({
-    example: true,
-    description: 'Hiển thị công khai',
-    required: false,
-    default: true,
-  })
+  @ApiHideProperty()
   isVisible?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @ApiHideProperty()
+  isApproved?: boolean;
 
   @IsOptional()
   @IsString()
@@ -184,21 +183,10 @@ export class CreatePropertyDto {
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => CreateRoomDto)
-  @ApiProperty({
-    type: [CreateRoomDto],
-    description: 'Danh sách phòng (chỉ cho loại BOARDING)',
-    required: false,
-  })
-  rooms?: CreateRoomDto[];
-
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
   @Type(() => CreateRoomTypeDto)
   @ApiProperty({
     type: [CreateRoomTypeDto],
-    description: 'Danh sách loại phòng (chỉ cho loại BOARDING)',
+    description: 'Danh sách loại phòng với rooms (chỉ cho loại BOARDING)',
     required: false,
   })
   roomTypes?: CreateRoomTypeDto[];

@@ -6,7 +6,6 @@ import { Room } from './entities/room.entity';
 import { RoomType } from './entities/room-type.entity';
 import { User } from '../user/entities/user.entity';
 import { CreatePropertyDto } from './dto/create-property.dto';
-import { CreateRoomDto } from './dto/create-room.dto';
 import { CreateRoomTypeDto } from './dto/create-room-type.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
@@ -28,7 +27,7 @@ export class PropertyService {
     landlordId: string,
   ): Promise<ResponseCommon<Property>> {
     try {
-      const { rooms, roomTypes, type, ...basePropertyData } = createPropertyDto;
+      const { roomTypes, type, ...basePropertyData } = createPropertyDto;
 
       // Step 1: Filter fields based on property type and create Property
       const propertyToSave = this.filterPropertyFieldsByType(
@@ -41,8 +40,8 @@ export class PropertyService {
       const savedProperty = await this.propertyRepository.save(property);
 
       // Step 2: Handle BOARDING specific logic - create RoomTypes and Rooms
-      if (type === PropertyTypeEnum.BOARDING && roomTypes && rooms) {
-        await this.createRoomTypesAndRooms(savedProperty, roomTypes, rooms);
+      if (type === PropertyTypeEnum.BOARDING && roomTypes) {
+        await this.createRoomTypesAndRooms(savedProperty, roomTypes);
       }
 
       // Step 3: Return the complete property with relationships
@@ -70,39 +69,34 @@ export class PropertyService {
   private async createRoomTypesAndRooms(
     property: Property,
     roomTypes: CreateRoomTypeDto[],
-    rooms: CreateRoomDto[],
   ): Promise<void> {
-    // Step 1: Create RoomTypes first
-    const roomTypeEntities = roomTypes.map((roomTypeDto) => {
-      return this.roomTypeRepository.create({
-        ...roomTypeDto,
+    // Process each roomType with its embedded rooms
+    for (const roomTypeDto of roomTypes) {
+      // Step 1: Create RoomType (excluding rooms field)
+      const { rooms, ...roomTypeData } = roomTypeDto;
+      const roomTypeEntity = this.roomTypeRepository.create({
+        ...roomTypeData,
       });
-    });
+      const savedRoomType = await this.roomTypeRepository.save(roomTypeEntity);
 
-    const savedRoomTypes = await this.roomTypeRepository.save(roomTypeEntities);
+      // Step 2: Create Rooms for this RoomType
+      if (rooms && rooms.length > 0) {
+        const roomEntities = rooms.map((roomDto) => {
+          return this.roomRepository.create({
+            name: roomDto.name,
+            floor: roomDto.floor,
+            property,
+            roomType: savedRoomType,
+          });
+        });
 
-    // Step 2: Create Rooms and link them to RoomTypes
-    // Logic: Each room will be linked to the corresponding RoomType by index
-    // If there are multiple rooms but only one roomType, all rooms link to that roomType
-    const roomEntities = rooms.map((roomDto, index) => {
-      // Determine which RoomType this room should link to
-      const roomTypeIndex =
-        savedRoomTypes.length === 1 ? 0 : index % savedRoomTypes.length;
-      const linkedRoomType = savedRoomTypes[roomTypeIndex];
-
-      return this.roomRepository.create({
-        name: roomDto.name,
-        floor: roomDto.floor,
-        property,
-        roomType: linkedRoomType,
-      });
-    });
-
-    await this.roomRepository.save(roomEntities);
+        await this.roomRepository.save(roomEntities);
+      }
+    }
   }
 
   private filterPropertyFieldsByType(
-    propertyData: Omit<CreatePropertyDto, 'rooms' | 'roomTypes' | 'type'>,
+    propertyData: Omit<CreatePropertyDto, 'roomTypes' | 'type'>,
     type: PropertyTypeEnum,
     landlordId: string,
   ): Partial<Property> {

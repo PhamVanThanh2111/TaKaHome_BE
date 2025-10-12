@@ -5,7 +5,10 @@ import {
   IsArray,
   IsOptional,
   IsNotEmpty,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+import { CreateRoomDto } from './create-room.dto';
 
 export class CreateRoomTypeDto {
   @IsString()
@@ -72,15 +75,6 @@ export class CreateRoomTypeDto {
   @IsString()
   @IsOptional()
   @ApiProperty({
-    example: 'Sổ hồng',
-    description: 'Giấy tờ pháp lý',
-    required: false,
-  })
-  legalDoc?: string;
-
-  @IsString()
-  @IsOptional()
-  @ApiProperty({
     example: 'https://example.com/hero-image.jpg',
     description: 'Hình ảnh đại diện',
     required: false,
@@ -99,4 +93,17 @@ export class CreateRoomTypeDto {
     required: false,
   })
   images?: string[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateRoomDto)
+  @ApiProperty({
+    type: [CreateRoomDto],
+    example: [
+      { name: 'A101', floor: 1 },
+      { name: 'A102', floor: 1 },
+    ],
+    description: 'Danh sách phòng thuộc RoomType này',
+  })
+  rooms: CreateRoomDto[];
 }
