@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In, Not } from 'typeorm';
 import { Property } from './entities/property.entity';
 import { Room } from './entities/room.entity';
 import { RoomType } from './entities/room-type.entity';
 import { User } from '../user/entities/user.entity';
+import { Booking } from '../booking/entities/booking.entity';
+import { BookingStatus } from '../common/enums/booking-status.enum';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { CreateRoomTypeDto } from './dto/create-room-type.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
@@ -20,6 +22,8 @@ export class PropertyService {
     private roomRepository: Repository<Room>,
     @InjectRepository(RoomType)
     private roomTypeRepository: Repository<RoomType>,
+    @InjectRepository(Booking)
+    private bookingRepository: Repository<Booking>,
   ) {}
 
   async create(
@@ -186,5 +190,102 @@ export class PropertyService {
   async remove(id: number): Promise<ResponseCommon<null>> {
     await this.propertyRepository.delete(id);
     return new ResponseCommon(200, 'SUCCESS', null);
+  }
+
+  async approveProperty(propertyId: string): Promise<ResponseCommon<Property>> {
+    try {
+      // Step 1: Find property with rooms relation for BOARDING type
+      const property = await this.propertyRepository.findOne({
+        where: { id: propertyId },
+        relations: ['rooms'],
+      });
+
+      if (!property) {
+        throw new Error(`Property with id ${propertyId} not found`);
+      }
+
+      // Step 1.5: Validate if property has active bookings (only when approving)
+      await this.validatePropertyBookings(property);
+
+      // Step 2: Update property approval status and visibility
+      property.isApproved = true;
+      if (
+        property.type === PropertyTypeEnum.HOUSING ||
+        property.type === PropertyTypeEnum.APARTMENT
+      ) {
+        property.isVisible = false; // When approved, set visible (isVisible=false means visible)
+      }
+
+      await this.propertyRepository.save(property);
+
+      // Step 3: For BOARDING type, update all rooms visibility
+      if (property.type === PropertyTypeEnum.BOARDING && property.rooms) {
+        const roomUpdatePromises = property.rooms.map((room) => {
+          room.isVisible = false; // When approved, rooms become visible (isVisible=false)
+          return this.roomRepository.save(room);
+        });
+
+        await Promise.all(roomUpdatePromises);
+      }
+
+      // Step 4: Return updated property with relations
+      const result = await this.propertyRepository.findOne({
+        where: { id: propertyId },
+        relations:
+          property.type === PropertyTypeEnum.BOARDING
+            ? ['rooms', 'rooms.roomType', 'landlord']
+            : ['landlord'],
+      });
+
+      if (!result) {
+        throw new Error('Failed to retrieve updated property');
+      }
+
+      return new ResponseCommon(200, 'Property approved successfully', result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Error approving property: ${message}`);
+    }
+  }
+
+  /**
+   * Validate if property has active bookings that would prevent approval
+   * @param property Property to validate
+   * @throws Error if property has active bookings
+   */
+  private async validatePropertyBookings(property: Property): Promise<void> {
+    if (property.type === PropertyTypeEnum.BOARDING) {
+      // For BOARDING: Check if any room has bookings with status != PENDING_LANDLORD
+      if (property.rooms && property.rooms.length > 0) {
+        const roomIds = property.rooms.map((room) => room.id);
+
+        const activeRoomBookings = await this.bookingRepository.find({
+          where: {
+            room: { id: In(roomIds) },
+            status: Not(BookingStatus.PENDING_LANDLORD),
+          },
+        });
+
+        if (activeRoomBookings.length > 0) {
+          throw new Error(
+            'Property này đã từng được Approve và đang có người thuê rồi',
+          );
+        }
+      }
+    } else {
+      // For HOUSING/APARTMENT: Check if property has bookings with status != PENDING_LANDLORD
+      const activePropertyBookings = await this.bookingRepository.find({
+        where: {
+          property: { id: property.id },
+          status: Not(BookingStatus.PENDING_LANDLORD),
+        },
+      });
+
+      if (activePropertyBookings.length > 0) {
+        throw new Error(
+          'Property này đã từng được Approve và đang có người thuê rồi',
+        );
+      }
+    }
   }
 }

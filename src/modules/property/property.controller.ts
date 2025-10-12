@@ -95,4 +95,31 @@ export class PropertyController {
   remove(@Param('id') id: string) {
     return this.propertyService.remove(+id);
   }
+
+  @Patch(':id/approve')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Duyệt property (ADMIN only)',
+    description:
+      'ADMIN duyệt property. Khi approve = true, property và rooms (nếu có) sẽ được hiển thị công khai',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    type: PropertyResponseDto,
+    description: 'Duyệt property thành công',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Không tìm thấy property',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Chỉ ADMIN mới có quyền duyệt property',
+  })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  approveProperty(@Param('id') id: string) {
+    return this.propertyService.approveProperty(id);
+  }
 }
