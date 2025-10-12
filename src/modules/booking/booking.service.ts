@@ -29,6 +29,9 @@ import { InvoiceService } from '../invoice/invoice.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import { CreateInvoiceDto } from '../invoice/dto/create-invoice.dto';
+import { Property } from '../property/entities/property.entity';
+import { Room } from '../property/entities/room.entity';
+import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 
 @Injectable()
 export class BookingService {
@@ -37,6 +40,10 @@ export class BookingService {
     private bookingRepository: Repository<Booking>,
     @InjectRepository(Contract)
     private contractRepository: Repository<Contract>,
+    @InjectRepository(Property)
+    private propertyRepository: Repository<Property>,
+    @InjectRepository(Room)
+    private roomRepository: Repository<Room>,
     private contractService: ContractService,
     private smartcaService: SmartCAService,
     private s3StorageService: S3StorageService,
@@ -48,11 +55,78 @@ export class BookingService {
     dto: CreateBookingDto,
     tenantId: string,
   ): Promise<ResponseCommon<Booking>> {
+    // Validate input: either propertyId or roomId must be provided
+    if (!dto.propertyId && !dto.roomId) {
+      throw new BadRequestException(
+        'Either propertyId or roomId must be provided',
+      );
+    }
+
+    if (dto.propertyId && dto.roomId) {
+      throw new BadRequestException(
+        'Cannot provide both propertyId and roomId',
+      );
+    }
+
+    let property: Property;
+    let room: Room | undefined;
+
+    if (dto.propertyId) {
+      // HOUSING/APARTMENT: Book entire property
+      const foundProperty = await this.propertyRepository.findOne({
+        where: { id: dto.propertyId },
+        relations: ['landlord'],
+      });
+
+      if (!foundProperty) {
+        throw new NotFoundException(
+          `Property with id ${dto.propertyId} not found`,
+        );
+      }
+
+      if (foundProperty.isVisible === true) {
+        throw new BadRequestException('Property is not already booked');
+      }
+
+      if (foundProperty.type === PropertyTypeEnum.BOARDING) {
+        throw new BadRequestException(
+          'For BOARDING property, use roomId instead of propertyId',
+        );
+      }
+
+      property = foundProperty;
+    } else {
+      // BOARDING: Book specific room
+      const foundRoom = await this.roomRepository.findOne({
+        where: { id: dto.roomId },
+        relations: ['property', 'property.landlord'],
+      });
+
+      if (!foundRoom) {
+        throw new NotFoundException(`Room with id ${dto.roomId} not found`);
+      }
+
+      if (foundRoom.isVisible === true) {
+        throw new BadRequestException('Room is not already booked');
+      }
+
+      if (foundRoom.property.type !== PropertyTypeEnum.BOARDING) {
+        throw new BadRequestException(
+          'roomId can only be used for BOARDING property type',
+        );
+      }
+
+      room = foundRoom;
+      property = foundRoom.property;
+    }
+
     const booking = this.bookingRepository.create({
       tenant: { id: tenantId },
-      property: { id: dto.propertyId },
+      property: { id: property.id },
+      room: room ? { id: room.id } : undefined,
       status: BookingStatus.PENDING_LANDLORD,
     });
+
     const saved = await this.bookingRepository.save(booking);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
@@ -178,6 +252,9 @@ export class BookingService {
     // After successful signing, update booking status
     booking.status = BookingStatus.PENDING_SIGNATURE;
     const saved = await this.bookingRepository.save(booking);
+
+    // Update property/room visibility after successful landlord approval
+    await this.updateVisibilityAfterApproval(booking);
 
     // Return response with presigned URL
     const response = {
@@ -762,5 +839,45 @@ export class BookingService {
         ? { message: error.message, stack: error.stack }
         : { raw: error };
     console.error(message, { ...context, ...normalized });
+  }
+
+  /**
+   * Update property/room visibility after successful landlord approval
+   */
+  private async updateVisibilityAfterApproval(booking: Booking): Promise<void> {
+    try {
+      if (booking.room) {
+        // BOARDING type: Update room visibility
+        const room = await this.roomRepository.findOne({
+          where: { id: booking.room.id },
+          relations: ['property'],
+        });
+
+        if (room) {
+          room.isVisible = true; // Make room visible
+          await this.roomRepository.save(room);
+        }
+      } else {
+        // HOUSING/APARTMENT type: Update property visibility
+        const property = await this.propertyRepository.findOne({
+          where: { id: booking.property.id },
+        });
+
+        if (property) {
+          property.isVisible = true; // Make property visible
+          await this.propertyRepository.save(property);
+        }
+      }
+    } catch (error) {
+      this.logWorkflowError(
+        'Failed to update visibility after approval',
+        {
+          bookingId: booking.id,
+          propertyId: booking.property?.id,
+          roomId: booking.room?.id,
+        },
+        error,
+      );
+    }
   }
 }
