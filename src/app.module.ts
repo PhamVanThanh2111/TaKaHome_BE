@@ -16,6 +16,7 @@ import { VerificationModule } from './modules/verification/verification.module';
 import { PropertyUtilityModule } from './modules/property-utility/property-utility.module';
 import { ChatRoomModule } from './modules/chatroom/chatroom.module';
 import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
+import { ChatModule } from './modules/chat/chat.module';
 import { AuthModule } from './modules/core/auth/auth.module';
 import AppDataSourcePromise from './modules/core/database/data-source';
 
@@ -81,6 +82,7 @@ import { CronModule } from './cron/cron.module';
     PropertyUtilityModule,
     ChatRoomModule,
     ChatMessageModule,
+    ChatModule,
     WalletModule,
     EscrowModule,
     InvoiceModule,
