@@ -15,6 +15,8 @@ import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { PropertyResponseDto } from './dto/property-response.dto';
+import { Query } from '@nestjs/common';
+import { FilterPropertyDto } from './dto/filter-property.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
@@ -59,6 +61,13 @@ export class PropertyController {
   @ApiResponse({ status: HttpStatus.OK })
   async findAll(): Promise<ResponseCommon<(Property | RoomTypeEntry)[]>> {
     return this.propertyService.findAll();
+  }
+
+  @Get('filter')
+  @ApiOperation({ summary: 'Filter danh sách bất động sản / roomtypes' })
+  @ApiResponse({ status: HttpStatus.OK })
+  filter(@Query() query: FilterPropertyDto): Promise<ResponseCommon<any[]>> {
+    return this.propertyService.filter(query);
   }
 
   @Get('me')
