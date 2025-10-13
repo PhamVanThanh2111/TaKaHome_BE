@@ -243,6 +243,16 @@ export class PropertyService {
     return new ResponseCommon(200, 'SUCCESS', combined);
   }
 
+  async findAllForLandlord(
+    landlordId: string,
+  ): Promise<ResponseCommon<Array<Property>>> {
+    const properties = await this.propertyRepository.find({
+      where: { landlord: { id: landlordId } },
+      relations: ['rooms', 'rooms.roomType', 'landlord'],
+    });
+    return new ResponseCommon(200, 'SUCCESS', properties);
+  }
+
   async findOne(id: string): Promise<ResponseCommon<Property | null>> {
     const property = await this.propertyRepository.findOne({
       where: { id: id.toString() },

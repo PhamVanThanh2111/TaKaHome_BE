@@ -61,6 +61,18 @@ export class PropertyController {
     return this.propertyService.findAll();
   }
 
+  @Get('me')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('LANDLORD', 'ADMIN')
+  @ApiOperation({ summary: 'Lấy danh sách bất động sản của chủ nhà' })
+  @ApiResponse({ status: HttpStatus.OK })
+  async findAllForLandlord(
+    @CurrentUser() currentUser: JwtUser,
+  ): Promise<ResponseCommon<Property[]>> {
+    return this.propertyService.findAllForLandlord(currentUser.id);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Lấy thông tin bất động sản theo id' })
   @ApiResponse({ status: HttpStatus.OK, type: PropertyResponseDto })
