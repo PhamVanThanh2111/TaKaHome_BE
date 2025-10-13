@@ -98,7 +98,7 @@ export class ChatRoomController {
     description: 'Không tìm thấy chatroom',
   })
   findOne(@Param('id') id: string) {
-    return this.chatRoomService.findOne(+id);
+    return this.chatRoomService.findOne(id);
   }
 
   @Patch(':id')
@@ -108,7 +108,7 @@ export class ChatRoomController {
     @Param('id') id: string,
     @Body() updateChatRoomDto: UpdateChatRoomDto,
   ) {
-    return this.chatRoomService.update(+id, updateChatRoomDto);
+    return this.chatRoomService.update(id, updateChatRoomDto);
   }
 
   @Delete(':id')
@@ -119,6 +119,6 @@ export class ChatRoomController {
     description: 'Xoá chatroom thành công',
   })
   remove(@Param('id') id: string) {
-    return this.chatRoomService.remove(+id);
+    return this.chatRoomService.remove(id);
   }
 }

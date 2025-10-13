@@ -35,9 +35,9 @@ export class ChatRoomService {
     return new ResponseCommon(200, 'SUCCESS', rooms);
   }
 
-  async findOne(id: number): Promise<ResponseCommon<ChatRoom>> {
+  async findOne(id: string): Promise<ResponseCommon<ChatRoom>> {
     const chatRoom = await this.chatRoomRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['user1', 'user2', 'property', 'messages'],
     });
     if (!chatRoom) {
@@ -47,7 +47,7 @@ export class ChatRoomService {
   }
 
   async update(
-    id: number,
+    id: string,
     updateChatRoomDto: UpdateChatRoomDto,
   ): Promise<ResponseCommon<ChatRoom>> {
     await this.chatRoomRepository.update(
@@ -57,7 +57,7 @@ export class ChatRoomService {
     return this.findOne(id);
   }
 
-  async remove(id: number): Promise<ResponseCommon<null>> {
+  async remove(id: string): Promise<ResponseCommon<null>> {
     await this.chatRoomRepository.delete(id);
     return new ResponseCommon(200, 'SUCCESS', null);
   }

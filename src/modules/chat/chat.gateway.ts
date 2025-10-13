@@ -8,8 +8,8 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger, UseFilters, UseGuards } from '@nestjs/common';
-import { WsJwtGuard } from '../core/auth/guards/ws-jwt.guard';
+import { Logger, UseFilters } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { ChatMessageService } from '../chatmessage/chatmessage.service';
 import { ChatRoomService } from '../chatroom/chatroom.service';
 
@@ -40,6 +40,7 @@ interface JoinRoomData {
 interface SendMessageData {
   chatroomId: string;
   content: string;
+  id?: string;
 }
 
 interface TypingData {
@@ -62,7 +63,6 @@ interface UserTypingInfo {
   namespace: '/chat',
 })
 @UseFilters(new WebsocketExceptionsFilter())
-@UseGuards(WsJwtGuard)
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
@@ -71,31 +71,60 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   
   // Store online users and typing states
   private onlineUsers = new Map<string, { socketId: string; user: any }>();
-  private typingUsers = new Map<string, Map<string, UserTypingInfo>>(); // chatroomId -> userId -> typing info
+  private typingUsers = new Map<string, Map<string, UserTypingInfo>>();
 
   constructor(
     private chatMessageService: ChatMessageService,
     private chatRoomService: ChatRoomService,
+    private jwtService: JwtService,
   ) {}
+
+  afterInit() {
+    this.logger.log('🚀 ChatGateway WebSocket server initialized');
+  }
 
   // Connection handlers
   async handleConnection(client: Socket) {
     try {
-      const user = client.data.user;
-      if (!user) {
-        client.disconnect();
+      const authToken = this.extractTokenFromHandshake(client);
+      
+      if (!authToken) {
+        this.logger.error(`No authentication token found for socket ${client.id}`);
+        client.disconnect(true);
         return;
       }
+
+      const payload = await this.jwtService.verify(authToken);
+      
+      // Transform JWT payload to user structure
+      const user = {
+        id: payload.sub || payload.id,
+        email: payload.email,
+        fullName: payload.fullName || payload.name || payload.email.split('@')[0],
+        roles: payload.roles || []
+      };
+      
+      if (!user.id || !user.email) {
+        this.logger.error(`Invalid user data for socket ${client.id}`);
+        client.disconnect(true);
+        return;
+      }
+
+      client.data.user = user;
 
       // Store online user
       this.onlineUsers.set(user.id, { 
         socketId: client.id, 
-        user: { id: user.id, fullName: user.fullName, email: user.email }
+        user: { 
+          id: user.id, 
+          fullName: user.fullName, 
+          email: user.email 
+        }
       });
 
       this.logger.log(`User ${user.fullName} connected: ${client.id}`);
       
-      // Notify all rooms about user coming online
+      // Notify about user coming online
       client.broadcast.emit('user-online', {
         userId: user.id,
         fullName: user.fullName,
@@ -103,8 +132,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
     } catch (error) {
-      this.logger.error('Connection error:', error);
-      client.disconnect();
+      this.logger.error(`Connection error for socket ${client.id}:`, error.message);
+      client.disconnect(true);
     }
   }
 
@@ -153,15 +182,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const { chatroomId } = data;
       const user = client.data.user;
 
-      // Validate if user has access to this room
-      const chatRoom = await this.chatRoomService.findOne(parseInt(chatroomId));
+      // Validate user access to room
+      const chatRoom = await this.chatRoomService.findOne(chatroomId);
       const room = chatRoom.data;
 
       if (!room) {
         throw new WsException('Chat room not found');
       }
 
-      // Check if user is participant in this room
       const isParticipant = room.user1.id === user.id || room.user2.id === user.id;
       if (!isParticipant) {
         throw new WsException('Access denied to this chat room');
@@ -172,18 +200,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       
       this.logger.log(`User ${user.fullName} joined room: ${chatroomId}`);
 
-      // Notify room about user joining
+      // Send confirmation to client
+      client.emit('joined-room', {
+        chatroomId,
+        message: 'Successfully joined chat room',
+      });
+
+      // Notify other room members about user joining
       client.to(chatroomId).emit('user-joined-room', {
         chatroomId,
         userId: user.id,
         fullName: user.fullName,
         timestamp: new Date().toISOString(),
-      });
-
-      // Send confirmation to client
-      client.emit('joined-room', {
-        chatroomId,
-        message: 'Successfully joined chat room',
       });
 
     } catch (error) {
@@ -222,7 +250,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  // Message events
+  // Message events - For real-time broadcast only (messages saved via REST API)
   @SubscribeMessage('send-message')
   async handleMessage(
     @MessageBody() data: SendMessageData,
@@ -232,25 +260,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const { chatroomId, content } = data;
       const user = client.data.user;
 
-      // Save message to database
-      const messageResponse = await this.chatMessageService.create({
-        chatroomId,
-        senderId: user.id,
-        content,
-      });
-
-      const savedMessage = messageResponse.data;
-
-      if (!savedMessage) {
-        throw new WsException('Failed to save message');
-      }
-
       // Clear typing state for this user
       this.clearUserTyping(chatroomId, user.id);
 
-      // Broadcast message to room participants
-      this.server.to(chatroomId).emit('new-message', {
-        id: savedMessage.id,
+      const messageData = {
+        id: data.id || 'temp-' + Date.now(),
         chatroomId,
         content,
         sender: {
@@ -258,14 +272,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           fullName: user.fullName,
           email: user.email,
         },
-        createdAt: savedMessage.createdAt,
-      });
+        createdAt: new Date().toISOString(),
+      };
 
-      this.logger.log(`Message sent in room ${chatroomId} by ${user.fullName}`);
+      // Broadcast message to room participants
+      this.server.to(chatroomId).emit('new-message', messageData);
+
+      this.logger.log(`Message broadcasted in room ${chatroomId} by ${user.fullName}`);
 
     } catch (error) {
-      this.logger.error('Send message error:', error);
-      throw new WsException('Failed to send message');
+      this.logger.error('Broadcast message error:', error);
+      throw new WsException('Failed to broadcast message');
     }
   }
 
@@ -336,9 +353,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  // Public method to emit messages from external services
+  // Public method to emit messages from external services (REST API)
   public emitMessageToRoom(chatroomId: string, messageData: any) {
-    this.server.to(chatroomId).emit('new-message', messageData);
+    try {
+      this.server.to(chatroomId).emit('new-message', messageData);
+      this.logger.log(`Message emitted to room ${chatroomId}`);
+    } catch (error) {
+      this.logger.error(`Error emitting message to room ${chatroomId}:`, error);
+    }
   }
 
   // Public method to get online status
@@ -349,5 +371,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Public method to get online users list
   public getOnlineUsers(): any[] {
     return Array.from(this.onlineUsers.values()).map(item => item.user);
+  }
+
+  // JWT Token extraction method
+  private extractTokenFromHandshake(client: Socket): string | undefined {
+    // Try to get token from auth header
+    const authHeader = client.handshake.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      return authHeader.substring(7);
+    }
+
+    // Try to get token from query parameters
+    const tokenFromQuery = client.handshake.query.token as string;
+    if (tokenFromQuery) {
+      return tokenFromQuery;
+    }
+
+    // Try to get token from auth object in handshake
+    const tokenFromAuth = client.handshake.auth?.token;
+    if (tokenFromAuth) {
+      return tokenFromAuth;
+    }
+
+    return undefined;
   }
 }
