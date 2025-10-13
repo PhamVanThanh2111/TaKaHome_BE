@@ -14,6 +14,8 @@ import { ResponseCommon } from 'src/common/dto/response.dto';
 import { FilterPropertyDto } from './dto/filter-property.dto';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
+import { S3StorageService } from '../s3-storage/s3-storage.service';
+import { UploadResult } from '../s3-storage/s3-storage.service';
 
 @Injectable()
 export class PropertyService {
@@ -26,7 +28,81 @@ export class PropertyService {
     private roomTypeRepository: Repository<RoomType>,
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
+    private s3: S3StorageService,
   ) {}
+
+  /**
+   * Upload heroImage and images for a Property or RoomType
+   * entityType: BOARDING -> roomtypes/<entityId>/..., otherwise properties/<entityId>/...
+   */
+  async uploadImages(
+    propertyId: string,
+    entityId: string,
+    entityType: PropertyTypeEnum,
+    heroFile: Express.Multer.File | undefined,
+    imageFiles: Express.Multer.File[] | undefined,
+  ): Promise<ResponseCommon<any>> {
+    // Determine base prefix
+    const isBoarding = entityType === PropertyTypeEnum.BOARDING;
+    const basePrefix = isBoarding ? 'roomtypes' : 'properties';
+
+    // Validate entity exists
+    if (!entityId) {
+      throw new Error('entityId is required');
+    }
+
+    let heroUrl: string | undefined;
+    const galleryUrls: string[] = [];
+
+    // Upload hero file if present
+    if (heroFile) {
+      const ext = heroFile.originalname.split('.').pop() || 'jpg';
+      const key = `${basePrefix}/${entityId}/hero/${Date.now()}_hero.${ext}`;
+      const res: UploadResult = await this.s3.uploadFile(
+        heroFile.buffer,
+        key,
+        heroFile.mimetype,
+      );
+      heroUrl = res.url;
+    }
+
+    // Upload gallery files
+    if (imageFiles && imageFiles.length > 0) {
+      for (let i = 0; i < imageFiles.length; i++) {
+        const f = imageFiles[i];
+        const ext = f.originalname.split('.').pop() || 'jpg';
+        const key = `${basePrefix}/${entityId}/gallery/${Date.now()}_${i}.${ext}`;
+        const res = await this.s3.uploadFile(f.buffer, key, f.mimetype);
+        galleryUrls.push(res.url);
+      }
+    }
+
+    // Persist to DB
+    if (isBoarding) {
+      // Update RoomType
+      const roomType = await this.roomTypeRepository.findOne({
+        where: { id: entityId },
+      });
+      if (!roomType) throw new Error('RoomType not found');
+      if (heroUrl) roomType.heroImage = heroUrl;
+      if (galleryUrls.length > 0)
+        roomType.images = [...(roomType.images || []), ...galleryUrls];
+      await this.roomTypeRepository.save(roomType);
+      return new ResponseCommon(200, 'Uploaded RoomType images', roomType);
+    }
+
+    // Update Property
+    const property = await this.propertyRepository.findOne({
+      where: { id: entityId },
+    });
+    if (!property) throw new Error('Property not found');
+    if (heroUrl) property.heroImage = heroUrl;
+    if (galleryUrls.length > 0)
+      property.images = [...(property.images || []), ...galleryUrls];
+    await this.propertyRepository.save(property);
+
+    return new ResponseCommon(200, 'Uploaded Property images', property);
+  }
 
   async create(
     createPropertyDto: CreatePropertyDto,

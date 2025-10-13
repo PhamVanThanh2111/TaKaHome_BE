@@ -9,14 +9,24 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  UploadedFiles,
+  UseInterceptors,
 } from '@nestjs/common';
 import { PropertyService } from './property.service';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
-import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { PropertyResponseDto } from './dto/property-response.dto';
 import { Query } from '@nestjs/common';
 import { FilterPropertyDto } from './dto/filter-property.dto';
+import { UploadPropertyImagesDto } from './dto/upload-property-images.dto';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
@@ -68,6 +78,58 @@ export class PropertyController {
   @ApiResponse({ status: HttpStatus.OK })
   filter(@Query() query: FilterPropertyDto): Promise<ResponseCommon<any[]>> {
     return this.propertyService.filter(query);
+  }
+
+  @Post(':id/images')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Upload hero and gallery images for property or roomtype',
+  })
+  @ApiResponse({ status: HttpStatus.OK })
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'heroImage', maxCount: 1 },
+      { name: 'images', maxCount: 20 },
+    ]),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        entityType: {
+          type: 'string',
+          description: 'Property type: HOUSING, APARTMENT, or BOARDING',
+          example: 'BOARDING',
+        },
+        heroImage: { type: 'string', format: 'binary' },
+        images: {
+          type: 'array',
+          items: { type: 'string', format: 'binary' },
+        },
+      },
+      required: ['entityType'],
+    },
+  })
+  uploadImages(
+    @Param('id') id: string,
+    @Body() body: UploadPropertyImagesDto,
+    @UploadedFiles()
+    files: {
+      heroImage?: Express.Multer.File[];
+      images?: Express.Multer.File[];
+    },
+  ) {
+    const entityId = id;
+    const heroImage = files?.heroImage?.[0];
+    const images = files?.images || [];
+    return this.propertyService.uploadImages(
+      id,
+      entityId,
+      body.entityType,
+      heroImage,
+      images,
+    );
   }
 
   @Get('me')
