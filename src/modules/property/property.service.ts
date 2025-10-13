@@ -12,6 +12,7 @@ import { CreateRoomTypeDto } from './dto/create-room-type.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
+import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
 
 @Injectable()
 export class PropertyService {
@@ -158,23 +159,100 @@ export class PropertyService {
     }
   }
 
-  async findAll(): Promise<ResponseCommon<Property[]>> {
-    const properties = await this.propertyRepository.find({
-      relations: ['rooms', 'roomTypes', 'landlord'],
+  /**
+   * Return a mixed list where HOUSING/APARTMENT properties are returned as-is
+   * and BOARDING properties are expanded into their RoomType objects. Each
+   * RoomType entry will include minimal parent property info under `property`.
+   */
+  async findAll(): Promise<ResponseCommon<Array<Property | RoomTypeEntry>>> {
+    // 1) Fetch non-boarding properties (HOUSING, APARTMENT)
+    const nonBoardingProps = await this.propertyRepository.find({
+      where: { type: Not(PropertyTypeEnum.BOARDING) },
+      relations: ['landlord'],
     });
-    return new ResponseCommon(200, 'SUCCESS', properties);
+
+    // 2) Fetch boarding properties with rooms and roomType relations
+    const boardingProps = await this.propertyRepository.find({
+      where: { type: PropertyTypeEnum.BOARDING },
+      relations: ['rooms', 'rooms.roomType', 'landlord'],
+    });
+
+    // 3) From each boarding property, build RoomType entries
+    const roomTypeEntries: RoomTypeEntry[] = [];
+    for (const prop of boardingProps) {
+      if (!prop.rooms || prop.rooms.length === 0) continue;
+
+      // Group rooms by their roomType id
+      const grouped: Record<string, { roomType: RoomType; rooms: Room[] }> = {};
+      for (const room of prop.rooms) {
+        if (!room.roomType) continue;
+        const rtId = room.roomType.id;
+        if (!grouped[rtId]) {
+          grouped[rtId] = { roomType: room.roomType, rooms: [] };
+        }
+        grouped[rtId].rooms.push(room);
+      }
+
+      // For each group produce an entry that represents the RoomType but
+      // includes the parent property minimal info and the rooms of that type
+      for (const rtId of Object.keys(grouped)) {
+        const { roomType, rooms } = grouped[rtId];
+
+        const entry: RoomTypeEntry = {
+          id: roomType.id,
+          name: roomType.name,
+          bedrooms: roomType.bedrooms,
+          bathrooms: roomType.bathrooms,
+          area: Number(roomType.area),
+          price: Number(roomType.price),
+          deposit: Number(roomType.deposit),
+          furnishing: roomType.furnishing,
+          images: roomType.images,
+          description: roomType.description,
+          heroImage: roomType.heroImage,
+          rooms: rooms.map((r) => ({
+            id: r.id,
+            name: r.name,
+            floor: r.floor,
+            isVisible: r.isVisible,
+          })),
+          property: {
+            id: prop.id,
+            title: prop.title,
+            province: prop.province,
+            ward: prop.ward,
+            address: prop.address,
+            landlord: prop.landlord
+              ? {
+                  id: prop.landlord.id,
+                  name: (prop.landlord as unknown as any).name,
+                }
+              : undefined,
+          },
+        };
+
+        roomTypeEntries.push(entry);
+      }
+    }
+
+    // 4) Combine non-boarding properties and roomType entries
+    const combined: Array<Property | RoomTypeEntry> = [];
+    combined.push(...nonBoardingProps);
+    combined.push(...roomTypeEntries);
+
+    return new ResponseCommon(200, 'SUCCESS', combined);
   }
 
-  async findOne(id: number): Promise<ResponseCommon<Property | null>> {
+  async findOne(id: string): Promise<ResponseCommon<Property | null>> {
     const property = await this.propertyRepository.findOne({
       where: { id: id.toString() },
-      relations: ['floors', 'roomTypes', 'landlord'],
+      relations: ['rooms', 'rooms.roomType', 'landlord'],
     });
     return new ResponseCommon(200, 'SUCCESS', property);
   }
 
   async update(
-    id: number,
+    id: string,
     updatePropertyDto: UpdatePropertyDto,
   ): Promise<ResponseCommon<Property>> {
     await this.propertyRepository.update(id, updatePropertyDto);
@@ -187,7 +265,7 @@ export class PropertyService {
     return new ResponseCommon(200, 'SUCCESS', updatedProperty);
   }
 
-  async remove(id: number): Promise<ResponseCommon<null>> {
+  async remove(id: string): Promise<ResponseCommon<null>> {
     await this.propertyRepository.delete(id);
     return new ResponseCommon(200, 'SUCCESS', null);
   }

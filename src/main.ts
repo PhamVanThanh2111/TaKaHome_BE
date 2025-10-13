@@ -52,8 +52,8 @@ async function bootstrap() {
 
   // ----- Swagger Setup -----
   const config = new DocumentBuilder()
-    .setTitle('Real Estate Rental API')
-    .setDescription('API for Real Estate Rental platform')
+    .setTitle('TakaHome (Real Estate Rental) API')
+    .setDescription('API for TakaHome (Real Estate Rental) platform')
     .setVersion('1.0')
     .addBearerAuth() // Cho phép Authorize bằng JWT Bearer
     .build();
