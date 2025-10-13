@@ -160,21 +160,21 @@ export class PropertyService {
 
   async findAll(): Promise<ResponseCommon<Property[]>> {
     const properties = await this.propertyRepository.find({
-      relations: ['rooms', 'roomTypes', 'landlord'],
+      relations: ['rooms', 'rooms.roomType', 'landlord'],
     });
     return new ResponseCommon(200, 'SUCCESS', properties);
   }
 
-  async findOne(id: number): Promise<ResponseCommon<Property | null>> {
+  async findOne(id: string): Promise<ResponseCommon<Property | null>> {
     const property = await this.propertyRepository.findOne({
       where: { id: id.toString() },
-      relations: ['floors', 'roomTypes', 'landlord'],
+      relations: ['rooms', 'rooms.roomType', 'landlord'],
     });
     return new ResponseCommon(200, 'SUCCESS', property);
   }
 
   async update(
-    id: number,
+    id: string,
     updatePropertyDto: UpdatePropertyDto,
   ): Promise<ResponseCommon<Property>> {
     await this.propertyRepository.update(id, updatePropertyDto);
@@ -187,7 +187,7 @@ export class PropertyService {
     return new ResponseCommon(200, 'SUCCESS', updatedProperty);
   }
 
-  async remove(id: number): Promise<ResponseCommon<null>> {
+  async remove(id: string): Promise<ResponseCommon<null>> {
     await this.propertyRepository.delete(id);
     return new ResponseCommon(200, 'SUCCESS', null);
   }
