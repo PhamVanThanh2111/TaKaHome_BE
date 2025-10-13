@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ChatGateway } from './chat.gateway';
-import { WsJwtGuard } from '../core/auth/guards/ws-jwt.guard';
 import { ChatMessageModule } from '../chatmessage/chatmessage.module';
 import { ChatRoomModule } from '../chatroom/chatroom.module';
 
@@ -21,7 +20,7 @@ import { ChatRoomModule } from '../chatroom/chatroom.module';
       inject: [ConfigService],
     }),
   ],
-  providers: [ChatGateway, WsJwtGuard],
+  providers: [ChatGateway],
   exports: [ChatGateway],
 })
 export class ChatModule {}
