@@ -32,6 +32,7 @@ import { CreateInvoiceDto } from '../invoice/dto/create-invoice.dto';
 import { Property } from '../property/entities/property.entity';
 import { Room } from '../property/entities/room.entity';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
+import { User } from '../user/entities/user.entity';
 
 @Injectable()
 export class BookingService {
@@ -44,6 +45,8 @@ export class BookingService {
     private propertyRepository: Repository<Property>,
     @InjectRepository(Room)
     private roomRepository: Repository<Room>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
     private contractService: ContractService,
     private smartcaService: SmartCAService,
     private s3StorageService: S3StorageService,
@@ -131,7 +134,10 @@ export class BookingService {
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async landlordApprove(id: string): Promise<ResponseCommon<Booking>> {
+  async landlordApprove(
+    id: string,
+    userId: string,
+  ): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.PENDING_LANDLORD]);
 
@@ -161,11 +167,14 @@ export class BookingService {
       }
 
       const pdfBuffer = fs.readFileSync(pdfPath);
-
+      const landlord = await this.userRepository.findOne({
+        where: { id: userId },
+      });
       // Landlord signs the contract (signatureIndex: 0)
       const signResult = await this.smartcaService.signPdfOneShot({
         pdfBuffer,
         signatureIndex: 0, // Landlord signature index
+        userIdOverride: landlord?.CCCD,
         contractId: contract.id,
         intervalMs: 2000,
         timeoutMs: 120000,
@@ -281,6 +290,7 @@ export class BookingService {
 
   async tenantSign(
     id: string,
+    userId: string,
     depositDeadlineHours = 24,
   ): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
@@ -307,10 +317,14 @@ export class BookingService {
       );
       const landlordSignedPdf = await this.s3StorageService.downloadFile(s3Key);
 
+      const tenant = await this.userRepository.findOne({
+        where: { id: userId },
+      });
       // 2. Tenant signs the PDF (signatureIndex: 1)
       const signResult = await this.smartcaService.signPdfOneShot({
         pdfBuffer: landlordSignedPdf,
         signatureIndex: 1, // Tenant signature index
+        userIdOverride: tenant?.CCCD,
         contractId: contract.id,
         intervalMs: 2000,
         timeoutMs: 120000,

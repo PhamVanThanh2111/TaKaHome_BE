@@ -42,6 +42,9 @@ export class User {
   })
   status: UserStatusEnum;
 
+  @Column({ nullable: true })
+  CCCD?: string;
+
   @CreateDateColumn({
     type: 'timestamptz',
     default: () => 'CURRENT_TIMESTAMP',
