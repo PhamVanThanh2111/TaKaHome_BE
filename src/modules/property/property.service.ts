@@ -11,6 +11,7 @@ import { CreatePropertyDto } from './dto/create-property.dto';
 import { CreateRoomTypeDto } from './dto/create-room-type.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
+import { FilterPropertyDto } from './dto/filter-property.dto';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
 
@@ -222,11 +223,9 @@ export class PropertyService {
             province: prop.province,
             ward: prop.ward,
             address: prop.address,
+            isApproved: prop.isApproved,
             landlord: prop.landlord
-              ? {
-                  id: prop.landlord.id,
-                  name: (prop.landlord as unknown as any).name,
-                }
+              ? { id: prop.landlord.id, name: prop.landlord.fullName }
               : undefined,
           },
         };
@@ -241,6 +240,112 @@ export class PropertyService {
     combined.push(...roomTypeEntries);
 
     return new ResponseCommon(200, 'SUCCESS', combined);
+  }
+
+  /**
+   * Filter combined results (properties and roomType entries) by provided criteria
+   */
+  async filter(
+    filterDto: Partial<FilterPropertyDto>,
+  ): Promise<ResponseCommon<Array<Property | RoomTypeEntry>>> {
+    const all = (await this.findAll()).data || [];
+
+    const filtered = all.filter((item) => {
+      // For Property (HOUSING/APARTMENT) shape
+      if (
+        (item as Property).type &&
+        (item as Property).type !== PropertyTypeEnum.BOARDING
+      ) {
+        const p = item as Property;
+        const price = p.price ?? 0;
+        const area = p.area ?? 0;
+        const bdr = p.bedrooms ?? 0;
+        const bath = p.bathrooms ?? 0;
+        const furn = p.furnishing ?? '';
+
+        if (filterDto.fromPrice && price < filterDto.fromPrice) {
+          return false;
+        }
+        if (filterDto.toPrice && price > filterDto.toPrice) {
+          return false;
+        }
+        if (filterDto.fromArea && area < filterDto.fromArea) {
+          return false;
+        }
+        if (filterDto.toArea && area > filterDto.toArea) {
+          return false;
+        }
+        if (filterDto.bedrooms && bdr < filterDto.bedrooms) {
+          return false;
+        }
+        if (filterDto.bathrooms && bath < filterDto.bathrooms) {
+          return false;
+        }
+        if (filterDto.furnishing && furn !== filterDto.furnishing) {
+          return false;
+        }
+
+        if (
+          typeof filterDto.isApproved === 'boolean' &&
+          p.isApproved !== filterDto.isApproved
+        ) {
+          return false;
+        }
+
+        return true;
+      }
+
+      // For RoomTypeEntry shape
+      const rt = item as RoomTypeEntry;
+      const price = rt.price ?? 0;
+      const area = rt.area ?? 0;
+      const bdr = rt.bedrooms ?? 0;
+      const bath = rt.bathrooms ?? 0;
+      const furn = rt.furnishing ?? '';
+
+      if (filterDto.fromPrice && price < filterDto.fromPrice) {
+        return false;
+      }
+      if (filterDto.toPrice && price > filterDto.toPrice) {
+        return false;
+      }
+      if (filterDto.fromArea && area < filterDto.fromArea) {
+        return false;
+      }
+      if (filterDto.toArea && area > filterDto.toArea) {
+        return false;
+      }
+      if (filterDto.bedrooms && bdr < filterDto.bedrooms) {
+        return false;
+      }
+      if (filterDto.bathrooms && bath < filterDto.bathrooms) {
+        return false;
+      }
+      if (filterDto.furnishing && furn !== filterDto.furnishing) {
+        return false;
+      }
+      if (
+        typeof filterDto.isApproved === 'boolean' &&
+        rt.property &&
+        rt.property.isApproved !== filterDto.isApproved
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+
+    return new ResponseCommon(200, 'SUCCESS', filtered);
+  }
+
+  async findAllForLandlord(
+    landlordId: string,
+  ): Promise<ResponseCommon<Array<Property>>> {
+    const properties = await this.propertyRepository.find({
+      where: { landlord: { id: landlordId } },
+      relations: ['rooms', 'rooms.roomType', 'landlord'],
+    });
+    return new ResponseCommon(200, 'SUCCESS', properties);
   }
 
   async findOne(id: string): Promise<ResponseCommon<Property | null>> {

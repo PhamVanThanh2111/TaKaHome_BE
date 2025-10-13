@@ -22,6 +22,7 @@ export interface RoomTypeEntry {
     province: string;
     ward: string;
     address: string;
+    isApproved?: boolean;
     landlord?: { id: string; name?: string };
   };
 }
