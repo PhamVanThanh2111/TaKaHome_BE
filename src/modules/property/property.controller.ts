@@ -20,6 +20,9 @@ import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { JwtUser } from '../core/auth/strategies/jwt.strategy';
+import { ResponseCommon } from 'src/common/dto/response.dto';
+import { Property } from './entities/property.entity';
+import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
 
 @Controller('properties')
 export class PropertyController {
@@ -53,8 +56,8 @@ export class PropertyController {
 
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách bất động sản' })
-  @ApiResponse({ status: HttpStatus.OK, type: [PropertyResponseDto] })
-  findAll() {
+  @ApiResponse({ status: HttpStatus.OK })
+  async findAll(): Promise<ResponseCommon<(Property | RoomTypeEntry)[]>> {
     return this.propertyService.findAll();
   }
 
