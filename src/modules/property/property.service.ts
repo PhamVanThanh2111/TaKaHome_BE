@@ -477,6 +477,14 @@ export class PropertyService {
     return new ResponseCommon(200, 'SUCCESS', property);
   }
 
+  async findOneRoomType(id: string): Promise<ResponseCommon<RoomType | null>> {
+    const roomType = await this.roomTypeRepository.findOne({
+      where: { id: id.toString() },
+      relations: ['rooms', 'rooms.property', 'rooms.property.landlord'],
+    });
+    return new ResponseCommon(200, 'SUCCESS', roomType);
+  }
+
   async update(
     id: string,
     updatePropertyDto: UpdatePropertyDto,
