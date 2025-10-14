@@ -32,6 +32,7 @@ import { InvoiceModule } from './modules/invoice/invoice.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { SmartCAModule } from './modules/smartca/smartca.module';
 import { CronModule } from './cron/cron.module';
+import { StatisticsModule } from './modules/statistics/statistics.module';
 
 @Module({
   imports: [
@@ -88,6 +89,7 @@ import { CronModule } from './cron/cron.module';
     InvoiceModule,
     MaintenanceModule,
     CronModule,
+    StatisticsModule,
   ],
 })
 export class AppModule implements NestModule {
