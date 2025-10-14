@@ -23,6 +23,7 @@ export interface RoomTypeEntry {
     ward: string;
     address: string;
     isApproved?: boolean;
+    createdAt?: Date;
     landlord?: { id: string; name?: string };
   };
 }

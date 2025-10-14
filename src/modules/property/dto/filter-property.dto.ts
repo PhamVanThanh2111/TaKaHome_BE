@@ -84,4 +84,34 @@ export class FilterPropertyDto {
     description: 'Tìm kiếm theo tên và mô tả',
   })
   q?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @ApiPropertyOptional({ description: 'Số trang (bắt đầu từ 1)', example: 1 })
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @ApiPropertyOptional({ description: 'Số lượng item mỗi trang', example: 10 })
+  limit?: number;
+
+  @IsOptional()
+  @IsEnum(['price', 'area', 'createdAt'])
+  @ApiPropertyOptional({
+    description: 'Sắp xếp theo trường',
+    enum: ['price', 'area', 'createdAt'],
+    example: 'price',
+  })
+  sortBy?: 'price' | 'area' | 'createdAt';
+
+  @IsOptional()
+  @IsEnum(['asc', 'desc'])
+  @ApiPropertyOptional({
+    description: 'Thứ tự sắp xếp',
+    enum: ['asc', 'desc'],
+    example: 'asc',
+  })
+  sortOrder?: 'asc' | 'desc';
 }
