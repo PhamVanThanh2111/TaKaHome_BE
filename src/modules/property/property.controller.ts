@@ -35,6 +35,7 @@ import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { Property } from './entities/property.entity';
 import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
+import { RoomType } from './entities/room-type.entity';
 
 @Controller('properties')
 export class PropertyController {
@@ -81,6 +82,9 @@ export class PropertyController {
   }
 
   @Post(':id/images')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('LANDLORD', 'ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Upload hero and gallery images for property or roomtype',
@@ -153,6 +157,17 @@ export class PropertyController {
   })
   findOne(@Param('id') id: string) {
     return this.propertyService.findOne(id);
+  }
+
+  @Get('/roomtype/:id')
+  @ApiOperation({ summary: 'Lấy thông tin roomtype theo id' })
+  @ApiResponse({ status: HttpStatus.OK, type: RoomType })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Không tìm thấy roomtype',
+  })
+  findOneRoomType(@Param('id') id: string) {
+    return this.propertyService.findOneRoomType(id);
   }
 
   @Patch(':id')
