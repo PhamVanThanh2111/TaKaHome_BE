@@ -323,7 +323,7 @@ export class PropertyService {
    */
   async filter(
     filterDto: Partial<FilterPropertyDto>,
-  ): Promise<ResponseCommon<Array<Property | RoomTypeEntry>>> {
+  ): Promise<ResponseCommon<any>> {
     const all = (await this.findAll()).data || [];
 
     const filtered = all.filter((item) => {
@@ -456,7 +456,112 @@ export class PropertyService {
       return true;
     });
 
-    return new ResponseCommon(200, 'SUCCESS', filtered);
+    // Apply sorting if specified
+    const sortedData = [...filtered];
+    if (filterDto.sortBy) {
+      sortedData.sort((a, b) => {
+        let valueA: number | Date | undefined;
+        let valueB: number | Date | undefined;
+
+        // Get values based on sortBy field
+        if (filterDto.sortBy === 'price') {
+          if (
+            (a as Property).type &&
+            (a as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueA = (a as Property).price ?? 0;
+          } else {
+            valueA = (a as RoomTypeEntry).price ?? 0;
+          }
+
+          if (
+            (b as Property).type &&
+            (b as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueB = (b as Property).price ?? 0;
+          } else {
+            valueB = (b as RoomTypeEntry).price ?? 0;
+          }
+        } else if (filterDto.sortBy === 'area') {
+          if (
+            (a as Property).type &&
+            (a as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueA = (a as Property).area ?? 0;
+          } else {
+            valueA = (a as RoomTypeEntry).area ?? 0;
+          }
+
+          if (
+            (b as Property).type &&
+            (b as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueB = (b as Property).area ?? 0;
+          } else {
+            valueB = (b as RoomTypeEntry).area ?? 0;
+          }
+        } else if (filterDto.sortBy === 'createdAt') {
+          // For Property
+          if (
+            (a as Property).type &&
+            (a as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueA = (a as Property).createdAt;
+          } else {
+            // For RoomTypeEntry - use property's createdAt
+            valueA = (a as RoomTypeEntry).property?.createdAt;
+          }
+
+          if (
+            (b as Property).type &&
+            (b as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueB = (b as Property).createdAt;
+          } else {
+            valueB = (b as RoomTypeEntry).property?.createdAt;
+          }
+        }
+
+        // Convert to comparable values
+        const compareA =
+          valueA instanceof Date ? valueA.getTime() : (valueA ?? 0);
+        const compareB =
+          valueB instanceof Date ? valueB.getTime() : (valueB ?? 0);
+
+        // Apply sort order
+        const order = filterDto.sortOrder === 'desc' ? -1 : 1;
+
+        if (compareA < compareB) return -1 * order;
+        if (compareA > compareB) return 1 * order;
+        return 0;
+      });
+    }
+
+    // Apply pagination
+    const page = filterDto.page || 1;
+    const limit = filterDto.limit || 10;
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+
+    const paginatedData = sortedData.slice(startIndex, endIndex);
+
+    // Prepare pagination metadata
+    const totalItems = sortedData.length;
+    const totalPages = Math.ceil(totalItems / limit);
+
+    const result = {
+      data: paginatedData,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalItems,
+        itemsPerPage: limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    };
+
+    return new ResponseCommon(200, 'SUCCESS', result);
   }
 
   async findAllForLandlord(

@@ -75,9 +75,44 @@ export class PropertyController {
   }
 
   @Get('filter')
-  @ApiOperation({ summary: 'Filter danh sách bất động sản / roomtypes' })
-  @ApiResponse({ status: HttpStatus.OK })
-  filter(@Query() query: FilterPropertyDto): Promise<ResponseCommon<any[]>> {
+  @ApiOperation({
+    summary:
+      'Filter danh sách bất động sản / roomtypes với phân trang và sắp xếp',
+    description:
+      'Lọc và tìm kiếm bất động sản/roomtypes với hỗ trợ phân trang và sắp xếp theo giá, diện tích, ngày tạo',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Trả về danh sách bất động sản với thông tin phân trang',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 200 },
+        message: { type: 'string', example: 'SUCCESS' },
+        data: {
+          type: 'object',
+          properties: {
+            data: {
+              type: 'array',
+              items: { type: 'object' },
+            },
+            pagination: {
+              type: 'object',
+              properties: {
+                currentPage: { type: 'number' },
+                totalPages: { type: 'number' },
+                totalItems: { type: 'number' },
+                itemsPerPage: { type: 'number' },
+                hasNextPage: { type: 'boolean' },
+                hasPrevPage: { type: 'boolean' },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  filter(@Query() query: FilterPropertyDto): Promise<ResponseCommon<any>> {
     return this.propertyService.filter(query);
   }
 
