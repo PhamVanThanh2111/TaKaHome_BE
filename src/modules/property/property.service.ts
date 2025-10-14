@@ -368,6 +368,18 @@ export class PropertyService {
           return false;
         }
 
+        if (filterDto.province && p.province !== filterDto.province) {
+          return false;
+        }
+
+        if (filterDto.ward && p.ward !== filterDto.ward) {
+          return false;
+        }
+
+        if (filterDto.type && p.type !== filterDto.type) {
+          return false;
+        }
+
         return true;
       }
 
@@ -405,6 +417,18 @@ export class PropertyService {
         rt.property &&
         rt.property.isApproved !== filterDto.isApproved
       ) {
+        return false;
+      }
+
+      if (filterDto.province && rt.property?.province !== filterDto.province) {
+        return false;
+      }
+
+      if (filterDto.ward && rt.property?.ward !== filterDto.ward) {
+        return false;
+      }
+
+      if (filterDto.type && filterDto.type !== PropertyTypeEnum.BOARDING) {
         return false;
       }
 

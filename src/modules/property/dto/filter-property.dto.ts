@@ -1,7 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsNumber, IsString } from 'class-validator';
+import { IsOptional, IsNumber, IsString, IsEnum } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { IsBoolean } from 'class-validator';
+import { PropertyTypeEnum } from '../../common/enums/property-type.enum';
 
 export class FilterPropertyDto {
   @IsOptional()
@@ -58,4 +59,22 @@ export class FilterPropertyDto {
     description: 'isApproved (true/false) - lọc theo trạng thái duyệt',
   })
   isApproved?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @ApiPropertyOptional({ description: 'Tỉnh/thành phố' })
+  province?: string;
+
+  @IsOptional()
+  @IsString()
+  @ApiPropertyOptional({ description: 'Phường/xã' })
+  ward?: string;
+
+  @IsOptional()
+  @IsEnum(PropertyTypeEnum)
+  @ApiPropertyOptional({
+    description: 'Loại bất động sản',
+    enum: PropertyTypeEnum,
+  })
+  type?: PropertyTypeEnum;
 }
