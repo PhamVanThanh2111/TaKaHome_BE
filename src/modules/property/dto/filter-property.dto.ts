@@ -77,4 +77,11 @@ export class FilterPropertyDto {
     enum: PropertyTypeEnum,
   })
   type?: PropertyTypeEnum;
+
+  @IsOptional()
+  @IsString()
+  @ApiPropertyOptional({
+    description: 'Tìm kiếm theo tên và mô tả',
+  })
+  q?: string;
 }

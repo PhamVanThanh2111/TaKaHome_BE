@@ -380,6 +380,18 @@ export class PropertyService {
           return false;
         }
 
+        if (filterDto.q) {
+          const searchTerm = filterDto.q.toLowerCase();
+          const title = (p.title || '').toLowerCase();
+          const description = (p.description || '').toLowerCase();
+          if (
+            !title.includes(searchTerm) &&
+            !description.includes(searchTerm)
+          ) {
+            return false;
+          }
+        }
+
         return true;
       }
 
@@ -430,6 +442,15 @@ export class PropertyService {
 
       if (filterDto.type && filterDto.type !== PropertyTypeEnum.BOARDING) {
         return false;
+      }
+
+      if (filterDto.q) {
+        const searchTerm = filterDto.q.toLowerCase();
+        const name = (rt.name || '').toLowerCase();
+        const description = (rt.description || '').toLowerCase();
+        if (!name.includes(searchTerm) && !description.includes(searchTerm)) {
+          return false;
+        }
       }
 
       return true;
