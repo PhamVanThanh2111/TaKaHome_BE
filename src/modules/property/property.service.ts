@@ -351,10 +351,10 @@ export class PropertyService {
         if (filterDto.toArea && area > filterDto.toArea) {
           return false;
         }
-        if (filterDto.bedrooms && bdr < filterDto.bedrooms) {
+        if (filterDto.bedrooms && bdr !== filterDto.bedrooms) {
           return false;
         }
-        if (filterDto.bathrooms && bath < filterDto.bathrooms) {
+        if (filterDto.bathrooms && bath !== filterDto.bathrooms) {
           return false;
         }
         if (filterDto.furnishing && furn !== filterDto.furnishing) {
@@ -415,10 +415,10 @@ export class PropertyService {
       if (filterDto.toArea && area > filterDto.toArea) {
         return false;
       }
-      if (filterDto.bedrooms && bdr < filterDto.bedrooms) {
+      if (filterDto.bedrooms && bdr !== filterDto.bedrooms) {
         return false;
       }
-      if (filterDto.bathrooms && bath < filterDto.bathrooms) {
+      if (filterDto.bathrooms && bath !== filterDto.bathrooms) {
         return false;
       }
       if (filterDto.furnishing && furn !== filterDto.furnishing) {
