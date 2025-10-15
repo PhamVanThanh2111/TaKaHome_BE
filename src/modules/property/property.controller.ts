@@ -36,6 +36,7 @@ import { ResponseCommon } from 'src/common/dto/response.dto';
 import { Property } from './entities/property.entity';
 import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
 import { RoomType } from './entities/room-type.entity';
+import { ApprovePropertiesDto } from './dto/approve-properties.dto';
 
 @Controller('properties')
 export class PropertyController {
@@ -205,6 +206,59 @@ export class PropertyController {
     return this.propertyService.findOneRoomType(id);
   }
 
+  @Patch('approve')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Duyệt nhiều properties (ADMIN only)',
+    description:
+      'ADMIN duyệt nhiều properties. Khi approve = true, properties và rooms (nếu có) sẽ được hiển thị công khai',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Duyệt properties thành công',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 200 },
+        message: {
+          type: 'string',
+          example: 'Successfully approved 2 properties',
+        },
+        data: {
+          type: 'object',
+          properties: {
+            approvedProperties: {
+              type: 'array',
+              items: { type: 'object' },
+              description: 'Danh sách các property đã được duyệt',
+            },
+            failedIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Danh sách ID các property không thể duyệt',
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Một hoặc nhiều properties không tìm thấy',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Chỉ ADMIN mới có quyền duyệt properties',
+  })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  approveProperty(@Body() approvePropertiesDto: ApprovePropertiesDto) {
+    return this.propertyService.approveProperties(
+      approvePropertiesDto.propertyIds,
+    );
+  }
+
   @Patch(':id')
   @ApiOperation({ summary: 'Cập nhật thông tin bất động sản' })
   @ApiResponse({ status: HttpStatus.OK, type: PropertyResponseDto })
@@ -230,32 +284,5 @@ export class PropertyController {
   @Roles('ADMIN', 'LANDLORD')
   remove(@Param('id') id: string) {
     return this.propertyService.remove(id);
-  }
-
-  @Patch(':id/approve')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Duyệt property (ADMIN only)',
-    description:
-      'ADMIN duyệt property. Khi approve = true, property và rooms (nếu có) sẽ được hiển thị công khai',
-  })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    type: PropertyResponseDto,
-    description: 'Duyệt property thành công',
-  })
-  @ApiResponse({
-    status: HttpStatus.NOT_FOUND,
-    description: 'Không tìm thấy property',
-  })
-  @ApiResponse({
-    status: HttpStatus.FORBIDDEN,
-    description: 'Chỉ ADMIN mới có quyền duyệt property',
-  })
-  @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
-  approveProperty(@Param('id') id: string) {
-    return this.propertyService.approveProperty(id);
   }
 }

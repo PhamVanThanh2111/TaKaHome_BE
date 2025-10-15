@@ -19,6 +19,7 @@ export interface RoomTypeEntry {
   property: {
     id: string;
     title: string;
+    description?: string;
     province: string;
     ward: string;
     address: string;
