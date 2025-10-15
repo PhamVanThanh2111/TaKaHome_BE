@@ -11,6 +11,7 @@ import { zonedTimeToUtc } from 'date-fns-tz';
 import { Booking } from './entities/booking.entity';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
+import { FilterBookingDto, BookingCondition } from './dto/filter-booking.dto';
 import { BookingStatus } from '../common/enums/booking-status.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { Contract } from '../contract/entities/contract.entity';
@@ -552,6 +553,62 @@ export class BookingService {
     const bookings = await this.bookingRepository.find({
       relations: ['tenant', 'property'],
     });
+    return new ResponseCommon(200, 'SUCCESS', bookings);
+  }
+
+  async filterBookings(
+    dto: FilterBookingDto,
+  ): Promise<ResponseCommon<Booking[]>> {
+    const { tenantId, landlordId, condition, status } = dto;
+
+    const queryBuilder = this.bookingRepository
+      .createQueryBuilder('booking')
+      .leftJoinAndSelect('booking.tenant', 'tenant')
+      .leftJoinAndSelect('booking.property', 'property')
+      .leftJoinAndSelect('property.landlord', 'landlord');
+
+    // Filter by tenantId
+    if (tenantId) {
+      queryBuilder.andWhere('tenant.id = :tenantId', { tenantId });
+    }
+
+    // Filter by landlordId
+    if (landlordId) {
+      queryBuilder.andWhere('landlord.id = :landlordId', { landlordId });
+    }
+
+    if (status) {
+      queryBuilder.andWhere('booking.status = :status', { status });
+    }
+
+    // Filter by condition
+    if (condition) {
+      switch (condition) {
+        case BookingCondition.NOT_APPROVED_YET:
+          queryBuilder.andWhere('booking.status = :status', {
+            status: BookingStatus.PENDING_LANDLORD,
+          });
+          break;
+        case BookingCondition.NOT_APPROVED:
+          queryBuilder.andWhere('booking.status = :status', {
+            status: BookingStatus.REJECTED,
+          });
+          break;
+        case BookingCondition.APPROVED:
+          queryBuilder.andWhere('booking.status NOT IN (:...statuses)', {
+            statuses: [
+              BookingStatus.PENDING_LANDLORD,
+              BookingStatus.REJECTED,
+              BookingStatus.CANCELLED,
+            ],
+          });
+          break;
+      }
+    }
+
+    queryBuilder.orderBy('booking.createdAt', 'DESC');
+
+    const bookings = await queryBuilder.getMany();
     return new ResponseCommon(200, 'SUCCESS', bookings);
   }
 
