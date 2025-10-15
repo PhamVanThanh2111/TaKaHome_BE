@@ -207,27 +207,30 @@ export class PropertyService {
 
       case PropertyTypeEnum.APARTMENT: {
         // APARTMENT: Like HOUSING but include block, exclude unit and utility prices
-        const {
-          electricityPricePerKwh,
-          waterPricePerM3,
-          unit,
-          ...apartmentData
-        } = baseProperty;
+        const { electricityPricePerKwh, waterPricePerM3, ...apartmentData } =
+          baseProperty;
         void electricityPricePerKwh;
         void waterPricePerM3;
-        void unit;
         return apartmentData as Partial<Property>;
       }
 
       case PropertyTypeEnum.BOARDING: {
         // BOARDING: Exclude fields that will be in RoomType
-        const { bedrooms, bathrooms, area, price, deposit, ...boardingData } =
-          baseProperty;
+        const {
+          bedrooms,
+          bathrooms,
+          area,
+          price,
+          deposit,
+          floor,
+          ...boardingData
+        } = baseProperty;
         void bedrooms;
         void bathrooms;
         void area;
         void price;
         void deposit;
+        void floor;
         return boardingData as Partial<Property>;
       }
 
