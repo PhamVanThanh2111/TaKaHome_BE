@@ -5,6 +5,7 @@ import {
   Body,
   Patch,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -12,6 +13,7 @@ import {
 import { BookingService } from './booking.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
+import { FilterBookingDto } from './dto/filter-booking.dto';
 import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { BookingResponseDto } from './dto/booking-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
@@ -51,6 +53,13 @@ export class BookingController {
   @ApiResponse({ status: HttpStatus.OK, type: [BookingResponseDto] })
   findAll() {
     return this.bookingService.findAll();
+  }
+
+  @Get('filter')
+  @ApiOperation({ summary: 'Lọc booking theo điều kiện' })
+  @ApiResponse({ status: HttpStatus.OK, type: [BookingResponseDto] })
+  filterBookings(@Query() filterDto: FilterBookingDto) {
+    return this.bookingService.filterBookings(filterDto);
   }
 
   @Get(':id')
