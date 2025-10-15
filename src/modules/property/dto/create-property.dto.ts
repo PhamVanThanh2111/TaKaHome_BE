@@ -79,6 +79,15 @@ export class CreatePropertyDto {
 
   @IsOptional()
   @IsNumber()
+  @ApiProperty({
+    example: 2,
+    description: 'Tầng (cho nhà nguyên căn)',
+    required: false,
+  })
+  floor?: number;
+
+  @IsOptional()
+  @IsNumber()
   @ApiProperty({ example: 80, description: 'Diện tích (m2)', required: false })
   area?: number;
 
