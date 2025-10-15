@@ -678,6 +678,89 @@ export class PropertyService {
     }
   }
 
+  async approveProperties(propertyIds: string[]): Promise<
+    ResponseCommon<{
+      approvedProperties: Property[];
+      failedIds: string[];
+    }>
+  > {
+    try {
+      const approvedProperties: Property[] = [];
+      const failedIds: string[] = [];
+
+      // Process each property ID
+      for (const propertyId of propertyIds) {
+        try {
+          // Step 1: Find property with rooms relation for BOARDING type
+          const property = await this.propertyRepository.findOne({
+            where: { id: propertyId },
+            relations: ['rooms'],
+          });
+
+          if (!property) {
+            failedIds.push(propertyId);
+            continue;
+          }
+
+          // Step 2: Validate if property has active bookings (only when approving)
+          await this.validatePropertyBookings(property);
+
+          // Step 3: Update property approval status and visibility
+          property.isApproved = true;
+          if (
+            property.type === PropertyTypeEnum.HOUSING ||
+            property.type === PropertyTypeEnum.APARTMENT
+          ) {
+            property.isVisible = false; // When approved, set visible (isVisible=false means visible)
+          }
+
+          await this.propertyRepository.save(property);
+
+          // Step 4: For BOARDING type, update all rooms visibility
+          if (property.type === PropertyTypeEnum.BOARDING && property.rooms) {
+            const roomUpdatePromises = property.rooms.map((room) => {
+              room.isVisible = false; // When approved, rooms become visible (isVisible=false)
+              return this.roomRepository.save(room);
+            });
+
+            await Promise.all(roomUpdatePromises);
+          }
+
+          // Step 5: Get the updated property with all relations and add to approved list
+          const updatedProperty = await this.propertyRepository.findOne({
+            where: { id: propertyId },
+            relations:
+              property.type === PropertyTypeEnum.BOARDING
+                ? ['rooms', 'rooms.roomType', 'landlord']
+                : ['landlord'],
+          });
+
+          if (updatedProperty) {
+            approvedProperties.push(updatedProperty);
+          }
+        } catch (error) {
+          // If there's an error with this property, add it to failed list and continue
+          failedIds.push(propertyId);
+          console.error(`Error approving property ${propertyId}:`, error);
+        }
+      }
+
+      const result = {
+        approvedProperties,
+        failedIds,
+      };
+
+      return new ResponseCommon(
+        200,
+        `Successfully approved ${approvedProperties.length} properties`,
+        result,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Error approving properties: ${message}`);
+    }
+  }
+
   /**
    * Validate if property has active bookings that would prevent approval
    * @param property Property to validate
