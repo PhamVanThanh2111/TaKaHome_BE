@@ -299,6 +299,7 @@ export class PropertyService {
           property: {
             id: prop.id,
             title: prop.title,
+            description: prop.description,
             province: prop.province,
             ward: prop.ward,
             address: prop.address,
@@ -451,7 +452,16 @@ export class PropertyService {
         const searchTerm = filterDto.q.toLowerCase();
         const name = (rt.name || '').toLowerCase();
         const description = (rt.description || '').toLowerCase();
-        if (!name.includes(searchTerm) && !description.includes(searchTerm)) {
+        const propertyTitle = (rt.property?.title || '').toLowerCase();
+        const propertyDescription = (
+          rt.property?.description || ''
+        ).toLowerCase();
+        if (
+          !name.includes(searchTerm) &&
+          !description.includes(searchTerm) &&
+          !propertyTitle.includes(searchTerm) &&
+          !propertyDescription.includes(searchTerm)
+        ) {
           return false;
         }
       }
