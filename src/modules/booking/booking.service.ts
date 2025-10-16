@@ -226,9 +226,9 @@ export class BookingService {
         }
       }
     } catch (error) {
-      console.error('[LandlordApprove] ❌ Landlord signing failed:', error);
+      console.error('[LandlordApprove] ❌ Landlord approval failed:', error);
       throw new BadRequestException(
-        `Failed to complete landlord signing: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `Failed to complete landlord approval: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
     }
 
