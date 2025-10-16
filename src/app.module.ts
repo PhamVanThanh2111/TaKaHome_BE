@@ -26,6 +26,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import * as Joi from 'joi';
 import vnpayConfig from './config/vnpay.config';
 import smartcaConfig from './config/smartca.config';
+import frontendConfig from './config/frontend.config';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { EscrowModule } from './modules/escrow/escrow.module';
 import { InvoiceModule } from './modules/invoice/invoice.module';
@@ -42,8 +43,11 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
     ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
-      load: [vnpayConfig, smartcaConfig], // <— nạp file config/vnpay.config.ts và smartca.config.ts
+      load: [vnpayConfig, smartcaConfig, frontendConfig], // <— nạp file config/vnpay.config.ts, smartca.config.ts và frontend.config.ts
       validationSchema: Joi.object({
+        // Frontend validation
+        FRONTEND_URL: Joi.string().required().uri(),
+
         // VNPAY validation
         VNP_TMN_CODE: Joi.string().required(),
         VNP_HASH_SECRET: Joi.string().required(),
@@ -58,7 +62,6 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
         SMARTCA_SIGN_STATUS_TMPL: Joi.string().optional(),
         SMARTCA_SP_ID: Joi.string().optional(),
         SMARTCA_SP_PASSWORD: Joi.string().optional(),
-        SMARTCA_USER_ID: Joi.string().optional(),
         OID_DATA: Joi.string().optional(),
         OID_SIGNED_DATA: Joi.string().optional(),
         OID_CONTENT_TYPE: Joi.string().optional(),
