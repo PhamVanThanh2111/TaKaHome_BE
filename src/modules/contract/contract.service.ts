@@ -235,6 +235,24 @@ export class ContractService {
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
+  async updateSignatureTransactionId(
+    id: string,
+    transactionId: string,
+    signatureIndex: number,
+  ): Promise<void> {
+    const contract = await this.loadContractOrThrow(id);
+
+    if (signatureIndex === 0) {
+      // LANDLORD signing (signatureIndex: 0)
+      contract.transactionIdLandlordSign = transactionId;
+    } else if (signatureIndex === 1) {
+      // TENANT signing (signatureIndex: 1)
+      contract.transactionIdTenantSign = transactionId;
+    }
+
+    await this.contractRepository.save(contract);
+  }
+
   async activate(id: string): Promise<ResponseCommon<Contract>> {
     const contract = await this.loadContractOrThrow(id);
     this.ensureStatus(contract, [
