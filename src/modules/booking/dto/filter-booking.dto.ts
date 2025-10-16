@@ -10,22 +10,6 @@ export enum BookingCondition {
 
 export class FilterBookingDto {
   @IsOptional()
-  @IsUUID()
-  @ApiProperty({
-    description: 'ID người thuê',
-    required: false,
-  })
-  tenantId?: string;
-
-  @IsOptional()
-  @IsUUID()
-  @ApiProperty({
-    description: 'ID chủ nhà',
-    required: false,
-  })
-  landlordId?: string;
-
-  @IsOptional()
   @IsEnum(BookingCondition)
   @ApiProperty({
     enum: BookingCondition,
