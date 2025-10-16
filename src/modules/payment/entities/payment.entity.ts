@@ -22,7 +22,7 @@ export class Payment {
   contract?: Contract;
 
   @OneToOne(() => Invoice, (invoice) => invoice.payment, { nullable: true })
-  invoice: Invoice;
+  invoice?: Invoice;
 
   @Column()
   amount: number;
