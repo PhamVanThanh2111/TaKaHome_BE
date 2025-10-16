@@ -7,6 +7,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToOne,
+  JoinColumn,
 } from 'typeorm';
 import { Contract } from '../../contract/entities/contract.entity';
 import { Payment } from '../../payment/entities/payment.entity';
@@ -28,6 +29,7 @@ export class Invoice {
   items: InvoiceItem[];
 
   @OneToOne(() => Payment, (payment) => payment.invoice)
+  @JoinColumn()
   payment: Payment;
 
   @Column()
