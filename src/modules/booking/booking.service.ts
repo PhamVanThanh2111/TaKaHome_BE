@@ -539,7 +539,7 @@ export class BookingService {
   private async loadBookingOrThrow(id: string): Promise<Booking> {
     const booking = await this.bookingRepository.findOne({
       where: { id },
-      relations: ['tenant', 'property', 'property.landlord'],
+      relations: ['tenant', 'property', 'property.landlord', 'room'],
     });
     if (!booking) throw new NotFoundException('Booking not found');
     return booking;
@@ -618,7 +618,9 @@ export class BookingService {
           break;
       }
     }
-
+    // add relations for room
+    queryBuilder.leftJoinAndSelect('booking.room', 'room');
+    queryBuilder.leftJoinAndSelect('room.roomType', 'roomType');
     queryBuilder.orderBy('booking.createdAt', 'DESC');
 
     const bookings = await queryBuilder.getMany();
@@ -851,6 +853,7 @@ export class BookingService {
       tenantId,
       landlordId,
       propertyId,
+      roomId: booking.room?.id,
       startDate: booking.signedAt ?? vnNow(),
     });
     booking.contractId = draft.id;
