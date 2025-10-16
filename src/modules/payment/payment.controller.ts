@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   Controller,
   Get,
@@ -12,11 +13,17 @@ import {
   Query,
   Req,
   Res,
+  Inject,
 } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
-import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { PaymentResponseDto } from './dto/payment-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
@@ -25,12 +32,24 @@ import { Request, Response } from 'express';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 import { Public } from 'src/common/decorators/public.decorator';
+import { ConfigType } from '@nestjs/config';
+import frontendConfig from '../../config/frontend.config';
+
+interface PaymentState {
+  userId: string;
+  contractId: string;
+  timestamp: number;
+}
 
 @Controller('payments')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class PaymentController {
-  constructor(private readonly paymentService: PaymentService) {}
+  constructor(
+    private readonly paymentService: PaymentService,
+    @Inject(frontendConfig.KEY)
+    private readonly frontend: ConfigType<typeof frontendConfig>,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -67,6 +86,15 @@ export class PaymentController {
     type: PaymentResponseDto,
     description: 'Tạo payment từ hóa đơn thành công',
   })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        method: { type: 'string', enum: ['VNPAY', 'WALLET'] },
+      },
+      required: ['method'],
+    },
+  })
   createFromInvoice(
     @Param('invoiceId') invoiceId: string,
     @Body() body: { method: 'VNPAY' | 'WALLET' },
@@ -77,10 +105,14 @@ export class PaymentController {
       (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
       req.socket.remoteAddress;
 
-    return this.paymentService.createPaymentFromInvoice(invoiceId, body.method as any, {
-      userId: user.id,
-      ipAddr: String(ip),
-    });
+    return this.paymentService.createPaymentFromInvoice(
+      invoiceId,
+      body.method as any,
+      {
+        userId: user.id,
+        ipAddr: String(ip),
+      },
+    );
   }
 
   @Get()
@@ -117,6 +149,7 @@ export class PaymentController {
     @Query('locale') locale: 'vn',
     @Query('expireIn') expireIn: string,
     @Query('redirect') redirect: string,
+    @CurrentUser() user: JwtUser,
     @Req() req: Request,
     @Res() res: Response,
   ) {
@@ -133,6 +166,7 @@ export class PaymentController {
       contractId,
       amount: amountNum,
       ipAddr: clientIp,
+      userId: user.id, // ✅ Add userId for state parameter
       orderInfo,
       locale: locale || 'vn',
       expireIn: expireIn ? Number(expireIn) : undefined,
@@ -155,10 +189,79 @@ export class PaymentController {
   @Get('vnpay/return')
   async vnpReturn(@Query() q: Record<string, string>, @Res() res: Response) {
     const result = await this.paymentService.verifyVnpayReturn(q);
-    // trả JSON
-    return res.json(result.data ?? {});
-    // hoặc redirect FE:
-    // return res.redirect(`${FE_URL}/payment-result?ok=${result.ok}&code=${result.code}&txnRef=${result.txnRef}`);
+
+    const frontendUrl = this.frontend.url;
+    const data = result.data;
+
+    if (!data) {
+      // Trường hợp lỗi không có data
+      return res.redirect(
+        `${frontendUrl}/payment-result?status=error&message=Unknown_error`,
+      );
+    }
+
+    const state = q.state;
+    if (state) {
+      try {
+        const userInfo: PaymentState = JSON.parse(
+          Buffer.from(state, 'base64').toString(),
+        );
+
+        // Verify payment belongs to the user who initiated it
+        const payment = await this.paymentService.findByTxnRef(
+          data.txnRef || '',
+        );
+        if (payment && payment.contract?.tenant?.id !== userInfo.userId) {
+          return res.redirect(
+            `${frontendUrl}/payment-result?status=error&message=Unauthorized_access`,
+          );
+        }
+
+        // Verify timestamp (optional: check if state is not too old)
+        const stateAge = Date.now() - userInfo.timestamp;
+        if (stateAge > 30 * 60 * 1000) {
+          // 30 minutes
+          return res.redirect(
+            `${frontendUrl}/payment-result?status=error&message=State_expired`,
+          );
+        }
+
+        const params = new URLSearchParams({
+          status: data.ok ? 'success' : 'failed',
+          code: data.code || '',
+          txnRef: data.txnRef || '',
+          amount: data.amount?.toString() || '0',
+          reason: data.reason || '',
+          userId: userInfo.userId, // ✅ Include verified user ID
+          contractId: userInfo.contractId, // ✅ Include contract context
+          ...(data.bankCode && { bankCode: data.bankCode }),
+          ...(data.payDate && { payDate: data.payDate }),
+          ...(data.orderInfo && { orderInfo: data.orderInfo }),
+        });
+
+        return res.redirect(
+          `${frontendUrl}/payment-result?${params.toString()}`,
+        );
+      } catch (error) {
+        console.error('Error verifying state parameter:', error);
+        return res.redirect(
+          `${frontendUrl}/payment-result?status=error&message=Invalid_state`,
+        );
+      }
+    }
+
+    const params = new URLSearchParams({
+      status: data.ok ? 'success' : 'failed',
+      code: data.code || '',
+      txnRef: data.txnRef || '',
+      amount: data.amount?.toString() || '0',
+      reason: data.reason || '',
+      ...(data.bankCode && { bankCode: data.bankCode }),
+      ...(data.payDate && { payDate: data.payDate }),
+      ...(data.orderInfo && { orderInfo: data.orderInfo }),
+    });
+
+    return res.redirect(`${frontendUrl}/payment-result?${params.toString()}`);
   }
 
   @Public()

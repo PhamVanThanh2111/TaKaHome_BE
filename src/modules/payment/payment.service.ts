@@ -75,27 +75,41 @@ export class PaymentService {
     }
 
     if (invoice.contract?.tenant?.id !== ctx.userId) {
-      throw new Error(`User ${ctx.userId} is not authorized to pay invoice ${invoiceId}`);
+      throw new Error(
+        `User ${ctx.userId} is not authorized to pay invoice ${invoiceId}`,
+      );
     }
 
     // Determine payment purpose based on invoice description
-    let purpose: PaymentPurpose;
     const firstMonthKeywords = ['first month', 'tháng đầu', 'first rent'];
-    const isFirstMonth = invoice.items?.some(item =>
-      firstMonthKeywords.some(keyword => 
-        item.description.toLowerCase().includes(keyword.toLowerCase())
-      )
+    const isFirstMonth = invoice.items?.some((item) =>
+      firstMonthKeywords.some((keyword) =>
+        item.description.toLowerCase().includes(keyword.toLowerCase()),
+      ),
     );
 
-    purpose = isFirstMonth ? PaymentPurpose.FIRST_MONTH_RENT : PaymentPurpose.MONTHLY_RENT;
+    const purpose: PaymentPurpose = isFirstMonth
+      ? PaymentPurpose.FIRST_MONTH_RENT
+      : PaymentPurpose.MONTHLY_RENT;
+
+    // Ensure invoice has an associated contract
+    if (!invoice.contract || !invoice.contract.id) {
+      throw new Error(
+        `Invoice ${invoiceId} does not have an associated contract`,
+      );
+    }
+    const contractId = invoice.contract.id;
 
     // Create payment with existing logic
-    return this.createPayment({
-      contractId: invoice.contract!.id,
-      amount: invoice.totalAmount,
-      method,
-      purpose,
-    }, ctx);
+    return this.createPayment(
+      {
+        contractId,
+        amount: invoice.totalAmount,
+        method,
+        purpose,
+      },
+      ctx,
+    );
   }
 
   /** API chính để khởi tạo thanh toán */
@@ -189,6 +203,13 @@ export class PaymentService {
     return new ResponseCommon(200, 'SUCCESS', payments);
   }
 
+  async findByTxnRef(txnRef: string): Promise<Payment | null> {
+    return this.paymentRepository.findOne({
+      where: { gatewayTxnRef: txnRef },
+      relations: ['contract', 'contract.tenant', 'contract.landlord'],
+    });
+  }
+
   async findOne(id: number): Promise<ResponseCommon<Payment>> {
     const payment = await this.paymentRepository.findOne({
       where: { id: id.toString() },
@@ -229,6 +250,7 @@ export class PaymentService {
     contractId: string;
     amount: number; // VND
     ipAddr: string; // IP thực của client
+    userId?: string;
     orderInfo?: string;
     locale?: 'vn'; // default 'vn'
     expireIn?: number; // minutes, default 15
@@ -237,6 +259,7 @@ export class PaymentService {
       contractId,
       amount,
       ipAddr,
+      userId,
       orderInfo = `Thanh toan hop dong ${contractId}`,
       locale = 'vn',
       expireIn = 15,
@@ -270,6 +293,18 @@ export class PaymentService {
     // vnp_TxnRef phải duy nhất
     const txnRef = this.generateVnpTxnRef();
 
+    let finalReturnUrl = returnUrl;
+    if (userId) {
+      const state = Buffer.from(
+        JSON.stringify({
+          userId,
+          contractId,
+          timestamp: Date.now(),
+        }),
+      ).toString('base64');
+      finalReturnUrl = `${returnUrl}${returnUrl.includes('?') ? '&' : '?'}state=${state}`;
+    }
+
     let vnp_Params: Record<string, string> = {
       vnp_Version: '2.1.0',
       vnp_Command: 'pay',
@@ -280,7 +315,7 @@ export class PaymentService {
       vnp_OrderInfo: safeOrderInfo,
       vnp_OrderType: 'other',
       vnp_Locale: locale,
-      vnp_ReturnUrl: returnUrl,
+      vnp_ReturnUrl: finalReturnUrl,
       vnp_IpAddr: ipAddr,
       vnp_CreateDate: createDate,
       vnp_ExpireDate: expireDate,
@@ -750,7 +785,9 @@ export class PaymentService {
     try {
       const contract = payment.contract;
       if (!contract?.contractCode || !contract.startDate) {
-        console.warn('Cannot record monthly payment: missing contract code or start date');
+        console.warn(
+          'Cannot record monthly payment: missing contract code or start date',
+        );
         return;
       }
 
@@ -849,34 +886,39 @@ export class PaymentService {
 
   /** ===== Helpers ===== */
 
-
-
   /**
    * Link payment with corresponding invoice based on contract and payment purpose
    */
   private async linkPaymentWithInvoice(payment: Payment): Promise<void> {
     try {
       // Link both FIRST_MONTH_RENT and MONTHLY_RENT payments with invoices
-      if (payment.purpose !== PaymentPurpose.MONTHLY_RENT && payment.purpose !== PaymentPurpose.FIRST_MONTH_RENT) {
+      if (
+        payment.purpose !== PaymentPurpose.MONTHLY_RENT &&
+        payment.purpose !== PaymentPurpose.FIRST_MONTH_RENT
+      ) {
         return;
       }
 
       const contract = payment.contract;
       if (!contract?.id) {
-        console.warn(`Cannot link payment: missing contract for payment ${payment.id}`);
+        console.warn(
+          `Cannot link payment: missing contract for payment ${payment.id}`,
+        );
         return;
       }
 
       // For FIRST_MONTH_RENT, find invoice with "first month" description
       // For MONTHLY_RENT, calculate period and match
       let searchCriteria: string;
-      
+
       if (payment.purpose === PaymentPurpose.FIRST_MONTH_RENT) {
         searchCriteria = 'first month';
       } else {
         // MONTHLY_RENT - calculate period
         if (!contract.startDate) {
-          console.warn(`Cannot calculate period: missing contract start date for payment ${payment.id}`);
+          console.warn(
+            `Cannot calculate period: missing contract start date for payment ${payment.id}`,
+          );
           return;
         }
         const paymentDate = payment.paidAt || new Date();
@@ -896,15 +938,17 @@ export class PaymentService {
       });
 
       if (invoices.length === 0) {
-        console.warn(`No matching invoice found for payment ${payment.id} (contract: ${contract.id}, amount: ${payment.amount})`);
+        console.warn(
+          `No matching invoice found for payment ${payment.id} (contract: ${contract.id}, amount: ${payment.amount})`,
+        );
         return;
       }
 
       // Try to match invoice by search criteria in description
-      let targetInvoice = invoices.find(inv => 
-        inv.items?.some(item => 
-          item.description.toLowerCase().includes(searchCriteria.toLowerCase())
-        )
+      let targetInvoice = invoices.find((inv) =>
+        inv.items?.some((item) =>
+          item.description.toLowerCase().includes(searchCriteria.toLowerCase()),
+        ),
       );
 
       // If no specific match, use the oldest invoice
@@ -920,7 +964,9 @@ export class PaymentService {
       targetInvoice.status = InvoiceStatusEnum.PAID;
       await this.invoiceRepository.save(targetInvoice);
 
-      console.log(`✅ Linked payment ${payment.id} with invoice ${targetInvoice.id} (${searchCriteria})`);
+      console.log(
+        `✅ Linked payment ${payment.id} with invoice ${targetInvoice.id} (${searchCriteria})`,
+      );
     } catch (error) {
       console.error('❌ Failed to link payment with invoice:', error);
       // Don't throw - linking failure shouldn't block payment processing
@@ -932,13 +978,16 @@ export class PaymentService {
    * Period 1 = First month payment (handled separately)
    * Period 2, 3, 4... = Monthly payments
    */
-  private calculatePaymentPeriod(contract: { startDate: Date }, paymentDate: Date): string {
+  private calculatePaymentPeriod(
+    contract: { startDate: Date },
+    paymentDate: Date,
+  ): string {
     const startDate = contract.startDate;
     const monthsDiff = Math.floor(
       (paymentDate.getFullYear() - startDate.getFullYear()) * 12 +
-      (paymentDate.getMonth() - startDate.getMonth())
+        (paymentDate.getMonth() - startDate.getMonth()),
     );
-    
+
     // Period starts from 2 since first payment is period 1
     const period = Math.max(2, monthsDiff + 2);
     return period.toString();

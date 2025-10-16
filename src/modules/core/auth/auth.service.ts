@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -126,7 +127,8 @@ export class AuthService {
       where: { email: dto.email },
       relations: ['user'],
     });
-    if (!acc || !(await bcrypt.compare(dto.password, acc.password))) {
+    if (!acc) throw new NotFoundException('Account not found');
+    if (!(await bcrypt.compare(dto.password, acc.password))) {
       throw new UnauthorizedException('Invalid credentials');
     }
     const payload = {

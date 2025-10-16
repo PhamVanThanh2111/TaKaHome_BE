@@ -16,6 +16,7 @@ import { VerificationModule } from './modules/verification/verification.module';
 import { PropertyUtilityModule } from './modules/property-utility/property-utility.module';
 import { ChatRoomModule } from './modules/chatroom/chatroom.module';
 import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
+import { ChatModule } from './modules/chat/chat.module';
 import { AuthModule } from './modules/core/auth/auth.module';
 import AppDataSourcePromise from './modules/core/database/data-source';
 
@@ -25,12 +26,14 @@ import { ScheduleModule } from '@nestjs/schedule';
 import * as Joi from 'joi';
 import vnpayConfig from './config/vnpay.config';
 import smartcaConfig from './config/smartca.config';
+import frontendConfig from './config/frontend.config';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { EscrowModule } from './modules/escrow/escrow.module';
 import { InvoiceModule } from './modules/invoice/invoice.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { SmartCAModule } from './modules/smartca/smartca.module';
 import { CronModule } from './cron/cron.module';
+import { StatisticsModule } from './modules/statistics/statistics.module';
 
 @Module({
   imports: [
@@ -40,8 +43,11 @@ import { CronModule } from './cron/cron.module';
     ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
-      load: [vnpayConfig, smartcaConfig], // <— nạp file config/vnpay.config.ts và smartca.config.ts
+      load: [vnpayConfig, smartcaConfig, frontendConfig], // <— nạp file config/vnpay.config.ts, smartca.config.ts và frontend.config.ts
       validationSchema: Joi.object({
+        // Frontend validation
+        FRONTEND_URL: Joi.string().required().uri(),
+
         // VNPAY validation
         VNP_TMN_CODE: Joi.string().required(),
         VNP_HASH_SECRET: Joi.string().required(),
@@ -56,7 +62,6 @@ import { CronModule } from './cron/cron.module';
         SMARTCA_SIGN_STATUS_TMPL: Joi.string().optional(),
         SMARTCA_SP_ID: Joi.string().optional(),
         SMARTCA_SP_PASSWORD: Joi.string().optional(),
-        SMARTCA_USER_ID: Joi.string().optional(),
         OID_DATA: Joi.string().optional(),
         OID_SIGNED_DATA: Joi.string().optional(),
         OID_CONTENT_TYPE: Joi.string().optional(),
@@ -81,11 +86,13 @@ import { CronModule } from './cron/cron.module';
     PropertyUtilityModule,
     ChatRoomModule,
     ChatMessageModule,
+    ChatModule,
     WalletModule,
     EscrowModule,
     InvoiceModule,
     MaintenanceModule,
     CronModule,
+    StatisticsModule,
   ],
 })
 export class AppModule implements NestModule {

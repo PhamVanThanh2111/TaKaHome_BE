@@ -1,6 +1,7 @@
-import { Entity, PrimaryGeneratedColumn, ManyToOne, OneToMany } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, ManyToOne, OneToMany, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { ChatMessage } from '../../chatmessage/entities/chatmessage.entity';
+import { Property } from '../../property/entities/property.entity';
 
 @Entity()
 export class ChatRoom {
@@ -13,6 +14,21 @@ export class ChatRoom {
   @ManyToOne(() => User)
   user2: User;
 
+  @ManyToOne(() => Property, { nullable: true })
+  property: Property;
+
   @OneToMany(() => ChatMessage, (message) => message.chatroom)
   messages: ChatMessage[];
+
+  @CreateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
+  createdAt: Date;
+
+  @UpdateDateColumn({
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
+  updatedAt: Date;
 }

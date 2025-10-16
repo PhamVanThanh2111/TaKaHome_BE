@@ -11,6 +11,7 @@ import { zonedTimeToUtc } from 'date-fns-tz';
 import { Booking } from './entities/booking.entity';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
+import { FilterBookingDto, BookingCondition } from './dto/filter-booking.dto';
 import { BookingStatus } from '../common/enums/booking-status.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { Contract } from '../contract/entities/contract.entity';
@@ -32,6 +33,8 @@ import { CreateInvoiceDto } from '../invoice/dto/create-invoice.dto';
 import { Property } from '../property/entities/property.entity';
 import { Room } from '../property/entities/room.entity';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
+import { User } from '../user/entities/user.entity';
+import { RoleEnum } from '../common/enums/role.enum';
 
 @Injectable()
 export class BookingService {
@@ -44,6 +47,8 @@ export class BookingService {
     private propertyRepository: Repository<Property>,
     @InjectRepository(Room)
     private roomRepository: Repository<Room>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
     private contractService: ContractService,
     private smartcaService: SmartCAService,
     private s3StorageService: S3StorageService,
@@ -131,7 +136,10 @@ export class BookingService {
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async landlordApprove(id: string): Promise<ResponseCommon<Booking>> {
+  async landlordApprove(
+    id: string,
+    userId: string,
+  ): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.PENDING_LANDLORD]);
 
@@ -161,11 +169,14 @@ export class BookingService {
       }
 
       const pdfBuffer = fs.readFileSync(pdfPath);
-
+      const landlord = await this.userRepository.findOne({
+        where: { id: userId },
+      });
       // Landlord signs the contract (signatureIndex: 0)
       const signResult = await this.smartcaService.signPdfOneShot({
         pdfBuffer,
         signatureIndex: 0, // Landlord signature index
+        userIdOverride: landlord?.CCCD,
         contractId: contract.id,
         intervalMs: 2000,
         timeoutMs: 120000,
@@ -217,9 +228,9 @@ export class BookingService {
         }
       }
     } catch (error) {
-      console.error('[LandlordApprove] ❌ Landlord signing failed:', error);
+      console.error('[LandlordApprove] ❌ Landlord approval failed:', error);
       throw new BadRequestException(
-        `Failed to complete landlord signing: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `Failed to complete landlord approval: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
     }
 
@@ -281,6 +292,7 @@ export class BookingService {
 
   async tenantSign(
     id: string,
+    userId: string,
     depositDeadlineHours = 24,
   ): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
@@ -307,10 +319,14 @@ export class BookingService {
       );
       const landlordSignedPdf = await this.s3StorageService.downloadFile(s3Key);
 
+      const tenant = await this.userRepository.findOne({
+        where: { id: userId },
+      });
       // 2. Tenant signs the PDF (signatureIndex: 1)
       const signResult = await this.smartcaService.signPdfOneShot({
         pdfBuffer: landlordSignedPdf,
         signatureIndex: 1, // Tenant signature index
+        userIdOverride: tenant?.CCCD,
         contractId: contract.id,
         intervalMs: 2000,
         timeoutMs: 120000,
@@ -523,7 +539,7 @@ export class BookingService {
   private async loadBookingOrThrow(id: string): Promise<Booking> {
     const booking = await this.bookingRepository.findOne({
       where: { id },
-      relations: ['tenant', 'property', 'property.landlord'],
+      relations: ['tenant', 'property', 'property.landlord', 'room'],
     });
     if (!booking) throw new NotFoundException('Booking not found');
     return booking;
@@ -538,6 +554,76 @@ export class BookingService {
     const bookings = await this.bookingRepository.find({
       relations: ['tenant', 'property'],
     });
+    return new ResponseCommon(200, 'SUCCESS', bookings);
+  }
+
+  async filterBookings(
+    dto: FilterBookingDto,
+    userId: string,
+  ): Promise<ResponseCommon<Booking[]>> {
+    const { condition, status } = dto;
+
+    const queryBuilder = this.bookingRepository
+      .createQueryBuilder('booking')
+      .leftJoinAndSelect('booking.tenant', 'tenant')
+      .leftJoinAndSelect('booking.property', 'property')
+      .leftJoinAndSelect('property.landlord', 'landlord');
+
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: ['account'],
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    const roles = user.account.roles;
+    // Filter by tenantId
+    if (roles.includes(RoleEnum.TENANT)) {
+      queryBuilder.andWhere('tenant.id = :tenantId', { tenantId: user.id });
+    }
+
+    // Filter by landlordId
+    if (roles.includes(RoleEnum.LANDLORD)) {
+      queryBuilder.andWhere('property.landlord.id = :landlordId', {
+        landlordId: user.id,
+      });
+    }
+
+    if (status) {
+      queryBuilder.andWhere('booking.status = :status', { status });
+    }
+
+    // Filter by condition
+    if (condition) {
+      switch (condition) {
+        case BookingCondition.NOT_APPROVED_YET:
+          queryBuilder.andWhere('booking.status = :status', {
+            status: BookingStatus.PENDING_LANDLORD,
+          });
+          break;
+        case BookingCondition.NOT_APPROVED:
+          queryBuilder.andWhere('booking.status = :status', {
+            status: BookingStatus.REJECTED,
+          });
+          break;
+        case BookingCondition.APPROVED:
+          queryBuilder.andWhere('booking.status NOT IN (:...statuses)', {
+            statuses: [
+              BookingStatus.PENDING_LANDLORD,
+              BookingStatus.REJECTED,
+              BookingStatus.CANCELLED,
+            ],
+          });
+          break;
+      }
+    }
+    // add relations for room
+    queryBuilder.leftJoinAndSelect('booking.room', 'room');
+    queryBuilder.leftJoinAndSelect('room.roomType', 'roomType');
+    queryBuilder.orderBy('booking.createdAt', 'DESC');
+
+    const bookings = await queryBuilder.getMany();
     return new ResponseCommon(200, 'SUCCESS', bookings);
   }
 
@@ -599,16 +685,22 @@ export class BookingService {
   }
 
   private async maybeMarkDualEscrowFunded(b: Booking) {
+    const isRoom = !!b.room.id;
     if (b.escrowDepositFundedAt && b.landlordEscrowDepositFundedAt) {
       b.status = BookingStatus.DUAL_ESCROW_FUNDED;
       try {
+        console.log('billingPeriod', formatVN(b.firstRentDueAt!, 'yyyy-MM'));
+        console.log(
+          'amount',
+          isRoom ? b.room.roomType.price : (b.property?.price ?? 0),
+        );
         const invoice: CreateInvoiceDto = {
           contractId: b.contractId!,
           dueDate: formatVN(b.firstRentDueAt!, 'yyyy-MM-dd'),
           items: [
             {
               description: 'First month rent payment',
-              amount: b.property?.price || 0,
+              amount: isRoom ? b.room.roomType.price : (b.property?.price ?? 0),
             },
           ],
           billingPeriod: formatVN(b.firstRentDueAt!, 'yyyy-MM'),
@@ -766,6 +858,7 @@ export class BookingService {
       tenantId,
       landlordId,
       propertyId,
+      roomId: booking.room?.id,
       startDate: booking.signedAt ?? vnNow(),
     });
     booking.contractId = draft.id;

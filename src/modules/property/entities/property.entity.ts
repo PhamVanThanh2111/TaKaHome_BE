@@ -86,11 +86,14 @@ export class Property {
   @Column({ nullable: true })
   heroImage?: string;
 
-  @ManyToOne(() => User, (user) => user.id)
-  landlord: User;
-
   @Column('text', { array: true, nullable: true })
   images?: string[];
+
+  @Column({ nullable: true })
+  floor?: number;
+
+  @ManyToOne(() => User, (user) => user.id)
+  landlord: User;
 
   @OneToMany(() => PropertyUtility, (util) => util.property)
   utilities: PropertyUtility[];

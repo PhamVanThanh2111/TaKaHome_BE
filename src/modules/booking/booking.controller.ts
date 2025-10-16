@@ -5,6 +5,7 @@ import {
   Body,
   Patch,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -12,6 +13,7 @@ import {
 import { BookingService } from './booking.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
+import { FilterBookingDto } from './dto/filter-booking.dto';
 import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { BookingResponseDto } from './dto/booking-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
@@ -53,6 +55,16 @@ export class BookingController {
     return this.bookingService.findAll();
   }
 
+  @Get('me')
+  @ApiOperation({ summary: 'Lọc booking theo điều kiện' })
+  @ApiResponse({ status: HttpStatus.OK, type: [BookingResponseDto] })
+  filterBookings(
+    @Query() filterDto: FilterBookingDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.bookingService.filterBookings(filterDto, user.id);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Lấy booking theo id' })
   @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
@@ -69,8 +81,8 @@ export class BookingController {
   @ApiOperation({ summary: 'Chủ nhà duyệt booking' })
   @Roles(RoleEnum.LANDLORD, RoleEnum.ADMIN)
   @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
-  approve(@Param('id') id: string) {
-    return this.bookingService.landlordApprove(id);
+  approve(@Param('id') id: string, @CurrentUser() user: JwtUser) {
+    return this.bookingService.landlordApprove(id, user.id);
   }
 
   @Post(':id/reject')
@@ -85,8 +97,8 @@ export class BookingController {
   @ApiOperation({ summary: 'Người thuê ký hợp đồng (digital signature)' })
   @Roles(RoleEnum.TENANT, RoleEnum.ADMIN)
   @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
-  tenantSign(@Param('id') id: string) {
-    return this.bookingService.tenantSign(id);
+  tenantSign(@Param('id') id: string, @CurrentUser() user: JwtUser) {
+    return this.bookingService.tenantSign(id, user.id);
   }
 
   @Post(':id/handover')

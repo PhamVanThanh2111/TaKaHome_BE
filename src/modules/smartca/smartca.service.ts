@@ -518,7 +518,7 @@ export class SmartCAService {
 
     // 6) Lấy cert & serial với auto-selection logic
     const certResp = await this.getCertificates({
-      userId: options.userIdOverride || this.smartca.smartcaUserId,
+      userId: options.userIdOverride,
     });
     if (certResp.status !== 200 || !certResp.certificates?.length) {
       throw new BadRequestException(`get_certificate failed or empty`);
@@ -553,6 +553,7 @@ export class SmartCAService {
       .digest();
     const derHashHex = derHashBytes.toString('hex');
     const derHashB64 = derHashBytes.toString('base64');
+    console.log(`derHashHex: ${derHashHex}`);
 
     const transactionId = 'SP_CA_' + Date.now();
 
@@ -567,7 +568,7 @@ export class SmartCAService {
       transactionId,
       docId,
       serialNumber: serial,
-      userIdOverride: this.smartca.smartcaUserId,
+      userIdOverride: options.userIdOverride,
     });
 
     // 9) Poll tới khi có signature_value (GIỮ NGUYÊN)
@@ -718,11 +719,10 @@ export class SmartCAService {
     serviceType?: 'ESEAL' | 'ESIGN'; // nếu biết loại dịch vụ, truyền vào để đỡ fallback
     transactionId?: string;
   }) {
-    const user_id = (
-      options?.userId ??
-      this.smartca.smartcaUserId ??
-      ''
-    ).trim();
+    if (!options?.userId) {
+      throw new BadRequestException('Missing CCCD / userId in getCertificates');
+    }
+    const user_id = (options?.userId ?? '').trim();
     const basePayload: any = {
       sp_id: this.smartca.smartcaSpId,
       sp_password: this.smartca.smartcaSpPassword,
@@ -1124,7 +1124,7 @@ export class SmartCAService {
     signType?: 'hash';
     fileType?: 'pdf';
   }) {
-    const user_id = options.userIdOverride ?? this.smartca.smartcaUserId;
+    const user_id = options.userIdOverride;
     if (
       !this.smartca.smartcaSpId ||
       !this.smartca.smartcaSpPassword ||

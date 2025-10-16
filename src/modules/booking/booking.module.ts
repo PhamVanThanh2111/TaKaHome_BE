@@ -11,10 +11,11 @@ import { InvoiceModule } from '../invoice/invoice.module';
 import { Contract } from '../contract/entities/contract.entity';
 import { Property } from '../property/entities/property.entity';
 import { Room } from '../property/entities/room.entity';
+import { User } from '../user/entities/user.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Booking, Contract, Property, Room]),
+    TypeOrmModule.forFeature([Booking, Contract, Property, Room, User]),
     ContractModule,
     SmartCAModule,
     S3StorageModule,

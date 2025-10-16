@@ -3,12 +3,37 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { IoAdapter } from '@nestjs/platform-socket.io';
+import { ServerOptions } from 'socket.io';
+
+// Custom Socket.IO Adapter for CORS
+class CustomSocketIOAdapter extends IoAdapter {
+  createIOServer(port: number, options?: ServerOptions): any {
+    const server = super.createIOServer(port, {
+      ...options,
+      cors: {
+        origin: process.env.FRONTEND_URL || ['http://localhost:3000', 'http://localhost:3001'],
+        credentials: true,
+        methods: ['GET', 'POST'],
+      },
+    });
+    return server;
+  }
+}
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Set up WebSocket adapter
+  app.useWebSocketAdapter(new CustomSocketIOAdapter(app));
+
   // Bật CORS (cho phép frontend kết nối)
-  app.enableCors();
+  app.enableCors({
+    origin: process.env.FRONTEND_URL || ['http://localhost:3000', 'http://localhost:3001'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
 
   // Dùng ValidationPipe toàn cục cho DTO
   app.useGlobalPipes(
@@ -27,8 +52,8 @@ async function bootstrap() {
 
   // ----- Swagger Setup -----
   const config = new DocumentBuilder()
-    .setTitle('Real Estate Rental API')
-    .setDescription('API for Real Estate Rental platform')
+    .setTitle('TakaHome (Real Estate Rental) API')
+    .setDescription('API for TakaHome (Real Estate Rental) platform')
     .setVersion('1.0')
     .addBearerAuth() // Cho phép Authorize bằng JWT Bearer
     .build();

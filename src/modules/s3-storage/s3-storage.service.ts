@@ -58,6 +58,53 @@ export class S3StorageService {
   }
 
   /**
+   * Generic file upload helper
+   */
+  async uploadFile(
+    buffer: Buffer,
+    key: string,
+    contentType = 'application/octet-stream',
+    metadata: Record<string, string> = {},
+  ): Promise<UploadResult> {
+    try {
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        throw new BadRequestException('Invalid file buffer');
+      }
+
+      const uploadParams: PutObjectCommandInput = {
+        Bucket: this.s3.bucketName,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType,
+        Metadata: {
+          uploadedAt: new Date().toISOString(),
+          ...metadata,
+        },
+        ServerSideEncryption: 'AES256',
+        CacheControl: 'private, no-cache',
+      };
+
+      const command = new PutObjectCommand(uploadParams);
+      const result = await this.s3Client.send(command);
+
+      const url = `https://${this.s3.bucketName}.s3.${this.s3.region}.amazonaws.com/${key}`;
+
+      return {
+        key,
+        url,
+        bucket: this.s3.bucketName,
+        etag: result.ETag,
+        size: buffer.length,
+      };
+    } catch (error) {
+      console.error('[S3Upload] ❌ uploadFile failed:', error);
+      throw new BadRequestException(
+        `Failed to upload file to S3: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+  }
+
+  /**
    * Upload signed contract PDF to S3
    * Generates structured key: contracts/{contractId}/{role}-signed-{timestamp}.pdf
    */

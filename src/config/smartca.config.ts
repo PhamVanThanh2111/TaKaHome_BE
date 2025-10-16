@@ -8,7 +8,6 @@ export default registerAs('smartCA', () => ({
 
   smartcaSpId: process.env.SMARTCA_SP_ID,
   smartcaSpPassword: process.env.SMARTCA_SP_PASSWORD,
-  smartcaUserId: process.env.SMARTCA_USER_ID,
 
   oidData: process.env.OID_DATA,
   oidSignedData: process.env.OID_SIGNED_DATA,
