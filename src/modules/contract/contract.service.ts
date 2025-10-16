@@ -13,8 +13,14 @@ import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
 import { Contract } from './entities/contract.entity';
-import { ContractTerminationService, TerminationResult } from './contract-termination.service';
-import { DisputeHandlingService, DisputeDetails } from './dispute-handling.service';
+import {
+  ContractTerminationService,
+  TerminationResult,
+} from './contract-termination.service';
+import {
+  DisputeHandlingService,
+  DisputeDetails,
+} from './dispute-handling.service';
 
 @Injectable()
 export class ContractService {
@@ -89,6 +95,7 @@ export class ContractService {
     tenantId: string;
     landlordId: string;
     propertyId: string;
+    roomId?: string;
     startDate?: Date;
     endDate?: Date;
     contractCode?: string;
@@ -106,6 +113,9 @@ export class ContractService {
       tenant: { id: input.tenantId } as unknown as Contract['tenant'],
       landlord: { id: input.landlordId } as unknown as Contract['landlord'],
       property: { id: input.propertyId } as unknown as Contract['property'],
+      room: input.roomId
+        ? ({ id: input.roomId } as unknown as Contract['room'])
+        : undefined,
       startDate: start,
       endDate: end,
       status: ContractStatusEnum.DRAFT,
@@ -171,13 +181,13 @@ export class ContractService {
   ): Promise<ResponseCommon<Contract>> {
     const contract = await this.loadContractOrThrow(id);
     this.ensureStatus(contract, [ContractStatusEnum.DRAFT]);
-    
+
     // Cập nhật status và contractFileUrl nếu có
     contract.status = ContractStatusEnum.PENDING_SIGNATURE;
     if (contractFileUrl) {
       contract.contractFileUrl = contractFileUrl;
     }
-    
+
     const saved = await this.contractRepository.save(contract);
 
     // Tích hợp với blockchain: Tạo contract trên blockchain
@@ -392,7 +402,7 @@ export class ContractService {
       // Load thông tin đầy đủ từ DB
       const fullContract = await this.contractRepository.findOne({
         where: { id: contract.id },
-        relations: ['tenant', 'landlord', 'property'],
+        relations: ['tenant', 'landlord', 'property', 'room', 'room.roomType'],
       });
 
       if (!fullContract) {
@@ -405,7 +415,11 @@ export class ContractService {
       // Tạo document hash và signature metadata
       // Là mã hash file pdf đã có chữ ký landlord
       const documentHash = await this.generateDocumentHash(fullContract);
-      const landlordSignatureMeta = this.generateSimpleSignatureMeta(fullContract, 0, 'landlord');
+      const landlordSignatureMeta = this.generateSimpleSignatureMeta(
+        fullContract,
+        0,
+        'landlord',
+      );
 
       // Tạo FabricUser cho landlord (người tạo contract)
       const fabricUser = this.createFabricUser(
@@ -423,7 +437,9 @@ export class ContractService {
         tenantCertId: `${fullContract.tenant.id}-cert`,
         signedContractFileHash: documentHash,
         landlordSignatureMeta,
-        rentAmount: (property.price ?? 0).toString(), // Default rent amount - should come from property
+        rentAmount: fullContract.room
+          ? fullContract.room.roomType.price.toString()
+          : (property.price ?? 0).toString(),
         depositAmount: (property.deposit ?? 0).toString(), // Default deposit amount - should come from property
         currency: 'VND',
         startDate: fullContract.startDate.toISOString(),
@@ -451,7 +467,11 @@ export class ContractService {
       // Tạo document hash và signature metadata
       // Là mã hash file pdf đã có chữ ký của cả landlord và tenant
       const documentHash = await this.generateDocumentHash(contract);
-      const tenantSignatureMeta = this.generateSimpleSignatureMeta(contract, 1, 'tenant');
+      const tenantSignatureMeta = this.generateSimpleSignatureMeta(
+        contract,
+        1,
+        'tenant',
+      );
 
       // Tạo FabricUser cho tenant
       const fabricUser = this.createFabricUser(
@@ -598,9 +618,18 @@ export class ContractService {
     signerRole: 'landlord' | 'tenant' = 'landlord',
   ): string {
     const timestamp = new Date().toISOString();
-    const signerInfo = signatureIndex === 0 
-      ? { role: 'landlord', userId: contract.landlord?.id, name: 'Landlord Digital Signature' }
-      : { role: 'tenant', userId: contract.tenant?.id, name: 'Tenant Digital Signature' };
+    const signerInfo =
+      signatureIndex === 0
+        ? {
+            role: 'landlord',
+            userId: contract.landlord?.id,
+            name: 'Landlord Digital Signature',
+          }
+        : {
+            role: 'tenant',
+            userId: contract.tenant?.id,
+            name: 'Tenant Digital Signature',
+          };
 
     const metadata = {
       algorithm: 'RSA-SHA256',
@@ -626,8 +655,6 @@ export class ContractService {
     return JSON.stringify(metadata);
   }
 
-
-
   /**
    * Tạo document hash cho contract
    * Ưu tiên hash từ file PDF đã ký, fallback về metadata nếu không có file
@@ -637,19 +664,25 @@ export class ContractService {
     if (contract.contractFileUrl) {
       try {
         // Extract S3 key từ URL và download file
-        const s3Key = this.s3StorageService.extractKeyFromUrl(contract.contractFileUrl);
+        const s3Key = this.s3StorageService.extractKeyFromUrl(
+          contract.contractFileUrl,
+        );
         const pdfBuffer = await this.s3StorageService.downloadFile(s3Key);
-        
+
         // Hash toàn bộ file PDF đã ký
-        const fileHash = crypto.createHash('sha256').update(pdfBuffer).digest('hex');
-        
-        this.logger.log(`📄 Generated hash from signed PDF file for contract ${contract.contractCode}: ${fileHash.substring(0, 16)}...`);
+        const fileHash = crypto
+          .createHash('sha256')
+          .update(pdfBuffer)
+          .digest('hex');
+
+        this.logger.log(
+          `📄 Generated hash from signed PDF file for contract ${contract.contractCode}: ${fileHash.substring(0, 16)}...`,
+        );
         return fileHash;
-        
       } catch (error) {
         this.logger.warn(
-          `⚠️ Failed to hash PDF file for contract ${contract.contractCode}, falling back to metadata hash:`, 
-          error instanceof Error ? error.message : error
+          `⚠️ Failed to hash PDF file for contract ${contract.contractCode}, falling back to metadata hash:`,
+          error instanceof Error ? error.message : error,
         );
         // Fallback về hash metadata nếu không thể download file
       }
@@ -667,9 +700,14 @@ export class ContractService {
     };
 
     const dataString = JSON.stringify(contractData);
-    const metadataHash = crypto.createHash('sha256').update(dataString).digest('hex');
-    
-    this.logger.log(`📋 Generated hash from contract metadata for contract ${contract.contractCode}: ${metadataHash.substring(0, 16)}...`);
+    const metadataHash = crypto
+      .createHash('sha256')
+      .update(dataString)
+      .digest('hex');
+
+    this.logger.log(
+      `📋 Generated hash from contract metadata for contract ${contract.contractCode}: ${metadataHash.substring(0, 16)}...`,
+    );
     return metadataHash;
   }
 
@@ -693,13 +731,13 @@ export class ContractService {
    * Terminate contract with proper refund calculation
    */
   async terminateContract(
-    id: string, 
-    reason: string, 
-    terminatedBy: string
+    id: string,
+    reason: string,
+    terminatedBy: string,
   ): Promise<ResponseCommon<TerminationResult>> {
     try {
       const contract = await this.loadContractOrThrow(id);
-      
+
       // Validate contract can be terminated
       this.ensureStatus(contract, [
         ContractStatusEnum.ACTIVE,
@@ -707,15 +745,17 @@ export class ContractService {
       ]);
 
       const result = await this.terminationService.terminateContract(
-        id, 
-        reason, 
-        terminatedBy
+        id,
+        reason,
+        terminatedBy,
       );
 
       return new ResponseCommon(200, 'SUCCESS', result);
     } catch (error) {
       this.logger.error(`Failed to terminate contract ${id}:`, error);
-      throw new BadRequestException(`Contract termination failed: ${error.message}`);
+      throw new BadRequestException(
+        `Contract termination failed: ${error.message}`,
+      );
     }
   }
 
@@ -726,11 +766,16 @@ export class ContractService {
     contractId: string,
     disputeReason: string,
     initiatedBy: 'tenant' | 'landlord' = 'tenant',
-    disputeType: 'PAYMENT' | 'PROPERTY_CONDITION' | 'CONTRACT_VIOLATION' | 'EARLY_TERMINATION' | 'OTHER' = 'OTHER'
+    disputeType:
+      | 'PAYMENT'
+      | 'PROPERTY_CONDITION'
+      | 'CONTRACT_VIOLATION'
+      | 'EARLY_TERMINATION'
+      | 'OTHER' = 'OTHER',
   ): Promise<ResponseCommon<DisputeDetails>> {
     try {
       const contract = await this.loadContractOrThrow(contractId);
-      
+
       // Validate contract status
       this.ensureStatus(contract, [
         ContractStatusEnum.ACTIVE,
@@ -741,13 +786,18 @@ export class ContractService {
         contractId,
         disputeReason,
         initiatedBy,
-        disputeType
+        disputeType,
       );
 
       return new ResponseCommon(200, 'SUCCESS', disputeDetails);
     } catch (error) {
-      this.logger.error(`Failed to raise dispute for contract ${contractId}:`, error);
-      throw new BadRequestException(`Dispute creation failed: ${error.message}`);
+      this.logger.error(
+        `Failed to raise dispute for contract ${contractId}:`,
+        error,
+      );
+      throw new BadRequestException(
+        `Dispute creation failed: ${error.message}`,
+      );
     }
   }
 
@@ -758,7 +808,11 @@ export class ContractService {
     contractId: string,
     resolution: string,
     resolvedBy: string,
-    outcome: 'TENANT_FAVOR' | 'LANDLORD_FAVOR' | 'MUTUAL_AGREEMENT' | 'DISMISSED'
+    outcome:
+      | 'TENANT_FAVOR'
+      | 'LANDLORD_FAVOR'
+      | 'MUTUAL_AGREEMENT'
+      | 'DISMISSED',
   ): Promise<ResponseCommon<boolean>> {
     try {
       const contract = await this.loadContractOrThrow(contractId);
@@ -767,13 +821,18 @@ export class ContractService {
         contractId,
         resolution,
         resolvedBy,
-        outcome
+        outcome,
       );
 
       return new ResponseCommon(200, 'SUCCESS', resolved);
     } catch (error) {
-      this.logger.error(`Failed to resolve dispute for contract ${contractId}:`, error);
-      throw new BadRequestException(`Dispute resolution failed: ${error.message}`);
+      this.logger.error(
+        `Failed to resolve dispute for contract ${contractId}:`,
+        error,
+      );
+      throw new BadRequestException(
+        `Dispute resolution failed: ${error.message}`,
+      );
     }
   }
 }

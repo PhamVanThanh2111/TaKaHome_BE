@@ -18,7 +18,12 @@ import {
 import { PaymentService } from './payment.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
-import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { PaymentResponseDto } from './dto/payment-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
@@ -80,6 +85,15 @@ export class PaymentController {
     status: HttpStatus.CREATED,
     type: PaymentResponseDto,
     description: 'Tạo payment từ hóa đơn thành công',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        method: { type: 'string', enum: ['VNPAY', 'WALLET'] },
+      },
+      required: ['method'],
+    },
   })
   createFromInvoice(
     @Param('invoiceId') invoiceId: string,
