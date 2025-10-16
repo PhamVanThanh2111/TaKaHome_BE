@@ -55,11 +55,14 @@ export class BookingController {
     return this.bookingService.findAll();
   }
 
-  @Get('filter')
+  @Get('me')
   @ApiOperation({ summary: 'Lọc booking theo điều kiện' })
   @ApiResponse({ status: HttpStatus.OK, type: [BookingResponseDto] })
-  filterBookings(@Query() filterDto: FilterBookingDto) {
-    return this.bookingService.filterBookings(filterDto);
+  filterBookings(
+    @Query() filterDto: FilterBookingDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.bookingService.filterBookings(filterDto, user.id);
   }
 
   @Get(':id')
