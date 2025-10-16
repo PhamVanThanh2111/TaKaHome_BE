@@ -30,6 +30,7 @@ export class InvoiceService {
       dueDate: zonedTimeToUtc(dueInput, VN_TZ),
       items,
       totalAmount: total,
+      billingPeriod: dto.billingPeriod,
     });
     const saved = await this.invoiceRepository.save(invoice);
     return new ResponseCommon(200, 'SUCCESS', saved);
