@@ -574,7 +574,8 @@ export class BookingService {
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.tenant', 'tenant')
       .leftJoinAndSelect('booking.property', 'property')
-      .leftJoinAndSelect('property.landlord', 'landlord');
+      .leftJoinAndSelect('property.landlord', 'landlord')
+      .leftJoinAndSelect('booking.contract', 'contract');
 
     const user = await this.userRepository.findOne({
       where: { id: userId },
