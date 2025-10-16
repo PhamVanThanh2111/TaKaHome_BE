@@ -860,7 +860,6 @@ export class BookingService {
       tenantId,
       landlordId,
       propertyId,
-      roomId: booking.room?.id,
       startDate: booking.signedAt ?? vnNow(),
     });
     booking.contractId = draft.id;
