@@ -34,6 +34,7 @@ import { Property } from '../property/entities/property.entity';
 import { Room } from '../property/entities/room.entity';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { User } from '../user/entities/user.entity';
+import { RoleEnum } from '../common/enums/role.enum';
 
 @Injectable()
 export class BookingService {
@@ -558,8 +559,9 @@ export class BookingService {
 
   async filterBookings(
     dto: FilterBookingDto,
+    userId: string,
   ): Promise<ResponseCommon<Booking[]>> {
-    const { tenantId, landlordId, condition, status } = dto;
+    const { condition, status } = dto;
 
     const queryBuilder = this.bookingRepository
       .createQueryBuilder('booking')
@@ -567,14 +569,25 @@ export class BookingService {
       .leftJoinAndSelect('booking.property', 'property')
       .leftJoinAndSelect('property.landlord', 'landlord');
 
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: ['account'],
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    const roles = user.account.roles;
     // Filter by tenantId
-    if (tenantId) {
-      queryBuilder.andWhere('tenant.id = :tenantId', { tenantId });
+    if (roles.includes(RoleEnum.TENANT)) {
+      queryBuilder.andWhere('tenant.id = :tenantId', { tenantId: user.id });
     }
 
     // Filter by landlordId
-    if (landlordId) {
-      queryBuilder.andWhere('landlord.id = :landlordId', { landlordId });
+    if (roles.includes(RoleEnum.LANDLORD)) {
+      queryBuilder.andWhere('property.landlord.id = :landlordId', {
+        landlordId: user.id,
+      });
     }
 
     if (status) {
@@ -670,6 +683,7 @@ export class BookingService {
   }
 
   private async maybeMarkDualEscrowFunded(b: Booking) {
+    const isRoom = !!b.room.id;
     if (b.escrowDepositFundedAt && b.landlordEscrowDepositFundedAt) {
       b.status = BookingStatus.DUAL_ESCROW_FUNDED;
       try {
@@ -679,7 +693,7 @@ export class BookingService {
           items: [
             {
               description: 'First month rent payment',
-              amount: b.property?.price || 0,
+              amount: isRoom ? b.room.roomType.price : (b.property?.price ?? 0),
             },
           ],
           billingPeriod: formatVN(b.firstRentDueAt!, 'yyyy-MM'),
