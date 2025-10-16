@@ -703,7 +703,7 @@ export class PaymentService {
       const fabricUser = {
         userId: contract.tenant.id,
         orgName: 'OrgTenant',
-        mspId: 'OrgTenantMSP',
+        mspId: 'orgMSP',
       };
 
       // Gọi recordFirstPayment - method này tự động activate contract trên blockchain
@@ -795,7 +795,7 @@ export class PaymentService {
       const fabricUser = {
         userId: contract.tenant.id,
         orgName: 'OrgTenant',
-        mspId: 'OrgTenantMSP',
+        mspId: 'orgMSP',
       };
 
       // Calculate period based on contract start date and payment date
@@ -845,7 +845,7 @@ export class PaymentService {
         fabricUser = {
           userId: contract.tenant.id,
           orgName: 'OrgTenant',
-          mspId: 'OrgTenantMSP',
+          mspId: 'orgMSP',
         };
         console.log(
           `👤 Tenant deposit detected, userId: ${contract.tenant.id}`,
@@ -855,7 +855,7 @@ export class PaymentService {
         fabricUser = {
           userId: contract.landlord.id,
           orgName: 'OrgLandlord',
-          mspId: 'OrgLandlordMSP',
+          mspId: 'orgMSP',
         };
         console.log(
           `🏠 Landlord deposit detected, userId: ${contract.landlord.id}`,
