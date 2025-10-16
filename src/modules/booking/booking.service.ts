@@ -567,6 +567,7 @@ export class BookingService {
       ],
     });
     if (!booking) throw new NotFoundException('Booking not found');
+    console.log(booking);
     return booking;
   }
 
@@ -711,7 +712,7 @@ export class BookingService {
   }
 
   private async maybeMarkDualEscrowFunded(b: Booking) {
-    const isRoom = !!b.room.id;
+    const isRoom = !!b.room?.id;
     if (b.escrowDepositFundedAt && b.landlordEscrowDepositFundedAt) {
       b.status = BookingStatus.DUAL_ESCROW_FUNDED;
       try {
@@ -721,7 +722,9 @@ export class BookingService {
           items: [
             {
               description: 'First month rent payment',
-              amount: isRoom ? b.room.roomType.price : (b.property?.price ?? 0),
+              amount: isRoom
+                ? (b.room?.roomType?.price ?? 0)
+                : (b.property?.price ?? 0),
             },
           ],
           billingPeriod: formatVN(b.firstRentDueAt!, 'yyyy-MM'),
