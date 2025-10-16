@@ -38,7 +38,7 @@ export class AutomatedPenaltyService {
     private contractRepository: Repository<Contract>,
     @InjectRepository(PenaltyRecord)
     private penaltyRecordRepository: Repository<PenaltyRecord>,
-    
+
     private blockchainService: BlockchainService,
     private notificationService: NotificationService,
     private escrowService: EscrowService,
@@ -50,48 +50,63 @@ export class AutomatedPenaltyService {
   async applyPaymentOverduePenalty(
     booking: Booking,
     daysPastDue: number,
-    rentAmount?: number
+    rentAmount?: number,
   ): Promise<PenaltyApplication | null> {
     try {
       if (!booking.contractId || !booking.firstRentDueAt) {
-        this.logger.warn(`Cannot apply penalty: missing contract or due date for booking ${booking.id}`);
+        this.logger.warn(
+          `Cannot apply penalty: missing contract or due date for booking ${booking.id}`,
+        );
         return null;
       }
 
       // Get actual rent amount from property if available
-      const actualRentAmount = rentAmount || booking.property?.price || 10000000;
+      const actualRentAmount =
+        rentAmount || booking.property?.price || 10000000;
 
       // Check if penalty already exists for this period to avoid double penalty
       const existingPenalty = await this.checkExistingPenalty(
         booking.contractId,
         'OVERDUE_PAYMENT',
-        booking.firstRentDueAt
+        booking.firstRentDueAt,
       );
 
       if (existingPenalty) {
-        this.logger.warn(`Penalty already applied for booking ${booking.id} on ${formatVN(existingPenalty.appliedAt, 'yyyy-MM-dd')}`);
+        this.logger.warn(
+          `Penalty already applied for booking ${booking.id} on ${formatVN(existingPenalty.appliedAt, 'yyyy-MM-dd')}`,
+        );
         return null;
       }
 
       // Calculate penalty based on Vietnam legal requirements
-      const penaltyInfo = this.calculateOverduePenalty(daysPastDue, actualRentAmount);
-      
-      this.logger.log(`Applying ${penaltyInfo.rate}% penalty for booking ${booking.id} (${daysPastDue} days overdue)`);
+      const penaltyInfo = this.calculateOverduePenalty(
+        daysPastDue,
+        actualRentAmount,
+      );
+
+      this.logger.log(
+        `Applying ${penaltyInfo.rate}% penalty for booking ${booking.id} (${daysPastDue} days overdue)`,
+      );
 
       // Check escrow balance before applying penalty
       const escrowBalance = await this.checkEscrowBalance(booking.contractId);
-      
+
       // If penalty would exceed escrow balance or contract should be terminated
-      if (!penaltyInfo.canContinue || (escrowBalance && penaltyInfo.amount > escrowBalance.tenantBalance)) {
-        this.logger.warn(`⚠️ Penalty exceeds limits for booking ${booking.id}. Initiating contract termination.`);
-        
+      if (
+        !penaltyInfo.canContinue ||
+        (escrowBalance && penaltyInfo.amount > escrowBalance.tenantBalance)
+      ) {
+        this.logger.warn(
+          `⚠️ Penalty exceeds limits for booking ${booking.id}. Initiating contract termination.`,
+        );
+
         // Initiate contract termination process
         await this.terminateContractForInsufficientFunds(
-          booking.contractId, 
+          booking.contractId,
           booking.id,
-          `Insufficient escrow funds to cover penalties. Total penalty: ${penaltyInfo.amount.toLocaleString('vi-VN')} VND`
+          `Insufficient escrow funds to cover penalties. Total penalty: ${penaltyInfo.amount.toLocaleString('vi-VN')} VND`,
         );
-        
+
         return null;
       }
 
@@ -100,14 +115,14 @@ export class AutomatedPenaltyService {
         booking.contractId,
         'tenant',
         penaltyInfo.amount,
-        `Payment overdue by ${daysPastDue} days`
+        `Payment overdue by ${daysPastDue} days`,
       );
 
       // Deduct penalty from tenant's escrow balance
       await this.deductFromEscrow(
         booking.contractId,
         penaltyInfo.amount,
-        `Payment overdue by ${daysPastDue} days`
+        `Payment overdue by ${daysPastDue} days`,
       );
 
       // Send notifications
@@ -139,11 +154,15 @@ export class AutomatedPenaltyService {
         appliedAt: vnNow(),
       };
 
-      this.logger.log(`✅ Successfully applied penalty for booking ${booking.id}`);
+      this.logger.log(
+        `✅ Successfully applied penalty for booking ${booking.id}`,
+      );
       return penaltyApplication;
-
     } catch (error) {
-      this.logger.error(`❌ Failed to apply penalty for booking ${booking.id}:`, error);
+      this.logger.error(
+        `❌ Failed to apply penalty for booking ${booking.id}:`,
+        error,
+      );
       return null;
     }
   }
@@ -151,14 +170,17 @@ export class AutomatedPenaltyService {
   /**
    * Cancel booking and contract if deposit not paid within 24 hours
    */
-  async cancelBookingForLateDeposit(booking: Booking): Promise<{ cancelled: boolean; reason: string } | null> {
+  async cancelBookingForLateDeposit(
+    booking: Booking,
+  ): Promise<{ cancelled: boolean; reason: string } | null> {
     try {
       if (!booking.contractId || !booking.escrowDepositDueAt) {
         return null;
       }
 
       const hoursLate = Math.floor(
-        (vnNow().getTime() - booking.escrowDepositDueAt.getTime()) / (1000 * 60 * 60)
+        (vnNow().getTime() - booking.escrowDepositDueAt.getTime()) /
+          (1000 * 60 * 60),
       );
 
       // Cancel if more than 24 hours late
@@ -166,10 +188,10 @@ export class AutomatedPenaltyService {
         // Cancel booking
         booking.status = BookingStatus.CANCELLED;
         booking.closedAt = vnNow(); // Use existing closedAt field to mark cancellation time
-        
+
         // Save booking changes
         await this.bookingRepository.save(booking);
-        
+
         // Send cancellation notifications
         await this.notificationService.create({
           userId: booking.tenant.id,
@@ -188,18 +210,22 @@ export class AutomatedPenaltyService {
           });
         }
 
-        this.logger.log(`✅ Booking ${booking.id} cancelled due to deposit not paid within 24 hours (${hoursLate}h late)`);
+        this.logger.log(
+          `✅ Booking ${booking.id} cancelled due to deposit not paid within 24 hours (${hoursLate}h late)`,
+        );
 
         return {
           cancelled: true,
-          reason: `Deposit not paid within 24 hours (${hoursLate}h late)`
+          reason: `Deposit not paid within 24 hours (${hoursLate}h late)`,
         };
       }
 
       return null; // Not late enough to cancel yet
-
     } catch (error) {
-      this.logger.error(`❌ Failed to cancel booking ${booking.id} for late deposit:`, error);
+      this.logger.error(
+        `❌ Failed to cancel booking ${booking.id} for late deposit:`,
+        error,
+      );
       return null;
     }
   }
@@ -207,7 +233,10 @@ export class AutomatedPenaltyService {
   /**
    * Calculate penalty for overdue payment based on Vietnam legal requirements
    */
-  private calculateOverduePenalty(daysPastDue: number, rentAmount?: number): {
+  private calculateOverduePenalty(
+    daysPastDue: number,
+    rentAmount?: number,
+  ): {
     rate: number;
     amount: number;
     reason: string;
@@ -215,17 +244,17 @@ export class AutomatedPenaltyService {
   } {
     // Vietnam legal requirement: Maximum 0.03% per day
     const rate = 0.03; // 0.03% per day as per Vietnamese law
-    
+
     // Use actual rent amount or fallback to default
     const baseAmount = rentAmount || 10000000; // 10M VND as fallback
     const penaltyAmount = Math.floor((baseAmount * rate * daysPastDue) / 100);
-    
+
     // Maximum penalty cap: 20% of contract value (Vietnamese consumer protection)
     const maxPenalty = Math.floor(baseAmount * 0.2);
     const finalPenalty = Math.min(penaltyAmount, maxPenalty);
 
     // Contract termination logic: If penalties exceed 15% of rent, recommend termination
-    const canContinue = finalPenalty < (baseAmount * 0.15);
+    const canContinue = finalPenalty < baseAmount * 0.15;
 
     return {
       rate,
@@ -236,7 +265,7 @@ export class AutomatedPenaltyService {
   }
 
   /**
-   * @deprecated Deposit penalties are no longer applied. 
+   * @deprecated Deposit penalties are no longer applied.
    * Bookings are cancelled after 24h instead.
    * Use cancelBookingForLateDeposit() method instead.
    */
@@ -247,7 +276,7 @@ export class AutomatedPenaltyService {
   private async sendPenaltyNotifications(
     booking: Booking,
     penaltyInfo: { amount: number; reason: string },
-    daysPastDue: number
+    daysPastDue: number,
   ): Promise<void> {
     // Notify tenant
     await this.notificationService.create({
@@ -273,17 +302,25 @@ export class AutomatedPenaltyService {
   /**
    * Get penalty history for a contract or booking
    */
-  async getPenaltyHistory(contractId?: string, bookingId?: string): Promise<any[]> {
+  async getPenaltyHistory(
+    contractId?: string,
+    bookingId?: string,
+  ): Promise<any[]> {
     // This would typically query a penalty history table or blockchain
     // For now, return empty array as placeholder
-    this.logger.log(`Getting penalty history for contract: ${contractId}, booking: ${bookingId}`);
+    this.logger.log(
+      `Getting penalty history for contract: ${contractId}, booking: ${bookingId}`,
+    );
     return [];
   }
 
   /**
    * Calculate total penalties applied to a tenant
    */
-  async getTotalPenaltiesForTenant(tenantId: string, fromDate?: Date): Promise<{
+  async getTotalPenaltiesForTenant(
+    tenantId: string,
+    fromDate?: Date,
+  ): Promise<{
     totalAmount: number;
     penaltyCount: number;
     lastPenaltyDate: Date | null;
@@ -299,8 +336,11 @@ export class AutomatedPenaltyService {
       }
 
       const penalties = await query.getMany();
-      
-      const totalAmount = penalties.reduce((sum, p) => sum + Number(p.penaltyAmount), 0);
+
+      const totalAmount = penalties.reduce(
+        (sum, p) => sum + Number(p.penaltyAmount),
+        0,
+      );
       const lastPenalty = penalties.length > 0 ? penalties[0].appliedAt : null;
 
       return {
@@ -309,7 +349,10 @@ export class AutomatedPenaltyService {
         lastPenaltyDate: lastPenalty,
       };
     } catch (error) {
-      this.logger.error(`❌ Failed to get total penalties for tenant ${tenantId}:`, error);
+      this.logger.error(
+        `❌ Failed to get total penalties for tenant ${tenantId}:`,
+        error,
+      );
       return { totalAmount: 0, penaltyCount: 0, lastPenaltyDate: null };
     }
   }
@@ -320,11 +363,12 @@ export class AutomatedPenaltyService {
   private async deductFromEscrow(
     contractId: string,
     penaltyAmount: number,
-    reason: string
+    reason: string,
   ): Promise<void> {
     try {
       // Get escrow account for the contract
-      const escrowResponse = await this.escrowService.ensureAccountForContract(contractId);
+      const escrowResponse =
+        await this.escrowService.ensureAccountForContract(contractId);
       const escrow = escrowResponse.data;
 
       if (!escrow) {
@@ -337,12 +381,17 @@ export class AutomatedPenaltyService {
         escrow.id,
         penaltyAmount,
         'TENANT',
-        `Penalty deduction: ${reason}`
+        `Penalty deduction: ${reason}`,
       );
 
-      this.logger.log(`✅ Deducted ${penaltyAmount} VND from escrow for contract ${contractId}: ${reason}`);
+      this.logger.log(
+        `✅ Deducted ${penaltyAmount} VND from escrow for contract ${contractId}: ${reason}`,
+      );
     } catch (error) {
-      this.logger.error(`❌ Failed to deduct penalty from escrow for contract ${contractId}:`, error);
+      this.logger.error(
+        `❌ Failed to deduct penalty from escrow for contract ${contractId}:`,
+        error,
+      );
       // Don't throw error to not break the penalty application process
     }
   }
@@ -354,14 +403,14 @@ export class AutomatedPenaltyService {
     contractId: string,
     party: string,
     amount: number,
-    reason: string
+    reason: string,
   ): Promise<void> {
     try {
       // Create FabricUser for system operations (use landlord MSP)
       const fabricUser = {
         userId: 'system',
         orgName: 'OrgProp',
-        mspId: 'OrgPropMSP',
+        mspId: 'orgMSP',
       };
 
       await this.blockchainService.recordPenalty(
@@ -369,10 +418,12 @@ export class AutomatedPenaltyService {
         party,
         amount.toString(),
         reason,
-        fabricUser
+        fabricUser,
       );
 
-      this.logger.log(`✅ Penalty recorded on blockchain for contract ${contractId}: ${amount} VND`);
+      this.logger.log(
+        `✅ Penalty recorded on blockchain for contract ${contractId}: ${amount} VND`,
+      );
     } catch (error) {
       this.logger.error(`❌ Failed to record penalty on blockchain:`, error);
       throw error;
@@ -384,7 +435,9 @@ export class AutomatedPenaltyService {
    */
   async processOverduePayments(): Promise<void> {
     try {
-      this.logger.log('🔍 Processing overdue payments for penalty application...');
+      this.logger.log(
+        '🔍 Processing overdue payments for penalty application...',
+      );
 
       // Find active bookings with overdue first rent payments
       const overdueBookings = await this.bookingRepository.find({
@@ -400,14 +453,21 @@ export class AutomatedPenaltyService {
         if (!booking.firstRentDueAt || !booking.firstRentPaidAt) {
           const now = vnNow();
           const dueDate = booking.firstRentDueAt || now;
-          
+
           if (now > dueDate) {
-            const daysPastDue = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
-            
+            const daysPastDue = Math.floor(
+              (now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24),
+            );
+
             if (daysPastDue > 0) {
-              this.logger.log(`📅 Found overdue payment: booking ${booking.id}, ${daysPastDue} days past due`);
-              
-              const penalty = await this.applyPaymentOverduePenalty(booking, daysPastDue);
+              this.logger.log(
+                `📅 Found overdue payment: booking ${booking.id}, ${daysPastDue} days past due`,
+              );
+
+              const penalty = await this.applyPaymentOverduePenalty(
+                booking,
+                daysPastDue,
+              );
               if (penalty) {
                 penaltiesApplied++;
               }
@@ -416,7 +476,9 @@ export class AutomatedPenaltyService {
         }
       }
 
-      this.logger.log(`✅ Processed overdue payments: ${penaltiesApplied} penalties applied`);
+      this.logger.log(
+        `✅ Processed overdue payments: ${penaltiesApplied} penalties applied`,
+      );
     } catch (error) {
       this.logger.error('❌ Failed to process overdue payments:', error);
     }
@@ -427,7 +489,9 @@ export class AutomatedPenaltyService {
    */
   async processMonthlyOverduePayments(): Promise<void> {
     try {
-      this.logger.log('🔍 Processing monthly overdue payments from blockchain...');
+      this.logger.log(
+        '🔍 Processing monthly overdue payments from blockchain...',
+      );
 
       // Create system user for blockchain queries
       const systemUser = {
@@ -436,7 +500,11 @@ export class AutomatedPenaltyService {
         mspId: 'OrgPropMSP',
       };
       // Query SCHEDULED payments from blockchain (not overdue yet)
-      const scheduledResponse = await this.blockchainService.queryPaymentsByStatus('SCHEDULED', systemUser);
+      const scheduledResponse =
+        await this.blockchainService.queryPaymentsByStatus(
+          'SCHEDULED',
+          systemUser,
+        );
       if (!scheduledResponse.success || !scheduledResponse.data) {
         return;
       }
@@ -444,22 +512,26 @@ export class AutomatedPenaltyService {
       const scheduledPayments = scheduledResponse.data;
       // Filter for overdue payments
       const now = vnNow();
-      const overduePayments = scheduledPayments.filter(payment => {
+      const overduePayments = scheduledPayments.filter((payment) => {
         const dueDate = new Date(payment.dueDate!);
         return now > dueDate;
       });
-      
+
       let penaltiesApplied = 0;
       for (const payment of overduePayments) {
         try {
-          this.logger.log(`🔍 Processing payment: ${JSON.stringify({ contractId: payment.contractId, period: payment.period, status: payment.status, dueDate: payment.dueDate })}`);
+          this.logger.log(
+            `🔍 Processing payment: ${JSON.stringify({ contractId: payment.contractId, period: payment.period, status: payment.status, dueDate: payment.dueDate })}`,
+          );
           // Skip first payment (period 1) as it's handled by processOverduePayments
           if (payment.period <= 1) {
             continue;
           }
 
           // Find corresponding contract in database
-          this.logger.log(`🔎 Looking for contract with contractCode: ${payment.contractId}`);
+          this.logger.log(
+            `🔎 Looking for contract with contractCode: ${payment.contractId}`,
+          );
           const contract = await this.contractRepository.findOne({
             where: { contractCode: payment.contractId },
             relations: ['tenant', 'landlord', 'property'],
@@ -471,30 +543,42 @@ export class AutomatedPenaltyService {
           // Calculate days overdue
           const dueDate = new Date(payment.dueDate!);
           const now = vnNow();
-          const daysPastDue = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+          const daysPastDue = Math.floor(
+            (now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24),
+          );
 
           if (daysPastDue > 0) {
             // Step 1: Mark payment as overdue on blockchain
-            await this.blockchainService.markOverdue(payment.contractId, payment.period.toString(), systemUser);
-            
+            await this.blockchainService.markOverdue(
+              payment.contractId,
+              payment.period.toString(),
+              systemUser,
+            );
+
             // Step 2: Apply penalty and deduct from escrow
             const penalty = await this.applyMonthlyPaymentOverduePenalty(
               contract,
               payment.period.toString(),
               daysPastDue,
-              payment.amount
+              payment.amount,
             );
-            
+
             if (penalty) {
               penaltiesApplied++;
-            } 
-          } 
+            }
+          }
         } catch (error) {
-          this.logger.error(`❌ Failed to process overdue payment ${payment.contractId} period ${payment.period}:`, error);
+          this.logger.error(
+            `❌ Failed to process overdue payment ${payment.contractId} period ${payment.period}:`,
+            error,
+          );
         }
       }
     } catch (error) {
-      this.logger.error('❌ Failed to process monthly overdue payments:', error);
+      this.logger.error(
+        '❌ Failed to process monthly overdue payments:',
+        error,
+      );
       this.logger.error('Error details:', error);
     }
   }
@@ -506,7 +590,7 @@ export class AutomatedPenaltyService {
     contract: Contract,
     period: string,
     daysPastDue: number,
-    originalAmount: number
+    originalAmount: number,
   ): Promise<PenaltyApplication | null> {
     try {
       if (!contract.contractCode) {
@@ -523,7 +607,7 @@ export class AutomatedPenaltyService {
       await this.deductFromEscrow(
         contract.id,
         penaltyInfo.amount,
-        `Monthly payment period ${period} overdue by ${daysPastDue} days`
+        `Monthly payment period ${period} overdue by ${daysPastDue} days`,
       );
       // Apply penalty to specific payment period on blockchain
       await this.blockchainService.applyPenalty(
@@ -532,15 +616,17 @@ export class AutomatedPenaltyService {
         penaltyInfo.amount.toString(),
         'MONTHLY_PAYMENT_OVERDUE',
         `Monthly payment period ${period} overdue by ${daysPastDue} days`,
-        systemUser
+        systemUser,
       );
       // Send notifications
-      this.logger.log(`📨 Sending penalty notifications for contract ${contract.contractCode} period ${period}`);
+      this.logger.log(
+        `📨 Sending penalty notifications for contract ${contract.contractCode} period ${period}`,
+      );
       await this.sendMonthlyPaymentPenaltyNotifications(
         contract,
         period,
         penaltyInfo.amount,
-        daysPastDue
+        daysPastDue,
       );
       const penaltyApplication: PenaltyApplication = {
         contractId: contract.id,
@@ -554,7 +640,10 @@ export class AutomatedPenaltyService {
       };
       return penaltyApplication;
     } catch (error) {
-      this.logger.error(`❌ Failed to apply monthly payment penalty for contract ${contract.contractCode} period ${period}:`, error);
+      this.logger.error(
+        `❌ Failed to apply monthly payment penalty for contract ${contract.contractCode} period ${period}:`,
+        error,
+      );
       return null;
     }
   }
@@ -566,10 +655,10 @@ export class AutomatedPenaltyService {
     contract: Contract,
     period: string,
     penaltyAmount: number,
-    daysPastDue: number
+    daysPastDue: number,
   ): Promise<void> {
     const periodDisplay = `tháng ${period}`;
-    
+
     await this.notificationService.create({
       userId: contract.tenant.id,
       type: NotificationTypeEnum.PAYMENT,
@@ -584,15 +673,20 @@ export class AutomatedPenaltyService {
       content: `Phí phạt ${penaltyAmount.toLocaleString('vi-VN')} VND đã được tự động áp dụng cho người thuê ${contract.tenant.fullName} do thanh toán muộn ${daysPastDue} ngày cho ${periodDisplay} của căn hộ ${contract.property.title}.`,
     });
 
-    this.logger.log(`📨 Sent monthly payment penalty notifications for contract ${contract.contractCode} period ${period}`);
+    this.logger.log(
+      `📨 Sent monthly payment penalty notifications for contract ${contract.contractCode} period ${period}`,
+    );
   }
 
   /**
    * Check escrow balance for a contract
    */
-  private async checkEscrowBalance(contractId: string): Promise<{ tenantBalance: number; landlordBalance: number } | null> {
+  private async checkEscrowBalance(
+    contractId: string,
+  ): Promise<{ tenantBalance: number; landlordBalance: number } | null> {
     try {
-      const escrowResponse = await this.escrowService.ensureAccountForContract(contractId);
+      const escrowResponse =
+        await this.escrowService.ensureAccountForContract(contractId);
       const escrow = escrowResponse.data;
 
       if (!escrow) {
@@ -604,7 +698,10 @@ export class AutomatedPenaltyService {
         landlordBalance: parseInt(escrow.currentBalanceLandlord || '0'),
       };
     } catch (error) {
-      this.logger.error(`❌ Failed to check escrow balance for contract ${contractId}:`, error);
+      this.logger.error(
+        `❌ Failed to check escrow balance for contract ${contractId}:`,
+        error,
+      );
       return null;
     }
   }
@@ -615,10 +712,12 @@ export class AutomatedPenaltyService {
   private async terminateContractForInsufficientFunds(
     contractId: string,
     bookingId: string,
-    reason: string
+    reason: string,
   ): Promise<void> {
     try {
-      this.logger.log(`🛑 Terminating contract ${contractId} due to insufficient funds: ${reason}`);
+      this.logger.log(
+        `🛑 Terminating contract ${contractId} due to insufficient funds: ${reason}`,
+      );
 
       // Update booking status to CANCELLED
       await this.bookingRepository.update(bookingId, {
@@ -630,13 +729,13 @@ export class AutomatedPenaltyService {
       const fabricUser = {
         userId: 'system',
         orgName: 'OrgProp',
-        mspId: 'OrgPropMSP',
+        mspId: 'orgMSP',
       };
 
       await this.blockchainService.terminateContract(
         contractId,
         reason,
-        fabricUser
+        fabricUser,
       );
 
       // Get booking details for notifications
@@ -665,9 +764,14 @@ export class AutomatedPenaltyService {
         }
       }
 
-      this.logger.log(`✅ Contract ${contractId} terminated successfully due to insufficient funds`);
+      this.logger.log(
+        `✅ Contract ${contractId} terminated successfully due to insufficient funds`,
+      );
     } catch (error) {
-      this.logger.error(`❌ Failed to terminate contract ${contractId}:`, error);
+      this.logger.error(
+        `❌ Failed to terminate contract ${contractId}:`,
+        error,
+      );
       throw error;
     }
   }
@@ -677,23 +781,31 @@ export class AutomatedPenaltyService {
    */
   private async checkExistingPenalty(
     contractId: string,
-    penaltyType: 'OVERDUE_PAYMENT' | 'MONTHLY_PAYMENT' | 'LATE_DEPOSIT' | 'OTHER',
+    penaltyType:
+      | 'OVERDUE_PAYMENT'
+      | 'MONTHLY_PAYMENT'
+      | 'LATE_DEPOSIT'
+      | 'OTHER',
     overdueDate: Date,
-    period?: string
+    period?: string,
   ): Promise<PenaltyRecord | null> {
     try {
       const query = this.penaltyRecordRepository
         .createQueryBuilder('penalty')
         .where('penalty.contractId = :contractId', { contractId })
         .andWhere('penalty.penaltyType = :penaltyType', { penaltyType })
-        .andWhere('penalty.status IN (:...statuses)', { statuses: ['APPLIED', 'DISPUTED'] });
+        .andWhere('penalty.status IN (:...statuses)', {
+          statuses: ['APPLIED', 'DISPUTED'],
+        });
 
       if (period) {
         query.andWhere('penalty.period = :period', { period });
       } else {
         // For overdue payments, check if penalty exists for the same due date
         const overdueStr = formatVN(overdueDate, 'yyyy-MM-dd');
-        query.andWhere('penalty.overdueDate = :overdueDate', { overdueDate: overdueStr });
+        query.andWhere('penalty.overdueDate = :overdueDate', {
+          overdueDate: overdueStr,
+        });
       }
 
       return await query.getOne();
@@ -710,7 +822,11 @@ export class AutomatedPenaltyService {
     contractId: string;
     bookingId?: string;
     tenantId: string;
-    penaltyType: 'OVERDUE_PAYMENT' | 'MONTHLY_PAYMENT' | 'LATE_DEPOSIT' | 'OTHER';
+    penaltyType:
+      | 'OVERDUE_PAYMENT'
+      | 'MONTHLY_PAYMENT'
+      | 'LATE_DEPOSIT'
+      | 'OTHER';
     period?: string;
     overdueDate: Date;
     daysPastDue: number;
@@ -749,7 +865,9 @@ export class AutomatedPenaltyService {
   /**
    * Get penalty history for a contract
    */
-  async getPenaltyHistoryForContract(contractId: string): Promise<PenaltyRecord[]> {
+  async getPenaltyHistoryForContract(
+    contractId: string,
+  ): Promise<PenaltyRecord[]> {
     try {
       return await this.penaltyRecordRepository.find({
         where: { contractId },
@@ -757,9 +875,11 @@ export class AutomatedPenaltyService {
         relations: ['contract'], // Removed 'booking' relation - use bookingId if needed
       });
     } catch (error) {
-      this.logger.error(`❌ Failed to get penalty history for contract ${contractId}:`, error);
+      this.logger.error(
+        `❌ Failed to get penalty history for contract ${contractId}:`,
+        error,
+      );
       return [];
     }
   }
-
 }

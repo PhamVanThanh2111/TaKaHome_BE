@@ -17,6 +17,8 @@ import { ContractResponseDto } from './dto/contract-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
+import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 
 @Controller('contracts')
 @ApiBearerAuth()
@@ -100,5 +102,39 @@ export class ContractController {
   @Roles('ADMIN')
   terminate(@Param('id') id: string) {
     return this.contractService.terminate(id);
+  }
+
+  @Get(':id/file-url')
+  @ApiOperation({ summary: 'Lấy URL truy cập file hợp đồng' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Trả về presigned URL để truy cập file hợp đồng',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 200 },
+        message: { type: 'string', example: 'SUCCESS' },
+        data: {
+          type: 'object',
+          properties: {
+            fileUrl: { type: 'string', example: 'https://presigned-url...' },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Không tìm thấy hợp đồng',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Không có quyền truy cập hợp đồng này',
+  })
+  getContractFileUrl(
+    @Param('id') contractId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.contractService.getContractFileUrl(contractId, user.id);
   }
 }

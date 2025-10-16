@@ -21,6 +21,7 @@ import {
   DisputeHandlingService,
   DisputeDetails,
 } from './dispute-handling.service';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
 @Injectable()
 export class ContractService {
@@ -234,6 +235,24 @@ export class ContractService {
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
+  async updateSignatureTransactionId(
+    id: string,
+    transactionId: string,
+    signatureIndex: number,
+  ): Promise<void> {
+    const contract = await this.loadContractOrThrow(id);
+
+    if (signatureIndex === 0) {
+      // LANDLORD signing (signatureIndex: 0)
+      contract.transactionIdLandlordSign = transactionId;
+    } else if (signatureIndex === 1) {
+      // TENANT signing (signatureIndex: 1)
+      contract.transactionIdTenantSign = transactionId;
+    }
+
+    await this.contractRepository.save(contract);
+  }
+
   async activate(id: string): Promise<ResponseCommon<Contract>> {
     const contract = await this.loadContractOrThrow(id);
     this.ensureStatus(contract, [
@@ -330,6 +349,59 @@ export class ContractService {
     contract.status = ContractStatusEnum.TERMINATED;
     const saved = await this.contractRepository.save(contract);
     return new ResponseCommon(200, 'SUCCESS', saved);
+  }
+
+  /**
+   * Lấy URL truy cập file hợp đồng từ S3
+   * Chỉ cho phép tenant hoặc landlord của hợp đồng truy cập
+   */
+  async getContractFileUrl(
+    contractId: string,
+    userId: string,
+  ): Promise<ResponseCommon<{ fileUrl: string }>> {
+    // Tìm hợp đồng với thông tin tenant và landlord
+    const contract = await this.contractRepository.findOne({
+      where: { id: contractId },
+      relations: ['tenant', 'landlord'],
+    });
+
+    if (!contract) {
+      throw new NotFoundException('Không tìm thấy hợp đồng');
+    }
+
+    // Kiểm tra contractFileUrl có tồn tại không
+    if (!contract.contractFileUrl) {
+      throw new NotFoundException('Hợp đồng chưa có file đính kèm');
+    }
+
+    // Kiểm tra quyền truy cập: chỉ tenant hoặc landlord của hợp đồng mới được phép
+    const isTenant = contract.tenant?.id === userId;
+    const isLandlord = contract.landlord?.id === userId;
+
+    if (!isTenant && !isLandlord) {
+      throw new ForbiddenException('Bạn không có quyền truy cập hợp đồng này');
+    }
+
+    try {
+      // Trích xuất key từ URL S3
+      // URL format: https://hopdong-takahome.s3.ap-southeast-1.amazonaws.com/contracts/2d3f0e80-1796-4829-b8e4-0520c470aef1/tenant-signed-2025-10-08T15-38-56-848Z.pdf
+      const url = new URL(contract.contractFileUrl);
+      const key = url.pathname.substring(1); // Bỏ dấu "/" đầu tiên
+
+      // Tạo presigned URL (có hiệu lực trong 15 phút = 900 giây)
+      const presignedUrl = await this.s3StorageService.getPresignedGetUrl(
+        key,
+        900,
+      );
+
+      return new ResponseCommon(200, 'SUCCESS', { fileUrl: presignedUrl });
+    } catch (error) {
+      this.logger.error(
+        `Failed to generate presigned URL for contract ${contractId}:`,
+        error,
+      );
+      throw new BadRequestException('Không thể tạo URL truy cập file hợp đồng');
+    }
   }
 
   async findRawById(id: string): Promise<Contract | null> {
