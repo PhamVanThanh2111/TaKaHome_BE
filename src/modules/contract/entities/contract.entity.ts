@@ -53,6 +53,12 @@ export class Contract {
   @Column({ nullable: true })
   smartContractAddress: string;
 
+  @Column({ nullable: true })
+  transactionIdTenantSign: string;
+
+  @Column({ nullable: true })
+  transactionIdLandlordSign: string;
+
   @CreateDateColumn({
     type: 'timestamptz',
     default: () => 'CURRENT_TIMESTAMP',

@@ -193,6 +193,15 @@ export class BookingService {
         );
       }
 
+      // Save transaction ID for landlord signing (signatureIndex: 0)
+      if (signResult.transactionId) {
+        await this.contractService.updateSignatureTransactionId(
+          contract.id,
+          signResult.transactionId,
+          0, // LANDLORD signatureIndex
+        );
+      }
+
       // Upload the signed PDF to S3
       if (signResult.signedPdf) {
         try {
@@ -340,6 +349,15 @@ export class BookingService {
       if (!signResult.success) {
         throw new BadRequestException(
           `Tenant signing failed: ${signResult.error}`,
+        );
+      }
+
+      // Save transaction ID for tenant signing (signatureIndex: 1)
+      if (signResult.transactionId) {
+        await this.contractService.updateSignatureTransactionId(
+          contract.id,
+          signResult.transactionId,
+          1, // TENANT signatureIndex
         );
       }
 
