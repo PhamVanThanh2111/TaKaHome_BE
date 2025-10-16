@@ -305,7 +305,18 @@ export class PropertyService {
             address: prop.address,
             isApproved: prop.isApproved,
             landlord: prop.landlord
-              ? { id: prop.landlord.id, name: prop.landlord.fullName }
+              ? {
+                  id: prop.landlord.id,
+                  name: prop.landlord.fullName,
+                  email: prop.landlord.email,
+                  phone: prop.landlord.phone,
+                  isVerified: prop.landlord.isVerified,
+                  avatarUrl: prop.landlord.avatarUrl,
+                  status: prop.landlord.status,
+                  CCCD: prop.landlord.CCCD,
+                  createdAt: prop.landlord.createdAt,
+                  updatedAt: prop.landlord.updatedAt,
+                }
               : undefined,
           },
         };
