@@ -696,11 +696,6 @@ export class BookingService {
     if (b.escrowDepositFundedAt && b.landlordEscrowDepositFundedAt) {
       b.status = BookingStatus.DUAL_ESCROW_FUNDED;
       try {
-        console.log('billingPeriod', formatVN(b.firstRentDueAt!, 'yyyy-MM'));
-        console.log(
-          'amount',
-          isRoom ? b.room.roomType.price : (b.property?.price ?? 0),
-        );
         const invoice: CreateInvoiceDto = {
           contractId: b.contractId!,
           dueDate: formatVN(b.firstRentDueAt!, 'yyyy-MM-dd'),

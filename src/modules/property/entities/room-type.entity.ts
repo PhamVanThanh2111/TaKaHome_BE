@@ -22,13 +22,13 @@ export class RoomType {
   @Column({ type: 'int', default: 1 })
   bathrooms: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  @Column({ nullable: true })
   area: number;
 
-  @Column({ type: 'decimal', precision: 15, scale: 2 })
+  @Column({ nullable: true })
   price: number;
 
-  @Column({ type: 'decimal', precision: 15, scale: 2 })
+  @Column({ nullable: true })
   deposit: number;
 
   @Column()
