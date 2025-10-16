@@ -51,7 +51,7 @@ export class InvoiceService {
   async findByContract(contractId: string): Promise<ResponseCommon<Invoice[]>> {
     const invoices = await this.invoiceRepository.find({
       where: { contract: { id: contractId } },
-      relations: ['items', 'contract', 'payments'],
+      relations: ['items', 'contract', 'payment'],
       order: { createdAt: 'DESC' },
     });
     return new ResponseCommon(200, 'SUCCESS', invoices);
