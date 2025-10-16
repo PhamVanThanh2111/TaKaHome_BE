@@ -543,17 +543,16 @@ export class SmartCAService {
     );
     if (!serial) throw new BadRequestException('No serial_number');
 
-    // 7) Build SignedAttributes DER từ pdfDigestHex (GIỮ NGUYÊN)
+    // 7) Build SignedAttributes DER từ pdfDigestHex
     const signedAttrsDER = this.buildSignedAttrsDER(pdfDigestHex, signerPem);
 
-    // 8) Hash DER (SHA-256) → gửi ký SmartCA (GIỮ NGUYÊN)
+    // 8) Hash DER (SHA-256) → gửi ký SmartCA
     const derHashBytes = crypto
       .createHash('sha256')
       .update(signedAttrsDER)
       .digest();
     const derHashHex = derHashBytes.toString('hex');
     const derHashB64 = derHashBytes.toString('base64');
-    console.log(`derHashHex: ${derHashHex}`);
 
     const transactionId = 'SP_CA_' + Date.now();
 
