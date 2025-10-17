@@ -94,9 +94,7 @@ export class PaymentService {
       return firstMonthKeywords.some((keyword) => desc.includes(keyword));
     });
 
-    const purpose: PaymentPurpose = isFirstMonth
-      ? PaymentPurpose.FIRST_MONTH_RENT
-      : PaymentPurpose.MONTHLY_RENT;
+    const purpose: PaymentPurpose = PaymentPurpose.FIRST_MONTH_RENT;
 
     // Ensure invoice has an associated contract
     if (!invoice.contract || !invoice.contract.id) {
