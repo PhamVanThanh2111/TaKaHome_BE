@@ -63,7 +63,7 @@ export class PaymentService {
     // Load invoice and validate
     const invoice = await this.invoiceRepository.findOne({
       where: { id: invoiceId },
-      relations: ['contract', 'contract.tenant'],
+      relations: ['contract', 'contract.tenant', 'items'],
     });
 
     if (!invoice) {
@@ -94,7 +94,16 @@ export class PaymentService {
       return firstMonthKeywords.some((keyword) => desc.includes(keyword));
     });
 
-    const purpose: PaymentPurpose = PaymentPurpose.FIRST_MONTH_RENT;
+    console.log(
+      `🔍 Invoice ${invoiceId} purpose detection:`,
+      `items count: ${invoice.items?.length || 0},`,
+      `isFirstMonth: ${isFirstMonth},`,
+      `descriptions: ${invoice.items?.map((i) => i.description).join('; ')}`,
+    );
+
+    const purpose: PaymentPurpose = isFirstMonth
+      ? PaymentPurpose.FIRST_MONTH_RENT
+      : PaymentPurpose.MONTHLY_RENT;
 
     // Ensure invoice has an associated contract
     if (!invoice.contract || !invoice.contract.id) {
