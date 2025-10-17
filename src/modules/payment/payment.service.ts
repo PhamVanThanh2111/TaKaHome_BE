@@ -81,12 +81,18 @@ export class PaymentService {
     }
 
     // Determine payment purpose based on invoice description
-    const firstMonthKeywords = ['first month', 'tháng đầu', 'first rent'];
-    const isFirstMonth = invoice.items?.some((item) =>
-      firstMonthKeywords.some((keyword) =>
-        item.description.toLowerCase().includes(keyword.toLowerCase()),
-      ),
-    );
+    const firstMonthKeywords = [
+      'first month',
+      'tháng đầu',
+      'first rent',
+      'first month rent',
+      'first month payment',
+    ];
+
+    const isFirstMonth = invoice.items?.some((item) => {
+      const desc = (item.description || '').toLowerCase();
+      return firstMonthKeywords.some((keyword) => desc.includes(keyword));
+    });
 
     const purpose: PaymentPurpose = isFirstMonth
       ? PaymentPurpose.FIRST_MONTH_RENT
