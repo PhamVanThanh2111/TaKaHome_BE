@@ -512,7 +512,9 @@ export class ContractService {
         rentAmount: fullContract.room
           ? fullContract.room.roomType.price.toString()
           : (property.price ?? 0).toString(),
-        depositAmount: (property.deposit ?? 0).toString(), // Default deposit amount - should come from property
+        depositAmount: fullContract.room
+          ? fullContract.room.roomType.deposit.toString()
+          : (property.deposit ?? 0).toString(),
         currency: 'VND',
         startDate: fullContract.startDate.toISOString(),
         endDate: fullContract.endDate.toISOString(),

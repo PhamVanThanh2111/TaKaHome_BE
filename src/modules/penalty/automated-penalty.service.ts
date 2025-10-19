@@ -11,6 +11,7 @@ import { NotificationService } from '../notification/notification.service';
 import { NotificationTypeEnum } from '../common/enums/notification-type.enum';
 import { EscrowService } from '../escrow/escrow.service';
 import { PenaltyRecord } from './entities/penalty-record.entity';
+import { ContractTerminationService } from '../contract/contract-termination.service';
 
 export interface PenaltyApplication {
   contractId: string;
@@ -42,6 +43,7 @@ export class AutomatedPenaltyService {
     private blockchainService: BlockchainService,
     private notificationService: NotificationService,
     private escrowService: EscrowService,
+    private contractTerminationService: ContractTerminationService,
   ) {}
 
   /**
@@ -60,9 +62,23 @@ export class AutomatedPenaltyService {
         return null;
       }
 
-      // Get actual rent amount from property if available
-      const actualRentAmount =
-        rentAmount || booking.property?.price || 10000000;
+      // Check if first payment is more than 3 days overdue - cancel booking
+      if (daysPastDue >= 3 && !booking.firstRentPaidAt) {
+        this.logger.warn(
+          `⚠️ First payment is ${daysPastDue} days overdue for booking ${booking.id}. Cancelling booking as per business rule (3+ days).`,
+        );
+
+        return await this.cancelBookingForOverdueFirstPayment(
+          booking,
+          daysPastDue,
+        );
+      }
+
+      // Get actual rent amount from blockchain contract first, then fallback to property or default
+      const actualRentAmount = await this.getRentAmountFromBlockchain(
+        booking.contractId,
+        rentAmount || booking.property?.price || 10000000,
+      );
 
       // Check if penalty already exists for this period to avoid double penalty
       const existingPenalty = await this.checkExistingPenalty(
@@ -186,29 +202,11 @@ export class AutomatedPenaltyService {
       // Cancel if more than 24 hours late
       if (hoursLate > 24) {
         // Cancel booking
-        booking.status = BookingStatus.CANCELLED;
-        booking.closedAt = vnNow(); // Use existing closedAt field to mark cancellation time
-
-        // Save booking changes
-        await this.bookingRepository.save(booking);
-
-        // Send cancellation notifications
-        await this.notificationService.create({
-          userId: booking.tenant.id,
-          type: NotificationTypeEnum.GENERAL,
-          title: 'Booking Cancelled - Late Deposit',
-          content: `Your booking has been cancelled due to deposit not paid within 24 hours (${hoursLate} hours late). The contract and booking are now invalid.`,
-        });
-
-        // Send notification to landlord
-        if (booking.property?.landlord?.id) {
-          await this.notificationService.create({
-            userId: booking.property.landlord.id,
-            type: NotificationTypeEnum.GENERAL,
-            title: 'Booking Cancelled - Tenant Late Deposit',
-            content: `Booking ${booking.id} has been automatically cancelled. Tenant did not pay deposit within 24 hours (${hoursLate} hours late).`,
-          });
-        }
+        await this.contractTerminationService.terminateContract(
+          booking.contractId,
+          'Deposit not paid within 24 hours',
+          'system',
+        );
 
         this.logger.log(
           `✅ Booking ${booking.id} cancelled due to deposit not paid within 24 hours (${hoursLate}h late)`,
@@ -216,7 +214,7 @@ export class AutomatedPenaltyService {
 
         return {
           cancelled: true,
-          reason: `Deposit not paid within 24 hours (${hoursLate}h late)`,
+          reason: `Tiền cọc không được nộp trong vòng 24 giờ (trễ ${hoursLate} giờ)`,
         };
       }
 
@@ -224,6 +222,63 @@ export class AutomatedPenaltyService {
     } catch (error) {
       this.logger.error(
         `❌ Failed to cancel booking ${booking.id} for late deposit:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Cancel booking and contract if first payment not made within 3 days
+   */
+  async cancelBookingForOverdueFirstPayment(
+    booking: Booking,
+    daysPastDue: number,
+  ): Promise<PenaltyApplication | null> {
+    try {
+      if (!booking.contractId || !booking.firstRentDueAt) {
+        return null;
+      }
+
+      // Only cancel if first payment is overdue (not paid)
+      if (booking.firstRentPaidAt) {
+        this.logger.warn(
+          `First payment already made for booking ${booking.id}, cannot cancel`,
+        );
+        return null;
+      }
+
+      // Use ContractTerminationService for proper escrow distribution
+      const reason = `First payment not made within 3 days (${daysPastDue} days overdue)`;
+      const terminationResult =
+        await this.contractTerminationService.terminateContract(
+          booking.contractId,
+          reason,
+          'system',
+        );
+
+      this.logger.log(
+        `✅ Booking ${booking.id} cancelled due to first payment not made within 3 days with escrow refunds:`,
+        {
+          refundToTenant: terminationResult.calculation.refundToTenant,
+          refundToLandlord: terminationResult.calculation.refundToLandlord,
+        },
+      );
+
+      // Return a PenaltyApplication-like object for consistency (though it's a cancellation)
+      return {
+        contractId: booking.contractId,
+        bookingId: booking.id,
+        tenantId: booking.tenant.id,
+        daysPastDue,
+        originalAmount: booking.property?.price || 0,
+        penaltyAmount: terminationResult.calculation.penaltyAmount,
+        reason: `Hợp đồng đã bị hủy do không thanh toán lần đầu trong vòng 3 ngày (trễ ${daysPastDue} ngày). Hoàn trả: ${terminationResult.calculation.refundToTenant.toLocaleString('vi-VN')} VND`,
+        appliedAt: vnNow(),
+      };
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to cancel booking ${booking.id} for overdue first payment:`,
         error,
       );
       return null;
@@ -259,7 +314,7 @@ export class AutomatedPenaltyService {
     return {
       rate,
       amount: finalPenalty,
-      reason: `Late payment penalty: ${rate}% per day for ${daysPastDue} days (Legal limit: VN Law)`,
+      reason: `Phạt chậm thanh toán ${daysPastDue} ngày, số tiền phạt: ${finalPenalty.toLocaleString('vi-VN')} VND`,
       canContinue,
     };
   }
@@ -282,7 +337,7 @@ export class AutomatedPenaltyService {
     await this.notificationService.create({
       userId: booking.tenant.id,
       type: NotificationTypeEnum.PAYMENT,
-      title: '⚠️ Phí phạt đã được áp dụng',
+      title: 'Phí phạt đã được áp dụng',
       content: `Do thanh toán muộn ${daysPastDue} ngày cho căn hộ ${booking.property.title}, bạn đã bị áp dụng phí phạt ${penaltyInfo.amount.toLocaleString('vi-VN')} VND. Vui lòng thanh toán sớm để tránh thêm phí phạt.`,
     });
 
@@ -302,17 +357,17 @@ export class AutomatedPenaltyService {
   /**
    * Get penalty history for a contract or booking
    */
-  async getPenaltyHistory(
-    contractId?: string,
-    bookingId?: string,
-  ): Promise<any[]> {
-    // This would typically query a penalty history table or blockchain
-    // For now, return empty array as placeholder
-    this.logger.log(
-      `Getting penalty history for contract: ${contractId}, booking: ${bookingId}`,
-    );
-    return [];
-  }
+  // async getPenaltyHistory(
+  //   contractId?: string,
+  //   bookingId?: string,
+  // ): Promise<any[]> {
+  //   // This would typically query a penalty history table or blockchain
+  //   // For now, return empty array as placeholder
+  //   this.logger.log(
+  //     `Getting penalty history for contract: ${contractId}, booking: ${bookingId}`,
+  //   );
+  //   return [];
+  // }
 
   /**
    * Calculate total penalties applied to a tenant
@@ -385,11 +440,50 @@ export class AutomatedPenaltyService {
       );
 
       this.logger.log(
-        `✅ Deducted ${penaltyAmount} VND from escrow for contract ${contractId}: ${reason}`,
+        `✅ Deducted ${penaltyAmount} VND from tenant escrow for contract ${contractId}: ${reason}`,
       );
     } catch (error) {
       this.logger.error(
         `❌ Failed to deduct penalty from escrow for contract ${contractId}:`,
+        error,
+      );
+      // Don't throw error to not break the penalty application process
+    }
+  }
+
+  /**
+   * Deduct penalty amount from landlord's escrow balance
+   */
+  private async deductFromLandlordEscrow(
+    contractId: string,
+    penaltyAmount: number,
+    reason: string,
+  ): Promise<void> {
+    try {
+      // Get escrow account for the contract
+      const escrowResponse =
+        await this.escrowService.ensureAccountForContract(contractId);
+      const escrow = escrowResponse.data;
+
+      if (!escrow) {
+        this.logger.warn(`No escrow account found for contract ${contractId}`);
+        return;
+      }
+
+      // Deduct penalty amount from landlord's escrow balance
+      await this.escrowService.deduct(
+        escrow.id,
+        penaltyAmount,
+        'LANDLORD',
+        `Penalty deduction: ${reason}`,
+      );
+
+      this.logger.log(
+        `✅ Deducted ${penaltyAmount} VND from landlord escrow for contract ${contractId}: ${reason}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to deduct penalty from landlord escrow for contract ${contractId}:`,
         error,
       );
       // Don't throw error to not break the penalty application process
@@ -499,20 +593,30 @@ export class AutomatedPenaltyService {
         orgName: 'OrgProp',
         mspId: 'OrgPropMSP',
       };
-      // Query SCHEDULED payments from blockchain (not overdue yet)
+      // Query both SCHEDULED and OVERDUE payments from blockchain
       const scheduledResponse =
         await this.blockchainService.queryPaymentsByStatus(
           'SCHEDULED',
           systemUser,
         );
-      if (!scheduledResponse.success || !scheduledResponse.data) {
+      const overdueResponse =
+        await this.blockchainService.queryPaymentsByStatus(
+          'OVERDUE',
+          systemUser,
+        );
+
+      const allPayments = [
+        ...(scheduledResponse.success ? scheduledResponse.data || [] : []),
+        ...(overdueResponse.success ? overdueResponse.data || [] : []),
+      ];
+
+      if (allPayments.length === 0) {
         return;
       }
 
-      const scheduledPayments = scheduledResponse.data;
-      // Filter for overdue payments
+      // Filter for overdue payments (both SCHEDULED past due and existing OVERDUE)
       const now = vnNow();
-      const overduePayments = scheduledPayments.filter((payment) => {
+      const overduePayments = allPayments.filter((payment) => {
         const dueDate = new Date(payment.dueDate!);
         return now > dueDate;
       });
@@ -548,19 +652,69 @@ export class AutomatedPenaltyService {
           );
 
           if (daysPastDue > 0) {
-            // Step 1: Mark payment as overdue on blockchain
-            await this.blockchainService.markOverdue(
-              payment.contractId,
-              payment.period.toString(),
-              systemUser,
+            // Check if penalty already applied TODAY to avoid multiple penalties per day
+            const today = vnNow();
+            const startOfToday = new Date(
+              today.getFullYear(),
+              today.getMonth(),
+              today.getDate(),
+            );
+            const endOfToday = new Date(
+              today.getFullYear(),
+              today.getMonth(),
+              today.getDate() + 1,
             );
 
-            // Step 2: Apply penalty and deduct from escrow
+            const existingTodayPenalty = await this.penaltyRecordRepository
+              .createQueryBuilder('penalty')
+              .where('penalty.contractId = :contractId', {
+                contractId: contract.id,
+              })
+              .andWhere('penalty.penaltyType = :penaltyType', {
+                penaltyType: 'MONTHLY_PAYMENT',
+              })
+              .andWhere('penalty.period = :period', {
+                period: payment.period.toString(),
+              })
+              .andWhere('penalty.appliedAt >= :startOfToday', { startOfToday })
+              .andWhere('penalty.appliedAt < :endOfToday', { endOfToday })
+              .getOne();
+
+            if (existingTodayPenalty) {
+              this.logger.log(
+                `⚠️ Daily penalty already applied today for contract ${contract.contractCode} period ${payment.period}, skipping...`,
+              );
+              continue;
+            }
+
+            // Check if this is the FIRST penalty for this period
+            const existingPenaltyForPeriod =
+              await this.penaltyRecordRepository.findOne({
+                where: {
+                  contractId: contract.id,
+                  penaltyType: 'MONTHLY_PAYMENT',
+                  period: payment.period.toString(),
+                },
+              });
+
+            const isFirstPenalty = !existingPenaltyForPeriod;
+
+            // Step 1: Mark payment as overdue on blockchain (only if SCHEDULED)
+            if (payment.status === 'SCHEDULED') {
+              await this.blockchainService.markOverdue(
+                payment.contractId,
+                payment.period.toString(),
+                systemUser,
+              );
+            }
+
+            // Step 2: Apply penalty and deduct from escrow (pass isFirstPenalty flag)
             const penalty = await this.applyMonthlyPaymentOverduePenalty(
               contract,
               payment.period.toString(),
               daysPastDue,
               payment.amount,
+              isFirstPenalty,
             );
 
             if (penalty) {
@@ -574,6 +728,10 @@ export class AutomatedPenaltyService {
           );
         }
       }
+
+      this.logger.log(
+        `✅ Processed monthly overdue payments: ${penaltiesApplied} penalties applied`,
+      );
     } catch (error) {
       this.logger.error(
         '❌ Failed to process monthly overdue payments:',
@@ -591,33 +749,73 @@ export class AutomatedPenaltyService {
     period: string,
     daysPastDue: number,
     originalAmount: number,
+    isFirstPenalty: boolean = false,
   ): Promise<PenaltyApplication | null> {
     try {
       if (!contract.contractCode) {
         return null;
       }
-      // Calculate penalty based on business rules
-      const penaltyInfo = this.calculateOverduePenalty(daysPastDue);
+
+      // Calculate penalty based on business rules with actual rent amount
+      const penaltyInfo = this.calculateOverduePenalty(
+        daysPastDue,
+        originalAmount,
+      );
+
+      await this.deductFromEscrow(
+        contract.id,
+        penaltyInfo.amount,
+        `Monthly payment period ${period} overdue by ${daysPastDue} days`,
+      );
+
       // Create system user for blockchain operations
       const systemUser = {
         userId: 'system',
         orgName: 'OrgProp',
         mspId: 'OrgPropMSP',
       };
-      await this.deductFromEscrow(
-        contract.id,
-        penaltyInfo.amount,
-        `Monthly payment period ${period} overdue by ${daysPastDue} days`,
-      );
-      // Apply penalty to specific payment period on blockchain
-      await this.blockchainService.applyPenalty(
-        contract.contractCode,
-        period,
-        penaltyInfo.amount.toString(),
-        'MONTHLY_PAYMENT_OVERDUE',
-        `Monthly payment period ${period} overdue by ${daysPastDue} days`,
-        systemUser,
-      );
+
+      if (isFirstPenalty) {
+        // First penalty: Use applyPenalty to mark the payment period as penalized
+        this.logger.log(
+          `🥇 First penalty for contract ${contract.contractCode} period ${period} - using applyPenalty`,
+        );
+        await this.blockchainService.applyPenalty(
+          contract.contractCode,
+          period,
+          penaltyInfo.amount.toString(),
+          'MONTHLY_PAYMENT_OVERDUE',
+          `Monthly payment period ${period} overdue by ${daysPastDue} days - First penalty`,
+          systemUser,
+        );
+      } else {
+        // Subsequent penalties: Use recordPenalty for daily tracking
+        this.logger.log(
+          `📅 Daily penalty for contract ${contract.contractCode} period ${period} - using recordPenalty`,
+        );
+        await this.recordPenaltyOnBlockchain(
+          contract.id,
+          'tenant',
+          penaltyInfo.amount,
+          `Monthly payment period ${period} overdue by ${daysPastDue} days - Daily penalty`,
+        );
+      }
+
+      // Record penalty in database with period for tracking
+      await this.recordPenaltyInDatabase({
+        contractId: contract.id,
+        tenantId: contract.tenant.id,
+        penaltyType: 'MONTHLY_PAYMENT',
+        period: period,
+        overdueDate: new Date(), // Current date as overdue date for tracking
+        daysPastDue: daysPastDue,
+        originalAmount: originalAmount,
+        penaltyAmount: penaltyInfo.amount,
+        penaltyRate: 0.03, // 0.03% per day
+        reason: `Monthly payment period ${period} overdue by ${daysPastDue} days - Daily penalty`,
+        appliedBy: 'system',
+      });
+
       // Send notifications
       this.logger.log(
         `📨 Sending penalty notifications for contract ${contract.contractCode} period ${period}`,
@@ -633,7 +831,7 @@ export class AutomatedPenaltyService {
         bookingId: '', // Monthly payments don't have booking reference
         tenantId: contract.tenant.id,
         daysPastDue,
-        originalAmount,
+        originalAmount: originalAmount,
         penaltyAmount: penaltyInfo.amount,
         reason: `Monthly payment period ${period} overdue by ${daysPastDue} days`,
         appliedAt: vnNow(),
@@ -662,7 +860,7 @@ export class AutomatedPenaltyService {
     await this.notificationService.create({
       userId: contract.tenant.id,
       type: NotificationTypeEnum.PAYMENT,
-      title: '⚠️ Phí phạt thanh toán hàng tháng',
+      title: 'Phí phạt thanh toán hàng tháng',
       content: `Do thanh toán muộn ${daysPastDue} ngày cho ${periodDisplay} của căn hộ ${contract.property.title}, bạn đã bị áp dụng phí phạt ${penaltyAmount.toLocaleString('vi-VN')} VND. Vui lòng thanh toán sớm để tránh thêm phí phạt.`,
     });
 
@@ -708,6 +906,7 @@ export class AutomatedPenaltyService {
 
   /**
    * Terminate contract when escrow funds are insufficient
+   * Now uses ContractTerminationService for proper escrow refund distribution
    */
   private async terminateContractForInsufficientFunds(
     contractId: string,
@@ -716,56 +915,24 @@ export class AutomatedPenaltyService {
   ): Promise<void> {
     try {
       this.logger.log(
-        `🛑 Terminating contract ${contractId} due to insufficient funds: ${reason}`,
+        `Terminating contract ${contractId} due to insufficient funds: ${reason}`,
       );
 
-      // Update booking status to CANCELLED
-      await this.bookingRepository.update(bookingId, {
-        status: BookingStatus.CANCELLED,
-        closedAt: vnNow(),
-      });
-
-      // Record termination on blockchain
-      const fabricUser = {
-        userId: 'system',
-        orgName: 'OrgProp',
-        mspId: 'orgMSP',
-      };
-
-      await this.blockchainService.terminateContract(
-        contractId,
-        reason,
-        fabricUser,
-      );
-
-      // Get booking details for notifications
-      const booking = await this.bookingRepository.findOne({
-        where: { id: bookingId },
-        relations: ['tenant', 'property', 'property.landlord'],
-      });
-
-      if (booking) {
-        // Notify tenant
-        await this.notificationService.create({
-          userId: booking.tenant.id,
-          type: NotificationTypeEnum.GENERAL,
-          title: '🛑 Hợp đồng đã bị hủy',
-          content: `Hợp đồng thuê căn hộ ${booking.property.title} đã bị hủy do không đủ tiền ký quỹ để thanh toán phí phạt. Lý do: ${reason}`,
-        });
-
-        // Notify landlord
-        if (booking.property?.landlord?.id) {
-          await this.notificationService.create({
-            userId: booking.property.landlord.id,
-            type: NotificationTypeEnum.GENERAL,
-            title: '🛑 Hợp đồng đã bị hủy',
-            content: `Hợp đồng với người thuê ${booking.tenant.fullName} cho căn hộ ${booking.property.title} đã bị hủy do không đủ tiền ký quỹ. Lý do: ${reason}`,
-          });
-        }
-      }
+      // Use ContractTerminationService for proper escrow distribution
+      const terminationResult =
+        await this.contractTerminationService.terminateContract(
+          contractId,
+          reason,
+          'system',
+        );
 
       this.logger.log(
-        `✅ Contract ${contractId} terminated successfully due to insufficient funds`,
+        `✅ Contract ${contractId} terminated successfully with escrow refunds processed:`,
+        {
+          refundToTenant: terminationResult.calculation.refundToTenant,
+          refundToLandlord: terminationResult.calculation.refundToLandlord,
+          penaltyAmount: terminationResult.calculation.penaltyAmount,
+        },
       );
     } catch (error) {
       this.logger.error(
@@ -785,6 +952,7 @@ export class AutomatedPenaltyService {
       | 'OVERDUE_PAYMENT'
       | 'MONTHLY_PAYMENT'
       | 'LATE_DEPOSIT'
+      | 'HANDOVER_OVERDUE'
       | 'OTHER',
     overdueDate: Date,
     period?: string,
@@ -826,6 +994,7 @@ export class AutomatedPenaltyService {
       | 'OVERDUE_PAYMENT'
       | 'MONTHLY_PAYMENT'
       | 'LATE_DEPOSIT'
+      | 'HANDOVER_OVERDUE'
       | 'OTHER';
     period?: string;
     overdueDate: Date;
@@ -880,6 +1049,285 @@ export class AutomatedPenaltyService {
         error,
       );
       return [];
+    }
+  }
+
+  /**
+   * Get rent amount from blockchain contract, fallback to provided default
+   */
+  private async getRentAmountFromBlockchain(
+    contractId: string,
+    fallbackAmount: number,
+  ): Promise<number> {
+    try {
+      // Find contract to get contractCode
+      const contract = await this.contractRepository.findOne({
+        where: { id: contractId },
+      });
+
+      if (!contract?.contractCode) {
+        this.logger.warn(
+          `Contract ${contractId} not found or missing contractCode, using fallback amount`,
+        );
+        return fallbackAmount;
+      }
+
+      // Create system user for blockchain operations
+      const systemUser = {
+        userId: 'system',
+        orgName: 'OrgProp',
+        mspId: 'OrgPropMSP',
+      };
+
+      // Get contract details from blockchain
+      const blockchainResponse = await this.blockchainService.getContract(
+        contract.contractCode,
+        systemUser,
+      );
+
+      if (blockchainResponse.success && blockchainResponse.data) {
+        const blockchainRentAmount = blockchainResponse.data.rentAmount;
+        const rentAmount =
+          typeof blockchainRentAmount === 'string'
+            ? parseFloat(blockchainRentAmount)
+            : blockchainRentAmount;
+
+        if (rentAmount && rentAmount > 0) {
+          this.logger.log(
+            `✅ Retrieved rent amount from blockchain for contract ${contract.contractCode}: ${rentAmount.toLocaleString('vi-VN')} VND`,
+          );
+          return rentAmount;
+        }
+      }
+
+      this.logger.warn(
+        `❌ Failed to get rent amount from blockchain for contract ${contract.contractCode}, using fallback`,
+      );
+      return fallbackAmount;
+    } catch (error) {
+      this.logger.error(
+        `❌ Error getting rent amount from blockchain for contract ${contractId}:`,
+        error,
+      );
+      return fallbackAmount;
+    }
+  }
+
+  /**
+   * Process handover deadline violations - penalty for landlords who don't handover within 24 hours
+   */
+  async processOverdueHandovers(): Promise<void> {
+    try {
+      this.logger.log('🏠 Checking for overdue handovers...');
+
+      const now = vnNow();
+      const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+      // Find bookings that are READY_FOR_HANDOVER and first rent was paid more than 24 hours ago
+      const overdueHandovers = await this.bookingRepository.find({
+        where: {
+          status: BookingStatus.READY_FOR_HANDOVER,
+        },
+        relations: ['tenant', 'property', 'property.landlord', 'contract'],
+      });
+
+      let penaltiesApplied = 0;
+
+      for (const booking of overdueHandovers) {
+        if (
+          booking.firstRentPaidAt &&
+          booking.firstRentPaidAt <= twentyFourHoursAgo
+        ) {
+          const hoursOverdue = Math.floor(
+            (now.getTime() - booking.firstRentPaidAt.getTime()) /
+              (1000 * 60 * 60),
+          );
+
+          if (hoursOverdue >= 24) {
+            this.logger.log(
+              `📅 Found overdue handover: booking ${booking.id}, ${hoursOverdue} hours past due (landlord: ${booking.property?.landlord?.id})`,
+            );
+
+            const penalty = await this.applyLandlordHandoverPenalty(
+              booking,
+              hoursOverdue,
+            );
+            if (penalty) {
+              penaltiesApplied++;
+            }
+          }
+        }
+      }
+
+      this.logger.log(
+        `✅ Processed overdue handovers: ${penaltiesApplied} landlord penalties applied`,
+      );
+    } catch (error) {
+      this.logger.error('❌ Failed to process overdue handovers:', error);
+    }
+  }
+
+  /**
+   * Apply penalty to landlord for not handing over within 24 hours
+   * Deduct 50% of landlord deposit and cancel contract
+   */
+  async applyLandlordHandoverPenalty(
+    booking: Booking,
+    hoursOverdue: number,
+  ): Promise<PenaltyApplication | null> {
+    try {
+      if (!booking.contractId || !booking.firstRentPaidAt) {
+        this.logger.warn(
+          `Cannot apply handover penalty: missing contract or payment date for booking ${booking.id}`,
+        );
+        return null;
+      }
+
+      const landlordId = booking.property?.landlord?.id;
+      if (!landlordId) {
+        this.logger.warn(
+          `Cannot apply handover penalty: missing landlord for booking ${booking.id}`,
+        );
+        return null;
+      }
+
+      // Check if penalty already exists to avoid double penalty
+      const existingPenalty = await this.checkExistingPenalty(
+        booking.contractId,
+        'HANDOVER_OVERDUE',
+        booking.firstRentPaidAt,
+      );
+
+      if (existingPenalty) {
+        this.logger.warn(
+          `Handover penalty already applied for booking ${booking.id} on ${formatVN(existingPenalty.appliedAt, 'yyyy-MM-dd')}`,
+        );
+        return null;
+      }
+
+      // Get landlord's escrow balance
+      const escrowBalance = await this.checkEscrowBalance(booking.contractId);
+      if (!escrowBalance || escrowBalance.landlordBalance <= 0) {
+        this.logger.warn(
+          `No landlord escrow balance found for contract ${booking.contractId}`,
+        );
+        return null;
+      }
+
+      // Calculate 50% penalty of landlord deposit
+      const penaltyAmount = Math.floor(escrowBalance.landlordBalance * 0.5);
+      const reason = `Chủ nhà không bàn giao trong vòng 24 giờ (trễ ${hoursOverdue} giờ)`;
+
+      this.logger.log(
+        `Applying 50% deposit penalty (${penaltyAmount.toLocaleString('vi-VN')} VND) to landlord for booking ${booking.id}`,
+      );
+
+      // Record penalty on blockchain
+      await this.recordPenaltyOnBlockchain(
+        booking.contractId,
+        'landlord',
+        penaltyAmount,
+        reason,
+      );
+
+      // Deduct penalty from landlord's escrow balance
+      await this.deductFromLandlordEscrow(
+        booking.contractId,
+        penaltyAmount,
+        reason,
+      );
+
+      // Send notifications
+      await this.sendHandoverPenaltyNotifications(
+        booking,
+        penaltyAmount,
+        hoursOverdue,
+      );
+
+      // Record penalty in database
+      await this.recordPenaltyInDatabase({
+        contractId: booking.contractId,
+        bookingId: booking.id,
+        tenantId: landlordId, // Using landlordId as the penalized party
+        penaltyType: 'HANDOVER_OVERDUE',
+        overdueDate: booking.firstRentPaidAt,
+        daysPastDue: Math.floor(hoursOverdue / 24),
+        originalAmount: escrowBalance.landlordBalance,
+        penaltyAmount: penaltyAmount,
+        penaltyRate: 50, // 50% penalty
+        reason: reason,
+        appliedBy: 'system',
+      });
+
+      // Cancel booking and terminate contract due to landlord violation
+      this.logger.warn(
+        `⚠️ Cancelling booking ${booking.id} due to landlord handover violation`,
+      );
+
+      const terminationResult =
+        await this.contractTerminationService.terminateContract(
+          booking.contractId,
+          reason,
+          'LANDLORD_VIOLATION',
+        );
+
+      const penaltyApplication: PenaltyApplication = {
+        contractId: booking.contractId,
+        bookingId: booking.id,
+        tenantId: landlordId,
+        daysPastDue: Math.floor(hoursOverdue / 24),
+        originalAmount: escrowBalance.landlordBalance,
+        penaltyAmount: penaltyAmount,
+        reason: `${reason}. Contract terminated. Refund: ${terminationResult.calculation.refundToTenant.toLocaleString('vi-VN')} VND to tenant`,
+        appliedAt: vnNow(),
+      };
+
+      return penaltyApplication;
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to apply landlord handover penalty for booking ${booking.id}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Send notifications for handover penalty
+   */
+  private async sendHandoverPenaltyNotifications(
+    booking: Booking,
+    penaltyAmount: number,
+    hoursOverdue: number,
+  ): Promise<void> {
+    try {
+      const landlordId = booking.property?.landlord?.id;
+      const tenantId = booking.tenant?.id;
+
+      // Notify landlord about penalty
+      if (landlordId) {
+        await this.notificationService.create({
+          userId: landlordId,
+          type: NotificationTypeEnum.PENALTY,
+          title: '⚠️ Phạt chậm bàn giao',
+          content: `Bạn đã bị phạt ${penaltyAmount.toLocaleString('vi-VN')} VND (50% cọc) do không bàn giao căn hộ ${booking.property?.title} trong vòng 24 giờ. Thời gian trễ: ${hoursOverdue} giờ. Hợp đồng đã bị hủy.`,
+        });
+      }
+
+      // Notify tenant about landlord violation and refund
+      if (tenantId) {
+        await this.notificationService.create({
+          userId: tenantId,
+          type: NotificationTypeEnum.GENERAL,
+          title: '🏠 Hủy hợp đồng do chủ nhà vi phạm',
+          content: `Hợp đồng thuê căn hộ ${booking.property?.title} đã bị hủy do chủ nhà không bàn giao đúng hạn. Bạn sẽ được hoàn tiền đầy đủ cọc và tiền thuê đã thanh toán.`,
+        });
+      }
+    } catch (error) {
+      this.logger.error(
+        '❌ Failed to send handover penalty notifications:',
+        error,
+      );
     }
   }
 }
