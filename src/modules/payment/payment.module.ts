@@ -8,6 +8,7 @@ import { WalletModule } from '../wallet/wallet.module';
 import { EscrowModule } from '../escrow/escrow.module';
 import { BookingModule } from '../booking/booking.module';
 import { BlockchainModule } from '../blockchain/blockchain.module';
+import { ContractModule } from '../contract/contract.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { BlockchainModule } from '../blockchain/blockchain.module';
     EscrowModule,
     BookingModule,
     BlockchainModule,
+    ContractModule,
   ],
   controllers: [PaymentController],
   providers: [PaymentService],
