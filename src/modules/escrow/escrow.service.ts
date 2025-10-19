@@ -73,7 +73,9 @@ export class EscrowService {
       throw new Error('Payment is not PAID');
     if (
       payment.purpose !== PaymentPurpose.TENANT_ESCROW_DEPOSIT &&
-      payment.purpose !== PaymentPurpose.LANDLORD_ESCROW_DEPOSIT
+      payment.purpose !== PaymentPurpose.LANDLORD_ESCROW_DEPOSIT &&
+      payment.purpose !== PaymentPurpose.TENANT_EXTENSION_ESCROW_DEPOSIT &&
+      payment.purpose !== PaymentPurpose.LANDLORD_EXTENSION_ESCROW_DEPOSIT
     )
       throw new Error('Payment is not a deposit');
 
