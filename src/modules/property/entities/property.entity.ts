@@ -9,7 +9,6 @@ import {
 } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { PropertyTypeEnum } from '../../common/enums/property-type.enum';
-import { PropertyUtility } from '../../property-utility/entities/property-utility.entity';
 import { Contract } from '../../contract/entities/contract.entity';
 import { Booking } from '../../booking/entities/booking.entity';
 import { Review } from '../../review/entities/review.entity';
@@ -94,9 +93,6 @@ export class Property {
 
   @ManyToOne(() => User, (user) => user.id)
   landlord: User;
-
-  @OneToMany(() => PropertyUtility, (util) => util.property)
-  utilities: PropertyUtility[];
 
   @OneToMany(() => Contract, (contract) => contract.property)
   contracts: Contract[];

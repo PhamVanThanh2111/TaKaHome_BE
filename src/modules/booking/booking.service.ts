@@ -716,15 +716,18 @@ export class BookingService {
     if (b.escrowDepositFundedAt && b.landlordEscrowDepositFundedAt) {
       b.status = BookingStatus.DUAL_ESCROW_FUNDED;
       try {
+        // Lấy giá từ ContractExtension nếu có, nếu không thì dùng giá gốc
+        const pricing = await this.contractService.getCurrentContractPricing(
+          b.contractId!,
+        );
+        
         const invoice: CreateInvoiceDto = {
           contractId: b.contractId!,
           dueDate: formatVN(b.firstRentDueAt!, 'yyyy-MM-dd'),
           items: [
             {
               description: 'First month rent payment',
-              amount: isRoom
-                ? (b.room?.roomType?.price ?? 0)
-                : (b.property?.price ?? 0),
+              amount: pricing.monthlyRent,
             },
           ],
           billingPeriod: formatVN(b.firstRentDueAt!, 'yyyy-MM'),
@@ -783,11 +786,15 @@ export class BookingService {
         return;
       }
 
-      // Calculate monthly rent amount from property
-      const monthlyRent = contract.property?.price || 0;
+      // Calculate monthly rent amount from ContractExtension or property
+      const pricing = await this.contractService.getCurrentContractPricing(
+        contract.id,
+      );
+      const monthlyRent = pricing.monthlyRent;
+      
       if (!monthlyRent) {
         console.warn(
-          `Cannot create invoice: missing price for property ${contract.property?.id}`,
+          `Cannot create invoice: missing price for contract ${contract.id}`,
         );
         return;
       }
