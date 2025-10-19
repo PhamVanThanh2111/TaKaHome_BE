@@ -18,6 +18,8 @@ import { PaymentPurpose } from '../common/enums/payment-purpose.enum';
 import { EscrowService } from '../escrow/escrow.service';
 import { BookingService } from '../booking/booking.service';
 import { BlockchainService } from '../blockchain/blockchain.service';
+import { ContractService } from '../contract/contract.service';
+import { ExtensionStatus } from '../contract/entities/contract-extension.entity';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import {
   addMinutesVN,
@@ -42,6 +44,7 @@ export class PaymentService {
     private readonly escrowService: EscrowService,
     private readonly bookingService: BookingService,
     private readonly blockchainService: BlockchainService,
+    private readonly contractService: ContractService,
   ) {}
 
   /** API chính để khởi tạo thanh toán từ invoice */
@@ -141,6 +144,9 @@ export class PaymentService {
     }>
   > {
     const { contractId, amount, method, purpose } = dto;
+
+    // Validate extension escrow payments
+    await this.validateExtensionEscrowPayment(dto, ctx.userId);
 
     // 1) Tạo bản ghi Payment PENDING (mặc định)
     let payment = this.paymentRepository.create({
@@ -629,6 +635,15 @@ export class PaymentService {
       return;
     }
 
+    // Xử lý extension escrow deposits
+    if (
+      payment.purpose === PaymentPurpose.TENANT_EXTENSION_ESCROW_DEPOSIT ||
+      payment.purpose === PaymentPurpose.LANDLORD_EXTENSION_ESCROW_DEPOSIT
+    ) {
+      await this.handleExtensionEscrowDeposit(payment);
+      return;
+    }
+
     if (payment.purpose === PaymentPurpose.FIRST_MONTH_RENT) {
       // Link with existing invoice (invoice should be created when dual escrow funded)
       await this.linkPaymentWithInvoice(payment);
@@ -1035,5 +1050,117 @@ export class PaymentService {
         },
         {} as Record<string, string>,
       );
+  }
+
+  /**
+   * Validate extension escrow payment
+   */
+  private async validateExtensionEscrowPayment(
+    dto: CreatePaymentDto,
+    userId: string,
+  ): Promise<void> {
+    if (
+      dto.purpose !== PaymentPurpose.TENANT_EXTENSION_ESCROW_DEPOSIT &&
+      dto.purpose !== PaymentPurpose.LANDLORD_EXTENSION_ESCROW_DEPOSIT
+    ) {
+      return; // Không phải extension escrow, skip validation
+    }
+
+    if (!dto.contractId) {
+      throw new BadRequestException(
+        'Contract ID is required for extension escrow deposits',
+      );
+    }
+
+    // Lấy contract với extension relations
+    const contract = await this.contractService.findRawById(dto.contractId);
+    if (!contract) {
+      throw new BadRequestException('Contract not found');
+    }
+    console.log(contract.extensions);
+
+    // Tìm extension đang AWAITING_ESCROW hoặc đã có 1 bên funded
+    const activeExtension = contract.extensions?.find(
+      (ext) =>
+        ext.status === ExtensionStatus.AWAITING_ESCROW ||
+        ext.status === ExtensionStatus.ESCROW_FUNDED_T ||
+        ext.status === ExtensionStatus.ESCROW_FUNDED_L,
+    );
+
+    if (!activeExtension) {
+      throw new BadRequestException(
+        'No active extension awaiting escrow deposits for this contract',
+      );
+    }
+
+    // Validate user permission
+    if (dto.purpose === PaymentPurpose.TENANT_EXTENSION_ESCROW_DEPOSIT) {
+      if (contract.tenant.id !== userId) {
+        throw new BadRequestException(
+          'Only tenant can pay tenant extension escrow deposit',
+        );
+      }
+      if (activeExtension.tenantEscrowDepositFundedAt) {
+        throw new BadRequestException(
+          'Tenant extension escrow deposit already paid',
+        );
+      }
+    } else {
+      if (contract.landlord.id !== userId) {
+        throw new BadRequestException(
+          'Only landlord can pay landlord extension escrow deposit',
+        );
+      }
+      if (activeExtension.landlordEscrowDepositFundedAt) {
+        throw new BadRequestException(
+          'Landlord extension escrow deposit already paid',
+        );
+      }
+    }
+  }
+
+  /**
+   * Handle extension escrow deposit payment
+   */
+  private async handleExtensionEscrowDeposit(payment: Payment): Promise<void> {
+    if (!payment.contract) {
+      return;
+    }
+
+    // Tìm extension đang awaiting escrow
+    const contract = await this.contractService.findRawById(
+      payment.contract.id,
+    );
+    if (!contract) {
+      return;
+    }
+
+    const activeExtension = contract.extensions?.find(
+      (ext) =>
+        ext.status === ExtensionStatus.AWAITING_ESCROW ||
+        ext.status === ExtensionStatus.ESCROW_FUNDED_T ||
+        ext.status === ExtensionStatus.ESCROW_FUNDED_L,
+    );
+
+    if (!activeExtension) {
+      console.warn(
+        `No active extension found for payment ${payment.id}, contract ${payment.contract.id}`,
+      );
+      return;
+    }
+
+    // Credit vào escrow account
+    await this.escrowService.creditDepositFromPayment(payment.id);
+
+    // Cập nhật extension status
+    if (payment.purpose === PaymentPurpose.TENANT_EXTENSION_ESCROW_DEPOSIT) {
+      await this.contractService.markExtensionTenantEscrowFunded(
+        activeExtension.id,
+      );
+    } else {
+      await this.contractService.markExtensionLandlordEscrowFunded(
+        activeExtension.id,
+      );
+    }
   }
 }

@@ -13,6 +13,7 @@ import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
 import { Contract } from './entities/contract.entity';
+import { ExtensionStatus } from './entities/contract-extension.entity';
 import {
   ContractTerminationService,
   TerminationResult,
@@ -407,7 +408,7 @@ export class ContractService {
   async findRawById(id: string): Promise<Contract | null> {
     return this.contractRepository.findOne({
       where: { id },
-      relations: ['tenant', 'landlord', 'property'],
+      relations: ['tenant', 'landlord', 'property', 'extensions'],
     });
   }
 
@@ -906,5 +907,139 @@ export class ContractService {
         `Dispute resolution failed: ${error.message}`,
       );
     }
+  }
+
+  /**
+   * Lấy giá hiện tại của contract, ưu tiên giá từ ContractExtension nếu có
+   */
+  async getCurrentContractPricing(contractId: string): Promise<{
+    monthlyRent: number;
+    electricityPrice?: number;
+    waterPrice?: number;
+  }> {
+    const contract = await this.contractRepository.findOne({
+      where: { id: contractId },
+      relations: ['extensions', 'property', 'room', 'room.roomType'],
+    });
+
+    if (!contract) {
+      throw new NotFoundException('Contract not found');
+    }
+
+    // Tìm extension được active gần nhất
+    const activeExtension = contract.extensions
+      ?.filter((ext) => ext.status === ExtensionStatus.ACTIVE)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+
+    if (activeExtension && activeExtension.newMonthlyRent) {
+      // Sử dụng giá từ ContractExtension
+      return {
+        monthlyRent: activeExtension.newMonthlyRent,
+        electricityPrice: activeExtension.newElectricityPrice,
+        waterPrice: activeExtension.newWaterPrice,
+      };
+    }
+
+    // Sử dụng giá gốc từ Property/RoomType
+    if (contract.room) {
+      // BOARDING: Lấy giá từ RoomType
+      return {
+        monthlyRent: contract.room.roomType?.price || 0,
+        electricityPrice: contract.property?.electricityPricePerKwh,
+        waterPrice: contract.property?.waterPricePerM3,
+      };
+    } else {
+      // HOUSING/APARTMENT: Lấy giá từ Property
+      return {
+        monthlyRent: contract.property?.price || 0,
+        electricityPrice: contract.property?.electricityPricePerKwh,
+        waterPrice: contract.property?.waterPricePerM3,
+      };
+    }
+  }
+
+  /**
+   * Mark tenant extension escrow as funded
+   */
+  async markExtensionTenantEscrowFunded(extensionId: string): Promise<void> {
+    const extension = await this.contractRepository
+      .createQueryBuilder('contract')
+      .leftJoinAndSelect('contract.extensions', 'extension')
+      .where('extension.id = :extensionId', { extensionId })
+      .getOne();
+
+    const ext = extension?.extensions?.find((e) => e.id === extensionId);
+    if (!ext) {
+      throw new NotFoundException('Extension not found');
+    }
+
+    ext.tenantEscrowDepositFundedAt = vnNow();
+    
+    // Check if both escrows are funded
+    if (ext.landlordEscrowDepositFundedAt) {
+      ext.status = ExtensionStatus.DUAL_ESCROW_FUNDED;
+      ext.activatedAt = vnNow();
+      // Apply extension to contract
+      await this.applyActiveExtension(extension!.id, ext);
+    } else {
+      ext.status = ExtensionStatus.ESCROW_FUNDED_T;
+    }
+
+    await this.contractRepository.manager
+      .getRepository('ContractExtension')
+      .save(ext);
+  }
+
+  /**
+   * Mark landlord extension escrow as funded
+   */
+  async markExtensionLandlordEscrowFunded(extensionId: string): Promise<void> {
+    const extension = await this.contractRepository
+      .createQueryBuilder('contract')
+      .leftJoinAndSelect('contract.extensions', 'extension')
+      .where('extension.id = :extensionId', { extensionId })
+      .getOne();
+
+    const ext = extension?.extensions?.find((e) => e.id === extensionId);
+    if (!ext) {
+      throw new NotFoundException('Extension not found');
+    }
+
+    ext.landlordEscrowDepositFundedAt = vnNow();
+    
+    // Check if both escrows are funded
+    if (ext.tenantEscrowDepositFundedAt) {
+      ext.status = ExtensionStatus.ACTIVE;
+      // Apply extension to contract
+      await this.applyActiveExtension(extension!.id, ext);
+    } else {
+      ext.status = ExtensionStatus.ESCROW_FUNDED_L;
+    }
+
+    await this.contractRepository.manager
+      .getRepository('ContractExtension')
+      .save(ext);
+  }
+
+  /**
+   * Apply active extension to contract (update endDate and pricing)
+   */
+  private async applyActiveExtension(
+    contractId: string,
+    extension: any,
+  ): Promise<void> {
+    const contract = await this.contractRepository.findOne({
+      where: { id: contractId },
+    });
+
+    if (!contract) {
+      throw new NotFoundException('Contract not found');
+    }
+
+    // Gia hạn contract
+    const newEndDate = addMonthsFn(contract.endDate, extension.extensionMonths);
+    contract.endDate = newEndDate;
+
+    await this.contractRepository.save(contract);
   }
 }

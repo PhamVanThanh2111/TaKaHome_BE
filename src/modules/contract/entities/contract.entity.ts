@@ -5,11 +5,13 @@ import {
   ManyToOne,
   CreateDateColumn,
   UpdateDateColumn,
+  OneToMany,
 } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { Property } from '../../property/entities/property.entity';
 import { ContractStatusEnum } from '../../common/enums/contract-status.enum';
 import { Room } from 'src/modules/property/entities/room.entity';
+import { ContractExtension } from './contract-extension.entity';
 
 @Entity()
 export class Contract {
@@ -58,6 +60,9 @@ export class Contract {
 
   @Column({ nullable: true })
   transactionIdLandlordSign: string;
+
+  @OneToMany(() => ContractExtension, (extension) => extension.contract)
+  extensions: ContractExtension[];
 
   @CreateDateColumn({
     type: 'timestamptz',

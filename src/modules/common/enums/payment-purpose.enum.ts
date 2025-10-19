@@ -4,4 +4,6 @@ export enum PaymentPurpose {
   LANDLORD_ESCROW_DEPOSIT = 'LANDLORD_ESCROW_DEPOSIT', // chủ nhà nộp cọc
   FIRST_MONTH_RENT = 'FIRST_MONTH_RENT', // Tiền thuê tháng đầu
   MONTHLY_RENT = 'MONTHLY_RENT', // Tiền thuê hàng tháng
+  TENANT_EXTENSION_ESCROW_DEPOSIT = 'TENANT_EXTENSION_ESCROW_DEPOSIT', // người thuê nộp cọc gia hạn
+  LANDLORD_EXTENSION_ESCROW_DEPOSIT = 'LANDLORD_EXTENSION_ESCROW_DEPOSIT', // chủ nhà nộp cọc gia hạn
 }
