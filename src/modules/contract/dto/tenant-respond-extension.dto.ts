@@ -5,12 +5,12 @@ import { ExtensionStatus } from '../entities/contract-extension.entity';
 export class TenantRespondExtensionDto {
   @ApiProperty({
     description: 'Phản hồi của người thuê (đồng ý hoặc từ chối giá mới)',
-    enum: [ExtensionStatus.APPROVED, ExtensionStatus.REJECTED],
-    example: ExtensionStatus.APPROVED,
+    enum: [ExtensionStatus.AWAITING_SIGNATURES, ExtensionStatus.REJECTED],
+    example: ExtensionStatus.AWAITING_SIGNATURES,
   })
   @IsNotEmpty()
-  @IsEnum([ExtensionStatus.APPROVED, ExtensionStatus.REJECTED])
-  status: ExtensionStatus.APPROVED | ExtensionStatus.REJECTED;
+  @IsEnum([ExtensionStatus.AWAITING_SIGNATURES, ExtensionStatus.REJECTED])
+  status: ExtensionStatus.AWAITING_SIGNATURES | ExtensionStatus.REJECTED;
 
   @ApiProperty({
     description: 'Ghi chú từ người thuê',

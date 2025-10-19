@@ -12,7 +12,13 @@ import { Contract } from './contract.entity';
 export enum ExtensionStatus {
   PENDING = 'PENDING', // Tenant vừa gửi yêu cầu gia hạn
   LANDLORD_RESPONDED = 'LANDLORD_RESPONDED', // Landlord đã phản hồi với giá mới, chờ tenant đồng ý
-  APPROVED = 'APPROVED', // Tenant đã đồng ý với giá, extension được áp dụng
+  AWAITING_SIGNATURES = 'AWAITING_SIGNATURES', // Tenant đã đồng ý với giá, chờ ký hợp đồng
+  LANDLORD_SIGNED = 'LANDLORD_SIGNED', // Landlord đã ký, chờ tenant ký
+  AWAITING_ESCROW = 'AWAITING_ESCROW', // Chờ đóng ký quỹ
+  ESCROW_FUNDED_T = 'ESCROW_FUNDED_T',
+  ESCROW_FUNDED_L = 'ESCROW_FUNDED_L',
+  DUAL_ESCROW_FUNDED = 'DUAL_ESCROW_FUNDED',
+  ACTIVE = 'ACTIVE', // Extension đã có hiệu lực
   REJECTED = 'REJECTED', // Landlord từ chối hoặc tenant không đồng ý với giá
   CANCELLED = 'CANCELLED', // Tenant hủy yêu cầu
 }
@@ -56,6 +62,35 @@ export class ContractExtension {
 
   @Column({ type: 'timestamptz', nullable: true })
   respondedAt?: Date; // Thời gian chủ nhà phản hồi
+
+  // Ký hợp đồng gia hạn
+  @Column({ nullable: true })
+  extensionContractFileUrl?: string; // URL file hợp đồng gia hạn
+
+  @Column({ nullable: true })
+  landlordSignedAt?: Date; // Thời gian chủ nhà ký
+
+  @Column({ nullable: true })
+  tenantSignedAt?: Date; // Thời gian tenant ký
+
+  @Column({ nullable: true })
+  transactionIdLandlordSign?: string; // Transaction ID khi landlord ký
+
+  @Column({ nullable: true })
+  transactionIdTenantSign?: string; // Transaction ID khi tenant ký
+
+  // Ký quỹ
+  @Column({ nullable: true })
+  escrowDepositDueAt?: Date; // Hạn đóng ký quỹ
+
+  @Column({ nullable: true })
+  tenantEscrowDepositFundedAt?: Date; // Thời gian tenant đóng ký quỹ
+
+  @Column({ nullable: true })
+  landlordEscrowDepositFundedAt?: Date; // Thời gian landlord đóng ký quỹ
+
+  @Column({ nullable: true })
+  activatedAt?: Date; // Thời gian extension có hiệu lực
 
   @CreateDateColumn({
     type: 'timestamptz',

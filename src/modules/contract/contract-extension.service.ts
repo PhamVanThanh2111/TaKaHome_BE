@@ -17,7 +17,12 @@ import { RespondContractExtensionDto } from './dto/respond-contract-extension.dt
 import { TenantRespondExtensionDto } from './dto/tenant-respond-extension.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { vnNow } from '../../common/datetime';
-import { addMonths } from 'date-fns';
+import { addMonths, addHours } from 'date-fns';
+import { SmartCAService } from '../smartca/smartca.service';
+import { S3StorageService } from '../s3-storage/s3-storage.service';
+import { User } from '../user/entities/user.entity';
+import * as path from 'path';
+import * as fs from 'fs';
 
 @Injectable()
 export class ContractExtensionService {
@@ -26,6 +31,10 @@ export class ContractExtensionService {
     private extensionRepository: Repository<ContractExtension>,
     @InjectRepository(Contract)
     private contractRepository: Repository<Contract>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
+    private smartcaService: SmartCAService,
+    private s3StorageService: S3StorageService,
   ) {}
 
   async requestExtension(
@@ -131,8 +140,8 @@ export class ContractExtensionService {
     extension.responseNote = dto.responseNote;
     extension.respondedAt = vnNow();
 
-    // Cập nhật giá mới từ landlord
     if (dto.status === ExtensionStatus.LANDLORD_RESPONDED) {
+      // Cập nhật giá mới từ landlord
       if (dto.newMonthlyRent !== undefined) {
         extension.newMonthlyRent = dto.newMonthlyRent;
       }
@@ -266,19 +275,241 @@ export class ContractExtensionService {
         : `[Tenant response]: ${dto.note}`;
     }
 
-    // Nếu tenant đồng ý, áp dụng extension
-    if (dto.status === ExtensionStatus.APPROVED) {
-      await this.applyExtension(extension);
+    // Nếu tenant đồng ý, chuyển sang trạng thái chờ ký hợp đồng
+    if (dto.status === ExtensionStatus.AWAITING_SIGNATURES) {
+      extension.status = ExtensionStatus.AWAITING_SIGNATURES;
+    } else {
+      extension.status = ExtensionStatus.REJECTED;
     }
 
     const saved = await this.extensionRepository.save(extension);
 
     return new ResponseCommon(
       200,
-      dto.status === ExtensionStatus.APPROVED
-        ? 'Extension approved and applied successfully'
+      dto.status === ExtensionStatus.AWAITING_SIGNATURES
+        ? 'Extension approved, ready for signing'
         : 'Extension rejected successfully',
       saved,
     );
+  }
+
+  /**
+   * Landlord ký hợp đồng gia hạn
+   */
+  async landlordSignExtension(
+    extensionId: string,
+    userId: string,
+  ): Promise<ResponseCommon<ContractExtension>> {
+    const extension = await this.extensionRepository.findOne({
+      where: { id: extensionId },
+      relations: ['contract', 'contract.tenant', 'contract.landlord'],
+    });
+
+    if (!extension) {
+      throw new NotFoundException('Extension request not found');
+    }
+
+    // Chỉ landlord mới có thể ký
+    if (extension.contract.landlord.id !== userId) {
+      throw new ForbiddenException('Only landlord can sign extension contract');
+    }
+
+    // Extension phải ở trạng thái AWAITING_SIGNATURES
+    if (extension.status !== ExtensionStatus.AWAITING_SIGNATURES) {
+      throw new BadRequestException(
+        'Extension is not ready for landlord signing',
+      );
+    }
+
+    try {
+      // Read PDF file từ assets
+      const pdfPath = path.join(
+        process.cwd(),
+        'src',
+        'assets',
+        'contracts',
+        'HopDongChoThueNhaNguyenCan.pdf',
+      );
+
+      if (!fs.existsSync(pdfPath)) {
+        throw new BadRequestException(`PDF file not found at: ${pdfPath}`);
+      }
+
+      const pdfBuffer = fs.readFileSync(pdfPath);
+      const landlord = await this.userRepository.findOne({
+        where: { id: userId },
+      });
+
+      // Landlord ký hợp đồng gia hạn (signatureIndex: 0)
+      const signResult = await this.smartcaService.signPdfOneShot({
+        pdfBuffer,
+        signatureIndex: 0,
+        userIdOverride: landlord?.CCCD,
+        contractId: extension.contract.id,
+        intervalMs: 2000,
+        timeoutMs: 120000,
+        reason: 'Contract Extension Landlord Signature',
+        location: 'Vietnam',
+        contactInfo: '',
+        signerName: 'Landlord Extension Signature',
+        creator: 'SmartCA VNPT 2025',
+      });
+
+      if (!signResult.success) {
+        throw new BadRequestException(
+          `Landlord extension signing failed: ${signResult.error}`,
+        );
+      }
+
+      // Upload signed PDF to S3
+      if (signResult.signedPdf) {
+        const uploadResult = await this.s3StorageService.uploadContractPdf(
+          signResult.signedPdf,
+          {
+            contractId: extension.contract.id,
+            role: 'LANDLORD',
+            signatureIndex: 0,
+            metadata: {
+              extensionId: extension.id,
+              transactionId: signResult.transactionId || '',
+              docId: signResult.docId || '',
+              uploadedBy: 'system',
+              signedAt: new Date().toISOString(),
+              contractType: 'extension',
+            },
+          },
+        );
+
+        extension.extensionContractFileUrl = uploadResult.url;
+      }
+
+      // Cập nhật extension
+      extension.status = ExtensionStatus.LANDLORD_SIGNED;
+      extension.landlordSignedAt = vnNow();
+      extension.transactionIdLandlordSign = signResult.transactionId;
+
+      const saved = await this.extensionRepository.save(extension);
+
+      return new ResponseCommon(
+        200,
+        'Landlord signed extension successfully',
+        saved,
+      );
+    } catch (error) {
+      console.error('[LandlordSignExtension] ❌ Failed:', error);
+      throw new BadRequestException(
+        `Failed to complete landlord extension signing: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+  }
+
+  /**
+   * Tenant ký hợp đồng gia hạn
+   */
+  async tenantSignExtension(
+    extensionId: string,
+    userId: string,
+  ): Promise<ResponseCommon<ContractExtension>> {
+    const extension = await this.extensionRepository.findOne({
+      where: { id: extensionId },
+      relations: ['contract', 'contract.tenant', 'contract.landlord'],
+    });
+
+    if (!extension) {
+      throw new NotFoundException('Extension request not found');
+    }
+
+    // Chỉ tenant mới có thể ký
+    if (extension.contract.tenant.id !== userId) {
+      throw new ForbiddenException('Only tenant can sign extension contract');
+    }
+
+    // Extension phải ở trạng thái LANDLORD_SIGNED
+    if (extension.status !== ExtensionStatus.LANDLORD_SIGNED) {
+      throw new BadRequestException(
+        'Landlord must sign the extension contract first',
+      );
+    }
+
+    if (!extension.extensionContractFileUrl) {
+      throw new BadRequestException(
+        'Extension contract file URL not found. Landlord must sign first.',
+      );
+    }
+
+    try {
+      // Download landlord-signed PDF from S3
+      const s3Key = this.s3StorageService.extractKeyFromUrl(
+        extension.extensionContractFileUrl,
+      );
+      const landlordSignedPdf = await this.s3StorageService.downloadFile(s3Key);
+
+      const tenant = await this.userRepository.findOne({
+        where: { id: userId },
+      });
+
+      // Tenant ký hợp đồng gia hạn (signatureIndex: 1)
+      const signResult = await this.smartcaService.signPdfOneShot({
+        pdfBuffer: landlordSignedPdf,
+        signatureIndex: 1,
+        userIdOverride: tenant?.CCCD,
+        contractId: extension.contract.id,
+        intervalMs: 2000,
+        timeoutMs: 120000,
+        reason: 'Contract Extension Tenant Signature',
+        location: 'Vietnam',
+        contactInfo: '',
+        signerName: 'Tenant Extension Signature',
+        creator: 'SmartCA VNPT 2025',
+      });
+
+      if (!signResult.success) {
+        throw new BadRequestException(
+          `Tenant extension signing failed: ${signResult.error}`,
+        );
+      }
+
+      // Upload fully-signed PDF to S3
+      if (signResult.signedPdf) {
+        const uploadResult = await this.s3StorageService.uploadContractPdf(
+          signResult.signedPdf,
+          {
+            contractId: extension.contract.id,
+            role: 'TENANT',
+            signatureIndex: 1,
+            metadata: {
+              extensionId: extension.id,
+              transactionId: signResult.transactionId || '',
+              docId: signResult.docId || '',
+              uploadedBy: 'system',
+              signedAt: new Date().toISOString(),
+              contractType: 'extension',
+              fullySignedExtension: 'true',
+            },
+          },
+        );
+
+        extension.extensionContractFileUrl = uploadResult.url;
+      }
+
+      // Cập nhật extension và set deadline cho ký quỹ (24 giờ)
+      extension.status = ExtensionStatus.AWAITING_ESCROW;
+      extension.tenantSignedAt = vnNow();
+      extension.transactionIdTenantSign = signResult.transactionId;
+      extension.escrowDepositDueAt = addHours(vnNow(), 24);
+
+      const saved = await this.extensionRepository.save(extension);
+
+      return new ResponseCommon(
+        200,
+        'Tenant signed extension successfully',
+        saved,
+      );
+    } catch (error) {
+      console.error('[TenantSignExtension] ❌ Failed:', error);
+      throw new BadRequestException(
+        `Failed to complete tenant extension signing: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
   }
 }

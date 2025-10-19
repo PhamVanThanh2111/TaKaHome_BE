@@ -209,4 +209,33 @@ export class ContractController {
   ) {
     return this.contractExtensionService.cancelExtension(extensionId, user.id);
   }
+
+  // Extension Signing Endpoints
+  @Patch('extensions/:id/landlord-sign')
+  @ApiOperation({ summary: 'Chủ nhà ký hợp đồng gia hạn' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Ký thành công' })
+  @Roles(RoleEnum.LANDLORD)
+  landlordSignExtension(
+    @Param('id') extensionId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.contractExtensionService.landlordSignExtension(
+      extensionId,
+      user.id,
+    );
+  }
+
+  @Patch('extensions/:id/tenant-sign')
+  @ApiOperation({ summary: 'Người thuê ký hợp đồng gia hạn' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Ký thành công' })
+  @Roles(RoleEnum.TENANT)
+  tenantSignExtension(
+    @Param('id') extensionId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.contractExtensionService.tenantSignExtension(
+      extensionId,
+      user.id,
+    );
+  }
 }
