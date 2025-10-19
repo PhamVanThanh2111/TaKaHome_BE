@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Contract } from './entities/contract.entity';
+import { ContractExtension } from './entities/contract-extension.entity';
 import { ContractService } from './contract.service';
+import { ContractExtensionService } from './contract-extension.service';
 import { ContractController } from './contract.controller';
 import { BlockchainModule } from '../blockchain/blockchain.module';
 import { S3StorageModule } from '../s3-storage/s3-storage.module';
@@ -14,7 +16,7 @@ import { WalletModule } from '../wallet/wallet.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Contract, Booking]),
+    TypeOrmModule.forFeature([Contract, ContractExtension, Booking]),
     BlockchainModule,
     S3StorageModule,
     EscrowModule,
@@ -24,6 +26,7 @@ import { WalletModule } from '../wallet/wallet.module';
   controllers: [ContractController],
   providers: [
     ContractService,
+    ContractExtensionService,
     ContractTerminationService,
     DisputeHandlingService,
   ],

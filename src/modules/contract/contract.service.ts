@@ -13,6 +13,7 @@ import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
 import { Contract } from './entities/contract.entity';
+import { ExtensionStatus } from './entities/contract-extension.entity';
 import {
   ContractTerminationService,
   TerminationResult,
@@ -905,6 +906,55 @@ export class ContractService {
       throw new BadRequestException(
         `Dispute resolution failed: ${error.message}`,
       );
+    }
+  }
+
+  /**
+   * Lấy giá hiện tại của contract, ưu tiên giá từ ContractExtension nếu có
+   */
+  async getCurrentContractPricing(contractId: string): Promise<{
+    monthlyRent: number;
+    electricityPrice?: number;
+    waterPrice?: number;
+  }> {
+    const contract = await this.contractRepository.findOne({
+      where: { id: contractId },
+      relations: ['extensions', 'property', 'room', 'room.roomType'],
+    });
+
+    if (!contract) {
+      throw new NotFoundException('Contract not found');
+    }
+
+    // Tìm extension được approve gần nhất
+    const approvedExtension = contract.extensions
+      ?.filter((ext) => ext.status === ExtensionStatus.APPROVED)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+
+    if (approvedExtension && approvedExtension.newMonthlyRent) {
+      // Sử dụng giá từ ContractExtension
+      return {
+        monthlyRent: approvedExtension.newMonthlyRent,
+        electricityPrice: approvedExtension.newElectricityPrice,
+        waterPrice: approvedExtension.newWaterPrice,
+      };
+    }
+
+    // Sử dụng giá gốc từ Property/RoomType
+    if (contract.room) {
+      // BOARDING: Lấy giá từ RoomType
+      return {
+        monthlyRent: contract.room.roomType?.price || 0,
+        electricityPrice: contract.property?.electricityPricePerKwh,
+        waterPrice: contract.property?.waterPricePerM3,
+      };
+    } else {
+      // HOUSING/APARTMENT: Lấy giá từ Property
+      return {
+        monthlyRent: contract.property?.price || 0,
+        electricityPrice: contract.property?.electricityPricePerKwh,
+        waterPrice: contract.property?.waterPricePerM3,
+      };
     }
   }
 }

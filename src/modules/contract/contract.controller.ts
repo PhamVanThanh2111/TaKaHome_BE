@@ -10,8 +10,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ContractService } from './contract.service';
+import { ContractExtensionService } from './contract-extension.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
+import { CreateContractExtensionDto } from './dto/create-contract-extension.dto';
+import { RespondContractExtensionDto } from './dto/respond-contract-extension.dto';
+import { TenantRespondExtensionDto } from './dto/tenant-respond-extension.dto';
 import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ContractResponseDto } from './dto/contract-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
@@ -19,12 +23,16 @@ import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { JwtUser } from '../core/auth/strategies/jwt.strategy';
+import { RoleEnum } from '../common/enums/role.enum';
 
 @Controller('contracts')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ContractController {
-  constructor(private readonly contractService: ContractService) {}
+  constructor(
+    private readonly contractService: ContractService,
+    private readonly contractExtensionService: ContractExtensionService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -136,5 +144,69 @@ export class ContractController {
     @CurrentUser() user: JwtUser,
   ) {
     return this.contractService.getContractFileUrl(contractId, user.id);
+  }
+
+  // Contract Extension Endpoints
+  @Post('extensions')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Yêu cầu gia hạn hợp đồng (Tenant)' })
+  @Roles(RoleEnum.TENANT)
+  requestExtension(
+    @Body() dto: CreateContractExtensionDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.contractExtensionService.requestExtension(dto, user.id);
+  }
+
+  @Patch('extensions/:id/respond')
+  @ApiOperation({ summary: 'Phản hồi yêu cầu gia hạn (Landlord)' })
+  @Roles(RoleEnum.LANDLORD)
+  respondToExtension(
+    @Param('id') extensionId: string,
+    @Body() dto: RespondContractExtensionDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.contractExtensionService.respondToExtension(
+      extensionId,
+      dto,
+      user.id,
+    );
+  }
+
+  @Patch('extensions/:id/tenant-respond')
+  @ApiOperation({ summary: 'Tenant đồng ý hoặc từ chối giá mới' })
+  @Roles(RoleEnum.TENANT)
+  tenantRespondToExtension(
+    @Param('id') extensionId: string,
+    @Body() dto: TenantRespondExtensionDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.contractExtensionService.tenantRespondToExtension(
+      extensionId,
+      dto,
+      user.id,
+    );
+  }
+
+  @Get(':id/extensions')
+  @ApiOperation({ summary: 'Lấy danh sách gia hạn của hợp đồng' })
+  getContractExtensions(
+    @Param('id') contractId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.contractExtensionService.getContractExtensions(
+      contractId,
+      user.id,
+    );
+  }
+
+  @Patch('extensions/:id/cancel')
+  @ApiOperation({ summary: 'Hủy yêu cầu gia hạn (Tenant)' })
+  @Roles(RoleEnum.TENANT)
+  cancelExtension(
+    @Param('id') extensionId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.contractExtensionService.cancelExtension(extensionId, user.id);
   }
 }
