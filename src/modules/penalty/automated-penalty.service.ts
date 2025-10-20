@@ -1218,6 +1218,139 @@ export class AutomatedPenaltyService {
   }
 
   /**
+   * Process pending signature timeouts - cancel bookings if tenant doesn't sign within 30 minutes
+   */
+  async processPendingSignatureTimeouts(): Promise<void> {
+    try {
+      this.logger.log('📝 Checking for pending signature timeouts...');
+
+      const now = vnNow();
+      const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000); // 30 minutes ago
+
+      // Find bookings that are PENDING_SIGNATURE and created more than 30 minutes ago
+      const timeoutBookings = await this.bookingRepository.find({
+        where: {
+          status: BookingStatus.PENDING_SIGNATURE,
+        },
+        relations: ['tenant', 'property', 'property.landlord', 'contract'],
+      });
+
+      let cancelledBookings = 0;
+
+      for (const booking of timeoutBookings) {
+        // Check if booking was updated to PENDING_SIGNATURE more than 30 minutes ago
+        if (booking.updatedAt <= thirtyMinutesAgo) {
+          const minutesOverdue = Math.floor(
+            (now.getTime() - booking.updatedAt.getTime()) / (1000 * 60),
+          );
+
+          this.logger.log(
+            `📅 Found pending signature timeout: booking ${booking.id}, ${minutesOverdue} minutes overdue`,
+          );
+
+          const cancelled = await this.cancelBookingForPendingSignatureTimeout(
+            booking,
+            minutesOverdue,
+          );
+          if (cancelled) {
+            cancelledBookings++;
+          }
+        }
+      }
+
+      this.logger.log(
+        `✅ Processed pending signature timeouts: ${cancelledBookings} bookings cancelled`,
+      );
+    } catch (error) {
+      this.logger.error(
+        '❌ Failed to process pending signature timeouts:',
+        error,
+      );
+    }
+  }
+
+  /**
+   * Cancel booking and contract if tenant doesn't sign within 30 minutes
+   */
+  async cancelBookingForPendingSignatureTimeout(
+    booking: Booking,
+    minutesOverdue: number,
+  ): Promise<boolean> {
+    try {
+      if (!booking.contractId) {
+        this.logger.warn(
+          `Cannot cancel booking for signature timeout: missing contract for booking ${booking.id}`,
+        );
+        return false;
+      }
+
+      // Use ContractTerminationService for proper cleanup
+      const reason = `Tenant không ký hợp đồng trong vòng 30 phút (trễ ${minutesOverdue} phút)`;
+      await this.contractTerminationService.terminateContract(
+        booking.contractId,
+        reason,
+        'system',
+      );
+
+      // Send notifications to both parties
+      await this.sendPendingSignatureTimeoutNotifications(
+        booking,
+        minutesOverdue,
+      );
+
+      this.logger.log(
+        `✅ Booking ${booking.id} cancelled due to pending signature timeout (${minutesOverdue} minutes)`,
+      );
+
+      return true;
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to cancel booking ${booking.id} for pending signature timeout:`,
+        error,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Send notifications for pending signature timeout cancellation
+   */
+  private async sendPendingSignatureTimeoutNotifications(
+    booking: Booking,
+    minutesOverdue: number,
+  ): Promise<void> {
+    try {
+      const tenantId = booking.tenant?.id;
+      const landlordId = booking.property?.landlord?.id;
+
+      // Notify tenant about cancellation
+      if (tenantId) {
+        await this.notificationService.create({
+          userId: tenantId,
+          type: NotificationTypeEnum.GENERAL,
+          title: '⏰ Hợp đồng đã bị hủy do quá hạn ký',
+          content: `Hợp đồng thuê căn hộ ${booking.property?.title} đã bị hủy tự động do bạn không ký trong vòng 30 phút. Thời gian trễ: ${minutesOverdue} phút. Bạn có thể tạo yêu cầu thuê mới nếu vẫn muốn thuê căn hộ này.`,
+        });
+      }
+
+      // Notify landlord about cancellation
+      if (landlordId) {
+        await this.notificationService.create({
+          userId: landlordId,
+          type: NotificationTypeEnum.GENERAL,
+          title: '⏰ Hợp đồng đã bị hủy do tenant không ký',
+          content: `Hợp đồng thuê với ${booking.tenant?.fullName} cho căn hộ ${booking.property?.title} đã bị hủy tự động do tenant không ký trong vòng 30 phút. Căn hộ hiện đã sẵn sàng cho thuê lại.`,
+        });
+      }
+    } catch (error) {
+      this.logger.error(
+        '❌ Failed to send pending signature timeout notifications:',
+        error,
+      );
+    }
+  }
+
+  /**
    * Apply penalty to landlord for not handing over within 24 hours
    * Deduct 10% of landlord deposit and cancel contract
    */

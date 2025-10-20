@@ -61,6 +61,29 @@ export class AutomatedPenaltyCron {
   }
 
   /**
+   * Run every 5 minutes to check for pending signature timeouts (30 minute limit)
+   */
+  @Cron('*/5 * * * *', {
+    name: 'process-pending-signature-timeouts',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
+  async processPendingSignatureTimeouts(): Promise<void> {
+    this.logger.log(
+      '📝 Checking for pending signature timeouts (30 minute limit)...',
+    );
+
+    try {
+      await this.penaltyService.processPendingSignatureTimeouts();
+      this.logger.log('✅ Pending signature timeout processing completed');
+    } catch (error) {
+      this.logger.error(
+        '❌ Failed to process pending signature timeouts:',
+        error,
+      );
+    }
+  }
+
+  /**
    * Run every day at 10:00 AM to check for monthly payment overdue
    */
   @Cron('0 10 * * *', {
@@ -184,6 +207,29 @@ export class AutomatedPenaltyCron {
       return { processed: true };
     } catch (error) {
       this.logger.error('❌ Manual handover processing failed:', error);
+      return {
+        processed: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Manual trigger for pending signature timeout processing (can be called via API if needed)
+   */
+  async triggerPendingSignatureProcessing(): Promise<{
+    processed: boolean;
+    error?: string;
+  }> {
+    try {
+      this.logger.log('🔧 Manual pending signature processing triggered...');
+      await this.penaltyService.processPendingSignatureTimeouts();
+      return { processed: true };
+    } catch (error) {
+      this.logger.error(
+        '❌ Manual pending signature processing failed:',
+        error,
+      );
       return {
         processed: false,
         error: error instanceof Error ? error.message : 'Unknown error',
