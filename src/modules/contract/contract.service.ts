@@ -976,7 +976,7 @@ export class ContractService {
     }
 
     ext.tenantEscrowDepositFundedAt = vnNow();
-    
+
     // Check if both escrows are funded
     if (ext.landlordEscrowDepositFundedAt) {
       ext.status = ExtensionStatus.DUAL_ESCROW_FUNDED;
@@ -1008,10 +1008,11 @@ export class ContractService {
     }
 
     ext.landlordEscrowDepositFundedAt = vnNow();
-    
+
     // Check if both escrows are funded
     if (ext.tenantEscrowDepositFundedAt) {
-      ext.status = ExtensionStatus.ACTIVE;
+      ext.status = ExtensionStatus.DUAL_ESCROW_FUNDED;
+      ext.activatedAt = vnNow();
       // Apply extension to contract
       await this.applyActiveExtension(extension!.id, ext);
     } else {
