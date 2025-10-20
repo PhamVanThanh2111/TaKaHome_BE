@@ -33,6 +33,6 @@ import { SmartCAModule } from '../smartca/smartca.module';
     ContractTerminationService,
     DisputeHandlingService,
   ],
-  exports: [ContractService, TypeOrmModule],
+  exports: [ContractService, ContractTerminationService, TypeOrmModule],
 })
 export class ContractModule {}

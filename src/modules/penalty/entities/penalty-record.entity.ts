@@ -26,7 +26,7 @@ export class PenaltyRecord {
   tenantId: string;
 
   @Column({ type: 'varchar', length: 50 })
-  penaltyType: 'OVERDUE_PAYMENT' | 'MONTHLY_PAYMENT' | 'LATE_DEPOSIT' | 'OTHER';
+  penaltyType: 'OVERDUE_PAYMENT' | 'MONTHLY_PAYMENT' | 'LATE_DEPOSIT' | 'HANDOVER_OVERDUE' | 'OTHER';
 
   @Column({ type: 'varchar', length: 20, nullable: true })
   @Index()

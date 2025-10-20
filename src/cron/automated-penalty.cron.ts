@@ -18,19 +18,45 @@ export class AutomatedPenaltyCron {
 
   /**
    * Run every day at 9:00 AM to check for overdue payments
+   *
+   * PRIMARY RESPONSIBILITY: Handle ALL overdue payment penalties
+   * This is the single source of truth for overdue payment processing
+   * to avoid duplicate penalty applications.
    */
   @Cron('0 9 * * *', {
     name: 'process-overdue-payments',
     timeZone: 'Asia/Ho_Chi_Minh',
   })
   async processOverduePayments(): Promise<void> {
-    this.logger.log('🔍 Starting daily overdue payment processing...');
+    this.logger.log(
+      '🔍 Starting daily overdue payment processing (SINGLE SOURCE OF TRUTH)...',
+    );
 
     try {
       await this.penaltyService.processOverduePayments();
       this.logger.log('✅ Daily overdue payment processing completed');
     } catch (error) {
       this.logger.error('❌ Failed to process overdue payments:', error);
+    }
+  }
+
+  /**
+   * Run every day at 8:00 AM to check for overdue handovers (landlord penalties)
+   */
+  @Cron('0 8 * * *', {
+    name: 'process-overdue-handovers',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
+  async processOverdueHandovers(): Promise<void> {
+    this.logger.log(
+      '🏠 Starting daily handover deadline check (landlord penalties)...',
+    );
+
+    try {
+      await this.penaltyService.processOverdueHandovers();
+      this.logger.log('✅ Daily handover deadline processing completed');
+    } catch (error) {
+      this.logger.error('❌ Failed to process overdue handovers:', error);
     }
   }
 
@@ -42,15 +68,22 @@ export class AutomatedPenaltyCron {
     timeZone: 'Asia/Ho_Chi_Minh',
   })
   async processMonthlyOverduePayments(): Promise<void> {
-    this.logger.log('🔍 [TEST MODE] Starting monthly overdue payment processing every 30 seconds...');
+    this.logger.log(
+      '🔍 Starting monthly overdue payment processing every day at 10:00 AM',
+    );
 
     try {
       const startTime = Date.now();
       await this.penaltyService.processMonthlyOverduePayments();
       const endTime = Date.now();
-      this.logger.log(`✅ [TEST MODE] Monthly overdue payment processing completed in ${endTime - startTime}ms`);
+      this.logger.log(
+        `✅ [TEST MODE] Monthly overdue payment processing completed in ${endTime - startTime}ms`,
+      );
     } catch (error) {
-      this.logger.error('❌ [TEST MODE] Failed to process monthly overdue payments:', error);
+      this.logger.error(
+        '❌ [TEST MODE] Failed to process monthly overdue payments:',
+        error,
+      );
       this.logger.error('Error stack:', error);
     }
   }
@@ -62,7 +95,7 @@ export class AutomatedPenaltyCron {
     name: 'mark-blockchain-overdue',
     timeZone: 'Asia/Ho_Chi_Minh',
   })
-  async markBlockchainOverduePayments(): Promise<void> {
+  markBlockchainOverduePayments(): void {
     this.logger.log('🔍 Checking for blockchain overdue payments...');
 
     try {
@@ -70,7 +103,10 @@ export class AutomatedPenaltyCron {
       // For now, we'll just log that it's running
       this.logger.log('✅ Blockchain overdue payment check completed');
     } catch (error) {
-      this.logger.error('❌ Failed to mark blockchain overdue payments:', error);
+      this.logger.error(
+        '❌ Failed to mark blockchain overdue payments:',
+        error,
+      );
     }
   }
 
@@ -81,7 +117,7 @@ export class AutomatedPenaltyCron {
     name: 'sync-penalty-blockchain',
     timeZone: 'Asia/Ho_Chi_Minh',
   })
-  async syncPenaltyData(): Promise<void> {
+  syncPenaltyData(): void {
     this.logger.log('🔄 Syncing penalty data with blockchain...');
 
     try {
@@ -96,16 +132,19 @@ export class AutomatedPenaltyCron {
   /**
    * Manual trigger for overdue payment processing (can be called via API if needed)
    */
-  async triggerOverdueProcessing(): Promise<{ processed: boolean; error?: string }> {
+  async triggerOverdueProcessing(): Promise<{
+    processed: boolean;
+    error?: string;
+  }> {
     try {
       this.logger.log('🔧 Manual overdue payment processing triggered...');
       await this.penaltyService.processOverduePayments();
       return { processed: true };
     } catch (error) {
       this.logger.error('❌ Manual overdue processing failed:', error);
-      return { 
-        processed: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      return {
+        processed: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
   }
@@ -113,16 +152,41 @@ export class AutomatedPenaltyCron {
   /**
    * Manual trigger for monthly overdue payment processing (can be called via API if needed)
    */
-  async triggerMonthlyOverdueProcessing(): Promise<{ processed: boolean; error?: string }> {
+  async triggerMonthlyOverdueProcessing(): Promise<{
+    processed: boolean;
+    error?: string;
+  }> {
     try {
-      this.logger.log('🔧 Manual monthly overdue payment processing triggered...');
+      this.logger.log(
+        '🔧 Manual monthly overdue payment processing triggered...',
+      );
       await this.penaltyService.processMonthlyOverduePayments();
       return { processed: true };
     } catch (error) {
       this.logger.error('❌ Manual monthly overdue processing failed:', error);
-      return { 
-        processed: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      return {
+        processed: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Manual trigger for handover deadline processing (can be called via API if needed)
+   */
+  async triggerHandoverProcessing(): Promise<{
+    processed: boolean;
+    error?: string;
+  }> {
+    try {
+      this.logger.log('🔧 Manual handover deadline processing triggered...');
+      await this.penaltyService.processOverdueHandovers();
+      return { processed: true };
+    } catch (error) {
+      this.logger.error('❌ Manual handover processing failed:', error);
+      return {
+        processed: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
   }
