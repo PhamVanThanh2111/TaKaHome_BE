@@ -14,6 +14,8 @@ import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { RoleEnum } from '../common/enums/role.enum';
 import { EscrowAdjustDto } from './dto/escrow-adjust.dto';
+import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -23,16 +25,16 @@ export class EscrowController {
 
   @Get('balance')
   @ApiOperation({
-    summary: 'Lấy số dư tiền cọc hiện tại theo tenant + property',
+    summary: 'Lấy số dư tiền cọc hiện tại theo contract và người thuê',
   })
   @ApiResponse({ status: 200, description: 'OK' })
   async getBalance(
-    @Query('tenantId') tenantId: string,
-    @Query('propertyId') propertyId: string,
+    @Query('contractId') contractId: string,
+    @CurrentUser() user: JwtUser,
   ) {
-    return this.escrowService.getBalanceByTenantAndProperty(
-      tenantId,
-      propertyId,
+    return this.escrowService.getBalanceByTenantAndContract(
+      user.id,
+      contractId,
     );
   }
 
@@ -60,7 +62,6 @@ export class EscrowController {
   }
 
   @Post(':id/refund')
-  @Roles(RoleEnum.ADMIN)
   @ApiOperation({ summary: 'Hoàn trả tiền cọc cho (người thuê + chủ nhà)' })
   @ApiResponse({ status: 200, description: 'Hoàn cọc thành công' })
   async refund(@Param('id') accountId: string, @Body() dto: EscrowAdjustDto) {

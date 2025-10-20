@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Escrow, EscrowBalanceParty } from './entities/escrow.entity';
@@ -209,7 +213,6 @@ export class EscrowService {
         : BigInt(acc.currentBalanceLandlord || '0');
     const next = current - amount;
     if (next < BigInt(0)) throw new Error('Insufficient escrow balance');
-
     // 1. Ghi giao dịch escrow
     const txn = this.txnRepo.create({
       escrow: { id: acc.id },
@@ -249,21 +252,27 @@ export class EscrowService {
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  /** Lấy số dư cọc hiện tại theo tenant + property */
-  async getBalanceByTenantAndProperty(
-    tenantId: string,
-    propertyId: string,
+  /** Lấy số dư cọc hiện tại theo tenant + contract */
+  async getBalanceByTenantAndContract(
+    userId: string,
+    contractId: string,
   ): Promise<
     ResponseCommon<
       | EscrowBalanceResponse
       | { accountId: null; balanceTenant: string; balanceLandlord: string }
     >
   > {
+    const user = await this.accountRepo.manager.getRepository('User').findOne({
+      where: { id: userId },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
     const acc = await this.accountRepo
       .createQueryBuilder('ea')
       .innerJoinAndSelect('ea.contract', 'c')
-      .where('ea.tenantId = :tenantId', { tenantId })
-      .andWhere('ea.propertyId = :propertyId', { propertyId })
+      .innerJoinAndSelect('c.landlord', 'landlord')
+      .andWhere('ea.contractId = :contractId', { contractId })
       .orderBy('c.createdAt', 'DESC')
       .getOne();
 
@@ -273,6 +282,13 @@ export class EscrowService {
         balanceLandlord: '0',
         accountId: null,
       });
+
+    // check user phải là tenant hoặc landlord của contract
+    if (user.id !== acc.tenantId && user.id !== acc.contract?.landlord?.id) {
+      throw new ForbiddenException(
+        'User is not authorized to access this escrow',
+      );
+    }
     return new ResponseCommon(200, 'SUCCESS', {
       balanceTenant: acc.currentBalanceTenant,
       balanceLandlord: acc.currentBalanceLandlord,
