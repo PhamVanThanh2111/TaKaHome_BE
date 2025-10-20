@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -231,9 +232,9 @@ export class PaymentService {
     });
   }
 
-  async findOne(id: number): Promise<ResponseCommon<Payment>> {
+  async findOne(id: string): Promise<ResponseCommon<Payment>> {
     const payment = await this.paymentRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['contract'],
     });
 
@@ -245,12 +246,12 @@ export class PaymentService {
   }
 
   async update(
-    id: number,
+    id: string,
     updatePaymentDto: UpdatePaymentDto,
   ): Promise<ResponseCommon<Payment>> {
     await this.paymentRepository.update(id, updatePaymentDto);
     const updated = await this.paymentRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['contract'],
     });
     if (!updated) {

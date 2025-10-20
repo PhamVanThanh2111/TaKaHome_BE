@@ -1,4 +1,7 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+import { Controller, Get, Query } from '@nestjs/common';
 import { AutomationEventLoggingService, AutomationEventType, EventStatus } from './automation-event-logging.service';
 import { AutomatedPenaltyService } from '../penalty/automated-penalty.service';
 

@@ -19,7 +19,7 @@ export class UserService {
 
   async findOne(id: string): Promise<ResponseCommon> {
     const user = await this.userRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['account'],
     });
     if (!user) {

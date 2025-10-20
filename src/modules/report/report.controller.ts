@@ -56,13 +56,13 @@ export class ReportController {
     description: 'Không tìm thấy báo cáo',
   })
   findOne(@Param('id') id: string) {
-    return this.reportService.findOne(+id);
+    return this.reportService.findOne(id);
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Cập nhật báo cáo' })
   @ApiResponse({ status: HttpStatus.OK, type: ReportResponseDto })
   update(@Param('id') id: string, @Body() updateReportDto: UpdateReportDto) {
-    return this.reportService.update(+id, updateReportDto);
+    return this.reportService.update(id, updateReportDto);
   }
 }

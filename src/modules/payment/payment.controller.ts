@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   Controller,
@@ -131,14 +132,14 @@ export class PaymentController {
     description: 'Không tìm thấy payment',
   })
   findOne(@Param('id') id: string) {
-    return this.paymentService.findOne(+id);
+    return this.paymentService.findOne(id);
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Cập nhật payment' })
   @ApiResponse({ status: HttpStatus.OK, type: PaymentResponseDto })
   update(@Param('id') id: string, @Body() updatePaymentDto: UpdatePaymentDto) {
-    return this.paymentService.update(+id, updatePaymentDto);
+    return this.paymentService.update(id, updatePaymentDto);
   }
 
   @Get('vnpay/create')

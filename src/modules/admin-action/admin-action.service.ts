@@ -28,21 +28,21 @@ export class AdminActionService {
     return new ResponseCommon(200, 'SUCCESS', actions);
   }
 
-  async findOne(id: number): Promise<ResponseCommon<AdminAction | null>> {
+  async findOne(id: string): Promise<ResponseCommon<AdminAction | null>> {
     const action = await this.adminActionRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['admin', 'target'],
     });
     return new ResponseCommon(200, 'SUCCESS', action);
   }
 
   async update(
-    id: number,
+    id: string,
     updateAdminActionDto: UpdateAdminActionDto,
   ): Promise<ResponseCommon<AdminAction>> {
     await this.adminActionRepository.update(id, updateAdminActionDto);
     const updatedAction = await this.adminActionRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['admin', 'target'],
     });
     if (!updatedAction) {
@@ -51,7 +51,7 @@ export class AdminActionService {
     return new ResponseCommon(200, 'SUCCESS', updatedAction);
   }
 
-  async remove(id: number): Promise<ResponseCommon<null>> {
+  async remove(id: string): Promise<ResponseCommon<null>> {
     await this.adminActionRepository.delete(id);
     return new ResponseCommon(200, 'SUCCESS', null);
   }

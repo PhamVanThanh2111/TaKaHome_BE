@@ -29,7 +29,6 @@ import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import * as fs from 'fs';
 import * as path from 'path';
-import { CreateInvoiceDto } from '../invoice/dto/create-invoice.dto';
 import { Property } from '../property/entities/property.entity';
 import { Room } from '../property/entities/room.entity';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';

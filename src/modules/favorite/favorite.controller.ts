@@ -54,7 +54,7 @@ export class FavoriteController {
     description: 'Không tìm thấy favorite',
   })
   findOne(@Param('id') id: string) {
-    return this.favoriteService.findOne(+id);
+    return this.favoriteService.findOne(id);
   }
 
   @Patch(':id')
@@ -64,7 +64,7 @@ export class FavoriteController {
     @Param('id') id: string,
     @Body() updateFavoriteDto: UpdateFavoriteDto,
   ) {
-    return this.favoriteService.update(+id, updateFavoriteDto);
+    return this.favoriteService.update(id, updateFavoriteDto);
   }
 
   @Delete(':id')
@@ -75,6 +75,6 @@ export class FavoriteController {
     description: 'Xóa favorite thành công',
   })
   remove(@Param('id') id: string) {
-    return this.favoriteService.remove(+id);
+    return this.favoriteService.remove(id);
   }
 }

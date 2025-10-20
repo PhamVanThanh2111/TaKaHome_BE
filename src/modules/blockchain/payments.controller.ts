@@ -26,12 +26,10 @@ import { JwtBlockchainAuthGuard, BlockchainUser } from './guards/jwt-blockchain-
 import { 
   RecordPaymentDto,
   ApplyPenaltyDto,
-  RecordPenaltyDto
 } from './dto/contract.dto';
 import { 
   RecordContractPenaltyDto,
   QueryPaymentsDto,
-  MarkOverdueDto
 } from './dto/payment.dto';
 import { FabricUser } from './interfaces/fabric.interface';
 

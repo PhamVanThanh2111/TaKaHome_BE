@@ -4,7 +4,7 @@ import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { RoleEnum } from '../common/enums/role.enum';
-import { AutomationEventLoggingService, AutomationEventType, EventStatus } from './automation-event-logging.service';
+import { AutomationEventLoggingService } from './automation-event-logging.service';
 import { AutomatedPenaltyService } from '../penalty/automated-penalty.service';
 
 /**
