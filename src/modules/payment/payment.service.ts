@@ -158,6 +158,7 @@ export class PaymentService {
       method, // 'WALLET' | 'VNPAY'
       status: PaymentStatusEnum.PENDING, // PENDING khi tạo mới
       ...(purpose ? { purpose } : {}),
+      userId: ctx.userId,
     });
     payment = await this.paymentRepository.save(payment);
 
