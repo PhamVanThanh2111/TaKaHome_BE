@@ -86,7 +86,8 @@ export class EscrowService {
 
     const amount = BigInt(payment.amount);
     const isTenantDeposit =
-      payment.purpose === PaymentPurpose.TENANT_ESCROW_DEPOSIT;
+      payment.purpose === PaymentPurpose.TENANT_ESCROW_DEPOSIT ||
+      payment.purpose === PaymentPurpose.TENANT_EXTENSION_ESCROW_DEPOSIT;
     const current = isTenantDeposit
       ? BigInt(acc.currentBalanceTenant || '0')
       : BigInt(acc.currentBalanceLandlord || '0');
@@ -100,8 +101,12 @@ export class EscrowService {
       status: 'COMPLETED',
       refId: payment.id,
       note: isTenantDeposit
-        ? 'Tenant deposit funded via payment'
-        : 'Landlord deposit funded via payment',
+        ? payment.purpose === PaymentPurpose.TENANT_EXTENSION_ESCROW_DEPOSIT
+          ? 'Tenant extension escrow deposit funded via payment'
+          : 'Tenant deposit funded via payment'
+        : payment.purpose === PaymentPurpose.LANDLORD_EXTENSION_ESCROW_DEPOSIT
+          ? 'Landlord extension escrow deposit funded via payment'
+          : 'Landlord deposit funded via payment',
       completedAt: vnNow(),
     });
     await this.txnRepo.save(txn);

@@ -1241,7 +1241,7 @@ export class SmartCAService {
     timeoutMs?: number;
   }) {
     const intervalMs = opts.intervalMs ?? 2000;
-    const timeoutMs = opts.timeoutMs ?? 120000;
+    const timeoutMs = opts.timeoutMs ?? 300000;
     const startedAt = Date.now();
 
     while (true) {
