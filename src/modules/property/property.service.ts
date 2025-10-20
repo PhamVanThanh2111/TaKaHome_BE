@@ -600,7 +600,7 @@ export class PropertyService {
 
   async findOne(id: string): Promise<ResponseCommon<Property | null>> {
     const property = await this.propertyRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['rooms', 'rooms.roomType', 'landlord'],
     });
     return new ResponseCommon(200, 'SUCCESS', property);
@@ -608,7 +608,7 @@ export class PropertyService {
 
   async findOneRoomType(id: string): Promise<ResponseCommon<RoomType | null>> {
     const roomType = await this.roomTypeRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['rooms', 'rooms.property', 'rooms.property.landlord'],
     });
     return new ResponseCommon(200, 'SUCCESS', roomType);
@@ -620,7 +620,7 @@ export class PropertyService {
   ): Promise<ResponseCommon<Property>> {
     await this.propertyRepository.update(id, updatePropertyDto);
     const updatedProperty = await this.propertyRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
     });
     if (!updatedProperty) {
       throw new Error(`Property with id ${id} not found`);

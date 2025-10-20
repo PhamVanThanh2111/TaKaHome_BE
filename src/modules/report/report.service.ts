@@ -33,9 +33,9 @@ export class ReportService {
     return new ResponseCommon(200, 'SUCCESS', reports);
   }
 
-  async findOne(id: number): Promise<ResponseCommon<Report>> {
+  async findOne(id: string): Promise<ResponseCommon<Report>> {
     const report = await this.reportRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['reporter', 'property'],
     });
     if (!report) {
@@ -45,14 +45,14 @@ export class ReportService {
   }
 
   async update(
-    id: number,
+    id: string,
     updateReportDto: UpdateReportDto,
   ): Promise<ResponseCommon<Report>> {
     await this.reportRepository.update(id, updateReportDto);
     return this.findOne(id);
   }
 
-  async remove(id: number): Promise<ResponseCommon<null>> {
+  async remove(id: string): Promise<ResponseCommon<null>> {
     await this.reportRepository.delete(id);
     return new ResponseCommon(200, 'SUCCESS', null);
   }

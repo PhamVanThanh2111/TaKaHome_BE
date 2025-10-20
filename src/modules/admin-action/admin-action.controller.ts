@@ -50,7 +50,7 @@ export class AdminActionController {
     description: 'Không tìm thấy admin action',
   })
   findOne(@Param('id') id: string) {
-    return this.adminActionService.findOne(+id);
+    return this.adminActionService.findOne(id);
   }
 
   @Patch(':id')
@@ -60,7 +60,7 @@ export class AdminActionController {
     @Param('id') id: string,
     @Body() updateAdminActionDto: UpdateAdminActionDto,
   ) {
-    return this.adminActionService.update(+id, updateAdminActionDto);
+    return this.adminActionService.update(id, updateAdminActionDto);
   }
 
   @Delete(':id')
@@ -71,6 +71,6 @@ export class AdminActionController {
     description: 'Xoá admin action thành công',
   })
   remove(@Param('id') id: string) {
-    return this.adminActionService.remove(+id);
+    return this.adminActionService.remove(id);
   }
 }

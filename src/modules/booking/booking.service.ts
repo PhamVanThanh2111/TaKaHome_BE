@@ -29,7 +29,6 @@ import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import * as fs from 'fs';
 import * as path from 'path';
-import { CreateInvoiceDto } from '../invoice/dto/create-invoice.dto';
 import { Property } from '../property/entities/property.entity';
 import { Room } from '../property/entities/room.entity';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
@@ -705,37 +704,9 @@ export class BookingService {
     return parsed;
   }
 
-  private parseOptionalInput(value?: string | Date | null): Date | undefined {
-    if (!value) return undefined;
-    if (value instanceof Date) return value;
-    return this.parseInput(value);
-  }
-
   private async maybeMarkDualEscrowFunded(b: Booking) {
-    const isRoom = !!b.room?.id;
     if (b.escrowDepositFundedAt && b.landlordEscrowDepositFundedAt) {
       b.status = BookingStatus.DUAL_ESCROW_FUNDED;
-      try {
-        // Lấy giá từ ContractExtension nếu có, nếu không thì dùng giá gốc
-        const pricing = await this.contractService.getCurrentContractPricing(
-          b.contractId!,
-        );
-        
-        const invoice: CreateInvoiceDto = {
-          contractId: b.contractId!,
-          dueDate: formatVN(b.firstRentDueAt!, 'yyyy-MM-dd'),
-          items: [
-            {
-              description: 'First month rent payment',
-              amount: pricing.monthlyRent,
-            },
-          ],
-          billingPeriod: formatVN(b.firstRentDueAt!, 'yyyy-MM'),
-        };
-        await this.invoiceService.create(invoice);
-      } catch (error) {
-        console.error('Failed to create invoice:', error);
-      }
 
       if (!b.firstRentDueAt) {
         b.firstRentDueAt = addDaysVN(vnNow(), 3);

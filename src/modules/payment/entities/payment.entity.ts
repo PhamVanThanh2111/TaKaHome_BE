@@ -24,6 +24,9 @@ export class Payment {
   @OneToOne(() => Invoice, (invoice) => invoice.payment, { nullable: true })
   invoice?: Invoice;
 
+  @Column({ nullable: true })
+  userId?: string;
+
   @Column()
   amount: number;
 

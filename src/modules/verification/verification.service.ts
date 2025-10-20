@@ -35,9 +35,9 @@ export class VerificationService {
     return new ResponseCommon(200, 'SUCCESS', verifications);
   }
 
-  async findOne(id: number): Promise<ResponseCommon<Verification>> {
+  async findOne(id: string): Promise<ResponseCommon<Verification>> {
     const verification = await this.verificationRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['user', 'verifiedBy'],
     });
     if (!verification) {
@@ -47,7 +47,7 @@ export class VerificationService {
   }
 
   async update(
-    id: number,
+    id: string,
     updateVerificationDto: UpdateVerificationDto,
   ): Promise<ResponseCommon<Verification>> {
     await this.verificationRepository.update(id, updateVerificationDto);

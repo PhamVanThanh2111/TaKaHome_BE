@@ -17,9 +17,9 @@ export class UserService {
     return new ResponseCommon(200, 'SUCCESS', users);
   }
 
-  async findOne(id: number): Promise<ResponseCommon> {
+  async findOne(id: string): Promise<ResponseCommon> {
     const user = await this.userRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['account'],
     });
     if (!user) {
@@ -29,14 +29,14 @@ export class UserService {
   }
 
   async update(
-    id: number,
+    id: string,
     updateUserDto: UpdateUserDto,
   ): Promise<ResponseCommon> {
     await this.userRepository.update(id, updateUserDto);
     return new ResponseCommon(200, 'SUCCESS', await this.findOne(id));
   }
 
-  async remove(id: number): Promise<ResponseCommon> {
+  async remove(id: string): Promise<ResponseCommon> {
     await this.userRepository.delete(id);
     return new ResponseCommon(200, 'SUCCESS');
   }

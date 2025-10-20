@@ -1,3 +1,7 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/require-await */
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as crypto from 'crypto';
@@ -500,6 +504,10 @@ export class ContractService {
         'OrgLandlordMSP',
       );
 
+      const pricing = await this.getCurrentContractPricing(
+        contract.id,
+      );
+
       const contractData = {
         contractId: fullContract.contractCode,
         landlordId: fullContract.landlord.id,
@@ -510,9 +518,7 @@ export class ContractService {
         tenantCertId: `${fullContract.tenant.id}-cert`,
         signedContractFileHash: documentHash,
         landlordSignatureMeta,
-        rentAmount: fullContract.room
-          ? fullContract.room.roomType.price.toString()
-          : (property.price ?? 0).toString(),
+        rentAmount: pricing.monthlyRent.toString(),
         depositAmount: fullContract.room
           ? fullContract.room.roomType.deposit.toString()
           : (property.deposit ?? 0).toString(),

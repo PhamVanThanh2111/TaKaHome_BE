@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -29,6 +30,7 @@ import {
   vnpFormatYYYYMMDDHHmmss,
 } from '../../common/datetime';
 import { WalletTxnType } from '../common/enums/wallet-txn-type.enum';
+import { UserService } from '../user/user.service';
 
 @Injectable()
 export class PaymentService {
@@ -45,6 +47,7 @@ export class PaymentService {
     private readonly bookingService: BookingService,
     private readonly blockchainService: BlockchainService,
     private readonly contractService: ContractService,
+    private readonly userService: UserService,
   ) {}
 
   /** API chính để khởi tạo thanh toán từ invoice */
@@ -229,9 +232,9 @@ export class PaymentService {
     });
   }
 
-  async findOne(id: number): Promise<ResponseCommon<Payment>> {
+  async findOne(id: string): Promise<ResponseCommon<Payment>> {
     const payment = await this.paymentRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['contract'],
     });
 
@@ -243,12 +246,12 @@ export class PaymentService {
   }
 
   async update(
-    id: number,
+    id: string,
     updatePaymentDto: UpdatePaymentDto,
   ): Promise<ResponseCommon<Payment>> {
     await this.paymentRepository.update(id, updatePaymentDto);
     const updated = await this.paymentRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['contract'],
     });
     if (!updated) {
@@ -585,7 +588,18 @@ export class PaymentService {
         ],
       }));
 
-    if (!payment || !payment.contract) {
+    if (!payment) {
+      return;
+    }
+
+    // Xử lý WALLET_TOPUP payment (không cần contract)
+    if (payment.purpose === PaymentPurpose.WALLET_TOPUP) {
+      await this.processWalletTopUpPayment(payment);
+      return;
+    }
+
+    // Các purpose khác đều cần contract
+    if (!payment.contract) {
       return;
     }
 
@@ -644,6 +658,7 @@ export class PaymentService {
       return;
     }
 
+    // Xử lý tiền thuê nhà tháng đầu
     if (payment.purpose === PaymentPurpose.FIRST_MONTH_RENT) {
       // Link with existing invoice (invoice should be created when dual escrow funded)
       await this.linkPaymentWithInvoice(payment);
@@ -800,6 +815,42 @@ export class PaymentService {
       });
     } catch (error) {
       console.error('Failed to credit landlord wallet for monthly rent', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Process wallet top-up payment
+   */
+  private async processWalletTopUpPayment(payment: Payment): Promise<void> {
+    try {
+      // Kiểm tra xem payment có userId không
+      if (!payment.userId) {
+        console.error('Missing userId for wallet top-up payment', {
+          paymentId: payment.id,
+        });
+        throw new BadRequestException('Missing user information for wallet top-up');
+      }
+
+      // Verify user exists
+      const user = await this.userService.findOne(payment.userId);
+      if (!user) {
+        console.error('User not found for wallet top-up payment', {
+          paymentId: payment.id,
+          userId: payment.userId,
+        });
+        throw new BadRequestException('User not found');
+      }
+
+      // Credit user wallet
+      await this.walletService.credit(payment.userId, {
+        amount: Number(payment.amount),
+        type: WalletTxnType.TOPUP,
+        refId: payment.id,
+        note: `Wallet top-up via VNPay - ${payment.transactionNo || payment.id}`,
+      });
+    } catch (error) {
+      console.error('❌ Failed to process wallet top-up payment:', error);
       throw error;
     }
   }

@@ -79,7 +79,7 @@ export class AuthService {
           defaultRoles.length > 1 ? defaultRoles[1] : defaultRoles[0];
 
         await this.blockchainService.enrollUser({
-          userId: user.id.toString(),
+          userId: user.id,
           orgName: orgName,
           role: enrollmentRole,
         });
