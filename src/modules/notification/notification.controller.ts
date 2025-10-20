@@ -8,6 +8,7 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Patch,
 } from '@nestjs/common';
 import { NotificationService } from './notification.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
@@ -71,5 +72,33 @@ export class NotificationController {
   })
   remove(@Param('id') id: string) {
     return this.notificationService.remove(id);
+  }
+
+  @Patch(':id/read')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Đánh dấu notification đã đọc' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    type: NotificationResponseDto,
+    description: 'Đánh dấu notification đã đọc thành công',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Không tìm thấy notification',
+  })
+  markAsRead(@Param('id') id: string) {
+    return this.notificationService.markAsRead(id);
+  }
+
+  @Patch('user/:userId/read-all')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Đánh dấu tất cả notification của user đã đọc' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    type: [NotificationResponseDto],
+    description: 'Đánh dấu tất cả notification đã đọc thành công',
+  })
+  markAllAsReadByUserId(@Param('userId') userId: string) {
+    return this.notificationService.markAllAsReadByUserId(userId);
   }
 }

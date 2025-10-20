@@ -70,4 +70,29 @@ export class NotificationService {
     await this.notificationRepository.delete(id);
     return new ResponseCommon(200, 'SUCCESS', null);
   }
+
+  async markAsRead(id: string): Promise<ResponseCommon<Notification>> {
+    const notification = await this.notificationRepository.findOne({
+      where: { id: id },
+    });
+    if (!notification) {
+      throw new Error(`Notification with id ${id} not found`);
+    }
+
+    await this.notificationRepository.update(id, {
+      status: StatusEnum.COMPLETED,
+    });
+    return this.findOne(id);
+  }
+
+  async markAllAsReadByUserId(
+    userId: string,
+  ): Promise<ResponseCommon<Notification[]>> {
+    await this.notificationRepository.update(
+      { user: { id: userId }, status: StatusEnum.PENDING },
+      { status: StatusEnum.COMPLETED },
+    );
+
+    return this.findAllByUserId(userId);
+  }
 }
