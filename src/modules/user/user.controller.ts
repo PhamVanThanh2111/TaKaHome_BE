@@ -39,14 +39,14 @@ export class UserController {
     description: 'Không tìm thấy user',
   })
   findOne(@Param('id') id: string) {
-    return this.userService.findOne(+id);
+    return this.userService.findOne(id);
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Cập nhật thông tin user' })
   @ApiResponse({ status: HttpStatus.OK, type: UserResponseDto })
   update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
-    return this.userService.update(+id, updateUserDto);
+    return this.userService.update(id, updateUserDto);
   }
 
   @Delete(':id')
@@ -58,6 +58,6 @@ export class UserController {
   })
   @Roles('ADMIN')
   remove(@Param('id') id: string) {
-    return this.userService.remove(+id);
+    return this.userService.remove(id);
   }
 }

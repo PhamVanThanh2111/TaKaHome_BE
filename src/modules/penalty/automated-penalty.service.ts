@@ -47,7 +47,9 @@ export class AutomatedPenaltyService {
   ) {}
 
   /**
-   * Apply penalty for overdue payment with contract termination check
+   * Apply penalty for overdue first payment with daily accumulation
+   * - Day 1-2: Apply daily penalty (3% per day accumulated)
+   * - Day 3+: Cancel contract automatically
    */
   async applyPaymentOverduePenalty(
     booking: Booking,
@@ -80,16 +82,34 @@ export class AutomatedPenaltyService {
         rentAmount || booking.property?.price || 10000000,
       );
 
-      // Check if penalty already exists for this period to avoid double penalty
-      const existingPenalty = await this.checkExistingPenalty(
-        booking.contractId,
-        'OVERDUE_PAYMENT',
-        booking.firstRentDueAt,
+      // Check if penalty already applied TODAY to avoid multiple penalties per day (similar to monthly payment logic)
+      const today = vnNow();
+      const startOfToday = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        today.getDate(),
+      );
+      const endOfToday = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        today.getDate() + 1,
       );
 
-      if (existingPenalty) {
-        this.logger.warn(
-          `Penalty already applied for booking ${booking.id} on ${formatVN(existingPenalty.appliedAt, 'yyyy-MM-dd')}`,
+      const existingTodayPenalty = await this.penaltyRecordRepository
+        .createQueryBuilder('penalty')
+        .where('penalty.contractId = :contractId', {
+          contractId: booking.contractId,
+        })
+        .andWhere('penalty.penaltyType = :penaltyType', {
+          penaltyType: 'OVERDUE_PAYMENT',
+        })
+        .andWhere('penalty.appliedAt >= :startOfToday', { startOfToday })
+        .andWhere('penalty.appliedAt < :endOfToday', { endOfToday })
+        .getOne();
+
+      if (existingTodayPenalty) {
+        this.logger.log(
+          `⚠️ Daily penalty already applied today for booking ${booking.id}, skipping...`,
         );
         return null;
       }
@@ -155,7 +175,7 @@ export class AutomatedPenaltyService {
         originalAmount: actualRentAmount,
         penaltyAmount: penaltyInfo.amount,
         penaltyRate: penaltyInfo.rate,
-        reason: penaltyInfo.reason,
+        reason: `First payment overdue by ${daysPastDue} days - Daily penalty`,
         appliedBy: 'system',
       });
 
@@ -249,7 +269,7 @@ export class AutomatedPenaltyService {
       }
 
       // Use ContractTerminationService for proper escrow distribution
-      const reason = `First payment not made within 3 days (${daysPastDue} days overdue)`;
+      const reason = `Không thanh toán lần đầu trong vòng 3 ngày (trễ ${daysPastDue} ngày)`;
       const terminationResult =
         await this.contractTerminationService.terminateContract(
           booking.contractId,
@@ -297,8 +317,8 @@ export class AutomatedPenaltyService {
     reason: string;
     canContinue: boolean;
   } {
-    // Vietnam legal requirement: Maximum 0.03% per day
-    const rate = 0.03; // 0.03% per day as per Vietnamese law
+    // Vietnam legal requirement: Maximum 3% per day
+    const rate = 3; // 3% per day as per Vietnamese law
 
     // Use actual rent amount or fallback to default
     const baseAmount = rentAmount || 10000000; // 10M VND as fallback
@@ -308,8 +328,8 @@ export class AutomatedPenaltyService {
     const maxPenalty = Math.floor(baseAmount * 0.2);
     const finalPenalty = Math.min(penaltyAmount, maxPenalty);
 
-    // Contract termination logic: If penalties exceed 15% of rent, recommend termination
-    const canContinue = finalPenalty < baseAmount * 0.15;
+    // Contract termination logic: If penalties exceed 30% of rent, recommend termination
+    const canContinue = finalPenalty < baseAmount * 0.3;
 
     return {
       rate,
@@ -337,8 +357,8 @@ export class AutomatedPenaltyService {
     await this.notificationService.create({
       userId: booking.tenant.id,
       type: NotificationTypeEnum.PAYMENT,
-      title: 'Phí phạt đã được áp dụng',
-      content: `Do thanh toán muộn ${daysPastDue} ngày cho căn hộ ${booking.property.title}, bạn đã bị áp dụng phí phạt ${penaltyInfo.amount.toLocaleString('vi-VN')} VND. Vui lòng thanh toán sớm để tránh thêm phí phạt.`,
+      title: 'Phí phạt thanh toán lần đầu',
+      content: `Do thanh toán lần đầu muộn ${daysPastDue} ngày cho căn hộ ${booking.property.title}, bạn đã bị áp dụng phí phạt ${penaltyInfo.amount.toLocaleString('vi-VN')} VND. Lưu ý: Nếu trễ quá 3 ngày, hợp đồng sẽ bị hủy!`,
     });
 
     // Notify landlord (if property has landlord relation)
@@ -346,8 +366,8 @@ export class AutomatedPenaltyService {
       await this.notificationService.create({
         userId: booking.property.landlord.id,
         type: NotificationTypeEnum.PAYMENT,
-        title: '💰 Phí phạt đã được áp dụng',
-        content: `Phí phạt ${penaltyInfo.amount.toLocaleString('vi-VN')} VND đã được tự động áp dụng cho người thuê ${booking.tenant.fullName} do thanh toán muộn ${daysPastDue} ngày.`,
+        title: '💰 Phí phạt thanh toán lần đầu',
+        content: `Phí phạt ${penaltyInfo.amount.toLocaleString('vi-VN')} VND đã được tự động áp dụng cho người thuê ${booking.tenant.fullName} do thanh toán lần đầu muộn ${daysPastDue} ngày. Nếu trễ quá 3 ngày, hợp đồng sẽ bị hủy.`,
       });
     }
 
@@ -762,6 +782,32 @@ export class AutomatedPenaltyService {
         originalAmount,
       );
 
+      this.logger.log(
+        `Applying ${penaltyInfo.rate}% penalty for contract ${contract.contractCode} period ${period} (${daysPastDue} days overdue)`,
+      );
+
+      // Check escrow balance before applying penalty
+      const escrowBalance = await this.checkEscrowBalance(contract.id);
+
+      // If penalty would exceed escrow balance or contract should be terminated
+      if (
+        !penaltyInfo.canContinue ||
+        (escrowBalance && penaltyInfo.amount > escrowBalance.tenantBalance)
+      ) {
+        this.logger.warn(
+          `⚠️ Penalty exceeds limits for contract ${contract.contractCode} period ${period}. Initiating contract termination.`,
+        );
+
+        // Initiate contract termination process
+        await this.terminateContractForInsufficientFunds(
+          contract.id,
+          '', // No bookingId for monthly payments
+          `Insufficient escrow funds to cover penalties. Total penalty: ${penaltyInfo.amount.toLocaleString('vi-VN')} VND`,
+        );
+
+        return null;
+      }
+
       await this.deductFromEscrow(
         contract.id,
         penaltyInfo.amount,
@@ -811,7 +857,7 @@ export class AutomatedPenaltyService {
         daysPastDue: daysPastDue,
         originalAmount: originalAmount,
         penaltyAmount: penaltyInfo.amount,
-        penaltyRate: 0.03, // 0.03% per day
+        penaltyRate: 3, // 3% per day
         reason: `Monthly payment period ${period} overdue by ${daysPastDue} days - Daily penalty`,
         appliedBy: 'system',
       });
@@ -836,6 +882,10 @@ export class AutomatedPenaltyService {
         reason: `Monthly payment period ${period} overdue by ${daysPastDue} days`,
         appliedAt: vnNow(),
       };
+
+      this.logger.log(
+        `✅ Successfully applied monthly penalty for contract ${contract.contractCode} period ${period}`,
+      );
       return penaltyApplication;
     } catch (error) {
       this.logger.error(
@@ -1168,8 +1218,141 @@ export class AutomatedPenaltyService {
   }
 
   /**
+   * Process pending signature timeouts - cancel bookings if tenant doesn't sign within 30 minutes
+   */
+  async processPendingSignatureTimeouts(): Promise<void> {
+    try {
+      this.logger.log('📝 Checking for pending signature timeouts...');
+
+      const now = vnNow();
+      const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000); // 30 minutes ago
+
+      // Find bookings that are PENDING_SIGNATURE and created more than 30 minutes ago
+      const timeoutBookings = await this.bookingRepository.find({
+        where: {
+          status: BookingStatus.PENDING_SIGNATURE,
+        },
+        relations: ['tenant', 'property', 'property.landlord', 'contract'],
+      });
+
+      let cancelledBookings = 0;
+
+      for (const booking of timeoutBookings) {
+        // Check if booking was updated to PENDING_SIGNATURE more than 30 minutes ago
+        if (booking.updatedAt <= thirtyMinutesAgo) {
+          const minutesOverdue = Math.floor(
+            (now.getTime() - booking.updatedAt.getTime()) / (1000 * 60),
+          );
+
+          this.logger.log(
+            `📅 Found pending signature timeout: booking ${booking.id}, ${minutesOverdue} minutes overdue`,
+          );
+
+          const cancelled = await this.cancelBookingForPendingSignatureTimeout(
+            booking,
+            minutesOverdue,
+          );
+          if (cancelled) {
+            cancelledBookings++;
+          }
+        }
+      }
+
+      this.logger.log(
+        `✅ Processed pending signature timeouts: ${cancelledBookings} bookings cancelled`,
+      );
+    } catch (error) {
+      this.logger.error(
+        '❌ Failed to process pending signature timeouts:',
+        error,
+      );
+    }
+  }
+
+  /**
+   * Cancel booking and contract if tenant doesn't sign within 30 minutes
+   */
+  async cancelBookingForPendingSignatureTimeout(
+    booking: Booking,
+    minutesOverdue: number,
+  ): Promise<boolean> {
+    try {
+      if (!booking.contractId) {
+        this.logger.warn(
+          `Cannot cancel booking for signature timeout: missing contract for booking ${booking.id}`,
+        );
+        return false;
+      }
+
+      // Use ContractTerminationService for proper cleanup
+      const reason = `Tenant không ký hợp đồng trong vòng 30 phút (trễ ${minutesOverdue} phút)`;
+      await this.contractTerminationService.terminateContract(
+        booking.contractId,
+        reason,
+        'system',
+      );
+
+      // Send notifications to both parties
+      await this.sendPendingSignatureTimeoutNotifications(
+        booking,
+        minutesOverdue,
+      );
+
+      this.logger.log(
+        `✅ Booking ${booking.id} cancelled due to pending signature timeout (${minutesOverdue} minutes)`,
+      );
+
+      return true;
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to cancel booking ${booking.id} for pending signature timeout:`,
+        error,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Send notifications for pending signature timeout cancellation
+   */
+  private async sendPendingSignatureTimeoutNotifications(
+    booking: Booking,
+    minutesOverdue: number,
+  ): Promise<void> {
+    try {
+      const tenantId = booking.tenant?.id;
+      const landlordId = booking.property?.landlord?.id;
+
+      // Notify tenant about cancellation
+      if (tenantId) {
+        await this.notificationService.create({
+          userId: tenantId,
+          type: NotificationTypeEnum.GENERAL,
+          title: '⏰ Hợp đồng đã bị hủy do quá hạn ký',
+          content: `Hợp đồng thuê căn hộ ${booking.property?.title} đã bị hủy tự động do bạn không ký trong vòng 30 phút. Thời gian trễ: ${minutesOverdue} phút. Bạn có thể tạo yêu cầu thuê mới nếu vẫn muốn thuê căn hộ này.`,
+        });
+      }
+
+      // Notify landlord about cancellation
+      if (landlordId) {
+        await this.notificationService.create({
+          userId: landlordId,
+          type: NotificationTypeEnum.GENERAL,
+          title: '⏰ Hợp đồng đã bị hủy do tenant không ký',
+          content: `Hợp đồng thuê với ${booking.tenant?.fullName} cho căn hộ ${booking.property?.title} đã bị hủy tự động do tenant không ký trong vòng 30 phút. Căn hộ hiện đã sẵn sàng cho thuê lại.`,
+        });
+      }
+    } catch (error) {
+      this.logger.error(
+        '❌ Failed to send pending signature timeout notifications:',
+        error,
+      );
+    }
+  }
+
+  /**
    * Apply penalty to landlord for not handing over within 24 hours
-   * Deduct 50% of landlord deposit and cancel contract
+   * Deduct 10% of landlord deposit and cancel contract
    */
   async applyLandlordHandoverPenalty(
     booking: Booking,
@@ -1214,12 +1397,12 @@ export class AutomatedPenaltyService {
         return null;
       }
 
-      // Calculate 50% penalty of landlord deposit
-      const penaltyAmount = Math.floor(escrowBalance.landlordBalance * 0.5);
+      // Calculate 10%% penalty of landlord deposit
+      const penaltyAmount = Math.floor(escrowBalance.landlordBalance * 0.1);
       const reason = `Chủ nhà không bàn giao trong vòng 24 giờ (trễ ${hoursOverdue} giờ)`;
 
       this.logger.log(
-        `Applying 50% deposit penalty (${penaltyAmount.toLocaleString('vi-VN')} VND) to landlord for booking ${booking.id}`,
+        `Applying 10% deposit penalty (${penaltyAmount.toLocaleString('vi-VN')} VND) to landlord for booking ${booking.id}`,
       );
 
       // Record penalty on blockchain
@@ -1254,7 +1437,7 @@ export class AutomatedPenaltyService {
         daysPastDue: Math.floor(hoursOverdue / 24),
         originalAmount: escrowBalance.landlordBalance,
         penaltyAmount: penaltyAmount,
-        penaltyRate: 50, // 50% penalty
+        penaltyRate: 10, // 10% penalty
         reason: reason,
         appliedBy: 'system',
       });
@@ -1310,7 +1493,7 @@ export class AutomatedPenaltyService {
           userId: landlordId,
           type: NotificationTypeEnum.PENALTY,
           title: '⚠️ Phạt chậm bàn giao',
-          content: `Bạn đã bị phạt ${penaltyAmount.toLocaleString('vi-VN')} VND (50% cọc) do không bàn giao căn hộ ${booking.property?.title} trong vòng 24 giờ. Thời gian trễ: ${hoursOverdue} giờ. Hợp đồng đã bị hủy.`,
+          content: `Bạn đã bị phạt ${penaltyAmount.toLocaleString('vi-VN')} VND (10% cọc) do không bàn giao căn hộ ${booking.property?.title} trong vòng 24 giờ. Thời gian trễ: ${hoursOverdue} giờ. Hợp đồng đã bị hủy.`,
         });
       }
 

@@ -46,7 +46,7 @@ export class PenaltyRecord {
   penaltyAmount: number;
 
   @Column({ type: 'decimal', precision: 5, scale: 3 })
-  penaltyRate: number; // 0.03 for 0.03%
+  penaltyRate: number; // 3 for 3%
 
   @Column({ type: 'varchar', length: 500 })
   reason: string;

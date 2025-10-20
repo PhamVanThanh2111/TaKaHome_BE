@@ -346,7 +346,6 @@ export class ContractTerminationService {
       );
     } catch (error) {
       this.logger.error(`❌ Failed to send termination notifications:`, error);
-      // Don't throw error - termination should still complete
     }
   }
 }
