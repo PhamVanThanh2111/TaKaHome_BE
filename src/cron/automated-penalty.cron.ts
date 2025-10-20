@@ -17,7 +17,7 @@ export class AutomatedPenaltyCron {
   ) {}
 
   /**
-   * Run every day at 9:00 AM to check for overdue payments
+   * Run every day at 9:00 AM to check for overdue payments firstmonth
    *
    * PRIMARY RESPONSIBILITY: Handle ALL overdue payment penalties
    * This is the single source of truth for overdue payment processing

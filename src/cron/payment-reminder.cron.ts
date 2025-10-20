@@ -38,7 +38,7 @@ export class PaymentReminderCron {
    * Sends payment reminders 7, 3, 1 days before due date
    */
   @Cron(CronExpression.EVERY_HOUR)
-  async sendPaymentRemindersFirstMont(): Promise<void> {
+  async sendPaymentRemindersFirstMonth(): Promise<void> {
     try {
       this.logger.log('🔔 Checking for payment reminders to send...');
 
@@ -168,22 +168,32 @@ export class PaymentReminderCron {
 
       // Send reminder 12 hours before deadline
       if (hoursToDeadline <= 12 && hoursToDeadline > 0) {
+        const commonPayload = {
+          type: NotificationTypeEnum.PAYMENT,
+          title: 'Nhắc nhở nộp tiền cọc',
+          content: `Bạn cần nộp tiền cọc cho căn hộ ${booking.property.title} trong vòng ${hoursToDeadline} giờ tới để hoàn tất booking.`,
+        };
+
+        const recipientUserIds: string[] = [];
+        const tenantId = booking.tenant.id;
+        const landlordId = booking.property.landlord.id;
+
         if (booking.status === BookingStatus.AWAITING_DEPOSIT) {
-          await this.notificationService.create({
-            userId: booking.tenant.id,
-            type: NotificationTypeEnum.PAYMENT,
-            title: 'Nhắc nhở nộp tiền cọc',
-            content: `Bạn cần nộp tiền cọc cho căn hộ ${booking.property.title} trong vòng ${hoursToDeadline} giờ tới để hoàn tất booking.`,
-          });
+          // Gửi cho cả hai
+          recipientUserIds.push(tenantId, landlordId);
         } else if (booking.status === BookingStatus.ESCROW_FUNDED_T) {
-          await this.notificationService.create({
-            userId: booking.property.landlord.id,
-            type: NotificationTypeEnum.PAYMENT,
-            title: 'Nhắc nhở nộp tiền cọc',
-            content: `Bạn cần nộp tiền cọc cho căn hộ ${booking.property.title} trong vòng ${hoursToDeadline} giờ tới để hoàn tất booking.`,
-          });
+          recipientUserIds.push(landlordId);
+        } else {
+          recipientUserIds.push(tenantId);
         }
 
+        const notificationPromises = recipientUserIds.map((userId) => {
+          return this.notificationService.create({
+            ...commonPayload, // Dùng lại nội dung chung
+            userId: userId, // Chỉ thay đổi userId
+          });
+        });
+        await Promise.all(notificationPromises);
         this.logger.log(`💰 Sent deposit reminder for booking ${booking.id}`);
       }
     }
