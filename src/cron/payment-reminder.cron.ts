@@ -152,7 +152,6 @@ export class PaymentReminderCron {
           BookingStatus.ESCROW_FUNDED_L,
           BookingStatus.ESCROW_FUNDED_T,
         ]),
-        escrowDepositFundedAt: IsNull(),
         escrowDepositDueAt: MoreThan(now),
       },
       relations: ['tenant', 'property', 'property.landlord'],
@@ -219,7 +218,6 @@ export class PaymentReminderCron {
             BookingStatus.ESCROW_FUNDED_L,
             BookingStatus.ESCROW_FUNDED_T,
           ]),
-          escrowDepositFundedAt: IsNull(),
           escrowDepositDueAt: LessThanOrEqual(addDays(now, -1)), // 24+ hours overdue
         },
         relations: ['tenant', 'property', 'property.landlord'],
