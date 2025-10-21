@@ -17,6 +17,7 @@ import { RoleEnum } from '../../common/enums/role.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { BlockchainService } from 'src/modules/blockchain/blockchain.service';
 import { Logger } from '@nestjs/common';
+import { vnNow } from 'src/common/datetime';
 
 @Injectable()
 export class AuthService {
@@ -122,8 +123,12 @@ export class AuthService {
     const payload = {
       sub: acc.user.id,
       email: acc.email,
-      roles: acc.roles, // RoleEnum[]
+      roles: acc.roles,
     };
+
+    acc.lastLoginAt = vnNow();
+    await this.accountRepo.save(acc);
+
     return new ResponseCommon(200, 'SUCCESS', {
       accessToken: this.jwtService.sign(payload),
       account: {
