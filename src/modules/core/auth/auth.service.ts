@@ -149,7 +149,10 @@ export class AuthService {
           fullName: acc.user.fullName,
           avatarUrl: acc.user.avatarUrl,
           status: acc.user.status,
+          CCCD: acc.user.CCCD,
         },
+        createdAt: acc.user.createdAt,
+        updatedAt: acc.user.updatedAt,
       },
     });
   }
