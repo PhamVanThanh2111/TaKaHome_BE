@@ -5,6 +5,8 @@ import { User } from './entities/user.entity';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { S3StorageService } from '../s3-storage/s3-storage.service';
+import { CccdRecognitionService } from './services/cccd-recognition.service';
+import { CccdRecognitionResponseDto } from './dto/cccd-recognition.dto';
 
 @Injectable()
 export class UserService {
@@ -12,6 +14,7 @@ export class UserService {
     @InjectRepository(User)
     private userRepository: Repository<User>,
     private readonly s3StorageService: S3StorageService,
+    private readonly cccdRecognitionService: CccdRecognitionService,
   ) {}
 
   async findAll(): Promise<ResponseCommon> {
@@ -116,6 +119,33 @@ export class UserService {
       console.error('Failed to upload avatar:', error);
       throw new BadRequestException(
         `Failed to upload avatar: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+  }
+
+  /**
+   * Recognize CCCD information from image
+   */
+  async recognizeCccd(
+    imageBuffer: Buffer,
+    originalFilename: string,
+  ): Promise<ResponseCommon<CccdRecognitionResponseDto>> {
+    try {
+      // Call CCCD recognition service
+      const result = await this.cccdRecognitionService.recognizeCccd(
+        imageBuffer,
+        originalFilename,
+      );
+
+      return new ResponseCommon(200, 'CCCD recognition completed successfully', result);
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      
+      console.error('Failed to recognize CCCD:', error);
+      throw new BadRequestException(
+        `Failed to recognize CCCD: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
     }
   }
