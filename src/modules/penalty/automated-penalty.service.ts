@@ -569,8 +569,12 @@ export class AutomatedPenaltyService {
           const dueDate = booking.firstRentDueAt || now;
 
           if (now > dueDate) {
+            // const daysPastDue = Math.floor(
+            //   (now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24),
+            // );
+            //Demo
             const daysPastDue = Math.floor(
-              (now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24),
+              (now.getTime() - dueDate.getTime()) / (1000 * 60),
             );
 
             if (daysPastDue > 0) {

@@ -830,7 +830,9 @@ export class PaymentService {
         console.error('Missing userId for wallet top-up payment', {
           paymentId: payment.id,
         });
-        throw new BadRequestException('Missing user information for wallet top-up');
+        throw new BadRequestException(
+          'Missing user information for wallet top-up',
+        );
       }
 
       // Verify user exists
@@ -1063,13 +1065,21 @@ export class PaymentService {
     paymentDate: Date,
   ): string {
     const startDate = contract.startDate;
-    const monthsDiff = Math.floor(
-      (paymentDate.getFullYear() - startDate.getFullYear()) * 12 +
-        (paymentDate.getMonth() - startDate.getMonth()),
-    );
+    // const monthsDiff = Math.floor(
+    //   (paymentDate.getFullYear() - startDate.getFullYear()) * 12 +
+    //     (paymentDate.getMonth() - startDate.getMonth()),
+    // );
+
+    // // Period starts from 2 since first payment is period 1
+    // const period = Math.max(2, monthsDiff + 2);
+    // return period.toString();
+    // DEMO: Calculate 5-hour periods instead of months
+    const timeDiffMs = paymentDate.getTime() - startDate.getTime();
+    const hoursDiff = Math.floor(timeDiffMs / (1000 * 60 * 60)); // Convert to hours
+    const periodsSinceStart = Math.floor(hoursDiff / 5); // 5-hour periods
 
     // Period starts from 2 since first payment is period 1
-    const period = Math.max(2, monthsDiff + 2);
+    const period = Math.max(2, periodsSinceStart + 2);
     return period.toString();
   }
 

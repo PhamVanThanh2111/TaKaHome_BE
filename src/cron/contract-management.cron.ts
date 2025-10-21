@@ -27,7 +27,9 @@ export class ContractManagementCron {
    * Chạy hàng ngày lúc 9h sáng để kiểm tra contract expiry
    * Sends contract expiry reminders at 30, 14, 7, 1 days before expiry
    */
-  @Cron('0 9 * * *') // 9:00 AM every day
+  //Demo
+  // @Cron('0 9 * * *') // 9:00 AM every day
+  @Cron('*/7 * * * *') // every 10 minutes
   async checkContractExpiry(): Promise<void> {
     try {
       this.logger.log('📋 Checking contracts for expiry reminders...');

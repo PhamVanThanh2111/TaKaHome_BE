@@ -110,9 +110,11 @@ export class ContractService {
     const start = input.startDate ? this.toDate(input.startDate) : vnNow();
     const proposedEnd = input.endDate
       ? this.toDate(input.endDate)
-      : this.addMonths(start, 12);
-    const end = proposedEnd > start ? proposedEnd : this.addMonths(start, 12);
-
+      : this.addHours(start, 60); // Demo: default 60 "hours" instead of months
+    // : this.addMonths(start, 12);
+    // const end = proposedEnd > start ? proposedEnd : this.addMonths(start, 12);
+    const end = proposedEnd > start ? proposedEnd : this.addHours(start, 60); // Demo: default 60 "hours" instead of months
+    //Demo
     const contract = this.contractRepository.create({
       contractCode:
         input.contractCode ?? (await this.generateContractCode(start)),
@@ -165,7 +167,12 @@ export class ContractService {
     const saved = await this.contractRepository.save(contract);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
-
+  //Demo
+  private addHours(base: Date, hours: number): Date {
+    const result = new Date(base);
+    result.setHours(result.getHours() + hours);
+    return result;
+  }
   private ensureStatus(
     contract: Contract,
     expected: ContractStatusEnum[],
@@ -504,9 +511,7 @@ export class ContractService {
         'OrgLandlordMSP',
       );
 
-      const pricing = await this.getCurrentContractPricing(
-        contract.id,
-      );
+      const pricing = await this.getCurrentContractPricing(contract.id);
 
       const contractData = {
         contractId: fullContract.contractCode,

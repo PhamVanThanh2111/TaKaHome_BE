@@ -20,9 +20,13 @@ export class InvoiceCronService {
   ) {}
 
   /**
-   * Generate monthly invoices from blockchain every 30 seconds
+   * Generate monthly invoices from blockchain every 60 seconds
    */
-  @Cron('*/30 * * * * *', {
+  //Demo
+  //  @Cron('0 0 8 * * *', {
+  //   name: 'generate-monthly-invoices-morning',
+  // })
+  @Cron('*/60 * * * * *', {
     name: 'generate-monthly-invoices-morning',
   })
   async handleGenerateMonthlyInvoicesMorning(): Promise<void> {
