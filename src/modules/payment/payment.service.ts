@@ -164,12 +164,17 @@ export class PaymentService {
 
     if (method === PaymentMethodEnum.WALLET) {
       // 2A) Thanh toán bằng ví: trừ ví và chuyển sang PAID
-      await this.walletService.debit(ctx.userId, {
+      try {
+        await this.walletService.debit(ctx.userId, {
         amount,
         type: WalletTxnType.CONTRACT_PAYMENT,
         refId: payment.id,
         note: `Pay contract ${contractId} by wallet`,
       });
+      } catch (error) {
+        console.error('Error debiting wallet:', error);
+        throw new Error('Failed to process wallet payment');
+      }
 
       payment.status = PaymentStatusEnum.PAID;
       payment.paidAt = vnNow();
