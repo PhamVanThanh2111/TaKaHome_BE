@@ -29,7 +29,7 @@ export class ContractManagementCron {
    */
   //Demo
   // @Cron('0 9 * * *') // 9:00 AM every day
-  @Cron('*/7 * * * *') // every 10 minutes
+  @Cron('*/10 * * * *') // every 10 minutes
   async checkContractExpiry(): Promise<void> {
     try {
       this.logger.log('📋 Checking contracts for expiry reminders...');
@@ -49,9 +49,9 @@ export class ContractManagementCron {
         const daysToExpiry = Math.ceil(
           (contract.endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
         );
-
+        //Demo
         // Send reminders at specific intervals
-        if ([30, 14, 7, 1].includes(daysToExpiry)) {
+        if ([30, 14, 7, 2, 3, 1].includes(daysToExpiry)) {
           await this.sendContractExpiryReminder(contract, daysToExpiry);
         }
       }
@@ -84,6 +84,14 @@ export class ContractManagementCron {
         7: {
           title: 'Hợp đồng sắp hết hạn (1 tuần)',
           content: `Hợp đồng thuê căn hộ ${contract.property.title} sẽ hết hạn vào ${expiryDate}. Chỉ còn 1 tuần! Hãy liên hệ ngay để hoàn tất thủ tục.`,
+        },
+        2: {
+          title: 'Hợp đồng hết hạn sau 2 ngày',
+          content: `Hợp đồng thuê căn hộ ${contract.property.title} sẽ hết hạn sau 2 ngày vào ${expiryDate}. Vui lòng chuẩn bị các thủ tục cần thiết.`,
+        },
+        3: {
+          title: 'Hợp đồng hết hạn sau 3 ngày',
+          content: `Hợp đồng thuê căn hộ ${contract.property.title} sẽ hết hạn sau 3 ngày vào ${expiryDate}. Vui lòng chuẩn bị các thủ tục cần thiết.`,
         },
         1: {
           title: 'Hợp đồng hết hạn ngày mai',
