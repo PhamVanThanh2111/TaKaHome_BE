@@ -16,6 +16,8 @@ import { UpdateContractDto } from './dto/update-contract.dto';
 import { CreateContractExtensionDto } from './dto/create-contract-extension.dto';
 import { RespondContractExtensionDto } from './dto/respond-contract-extension.dto';
 import { TenantRespondExtensionDto } from './dto/tenant-respond-extension.dto';
+import { GetContractExtensionsDto } from './dto/get-contract-extensions.dto';
+import { ContractExtensionResponseDto } from './dto/contract-extension-response.dto';
 import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ContractResponseDto } from './dto/contract-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
@@ -235,6 +237,50 @@ export class ContractController {
   ) {
     return this.contractExtensionService.tenantSignExtension(
       extensionId,
+      user.id,
+    );
+  }
+
+  @Post('extensions/list')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Lấy danh sách contract extensions theo contractId',
+    description: 'API này cho phép lấy danh sách tất cả các yêu cầu gia hạn của một hợp đồng. Người dùng phải là TENANT hoặc LANDLORD của hợp đồng đó.'
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Danh sách contract extensions được trả về thành công',
+    type: [ContractExtensionResponseDto],
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 200 },
+        message: { type: 'string', example: 'Contract extensions retrieved successfully' },
+        data: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/ContractExtensionResponseDto' }
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Không tìm thấy contract',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Không có quyền truy cập - chỉ tenant hoặc landlord mới có thể xem',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Dữ liệu đầu vào không hợp lệ',
+  })
+  getContractExtensionsList(
+    @Body() dto: GetContractExtensionsDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.contractExtensionService.getExtensionsByContractId(
+      dto.contractId,
       user.id,
     );
   }
