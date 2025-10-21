@@ -1,4 +1,4 @@
 export enum WalletDirection {
-  'CREDIT',
-  'DEBIT',
+  CREDIT = 'CREDIT',
+  DEBIT = 'DEBIT',
 }
