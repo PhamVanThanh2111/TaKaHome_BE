@@ -295,4 +295,50 @@ export class EscrowService {
       accountId: acc.id,
     });
   }
+
+  /** Lấy danh sách escrow transactions theo userId và contractId (optional) */
+  async getTransactionHistory(
+    userId: string,
+    contractId?: string,
+  ): Promise<ResponseCommon<EscrowTransaction[]>> {
+    const user = await this.accountRepo.manager.getRepository('User').findOne({
+      where: { id: userId },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Query builder để lấy transactions
+    const queryBuilder = this.txnRepo
+      .createQueryBuilder('txn')
+      .innerJoinAndSelect('txn.escrow', 'escrow')
+      .innerJoinAndSelect('escrow.contract', 'contract')
+      .innerJoinAndSelect('contract.tenant', 'tenant')
+      .innerJoinAndSelect('contract.landlord', 'landlord')
+      .where(
+        '(escrow.tenantId = :userId OR contract.landlordId = :userId)',
+        { userId }
+      );
+
+    // Nếu có contractId thì filter theo contract cụ thể
+    if (contractId) {
+      queryBuilder.andWhere('escrow.contractId = :contractId', { contractId });
+    }
+
+    // Sắp xếp theo thời gian mới nhất
+    queryBuilder.orderBy('txn.createdAt', 'DESC');
+
+    const transactions = await queryBuilder.getMany();
+
+    // Kiểm tra authorization cho từng transaction
+    const authorizedTransactions = transactions.filter(txn => {
+      const escrow = txn.escrow;
+      return (
+        escrow.tenantId === userId || 
+        escrow.contract?.landlord?.id === userId
+      );
+    });
+
+    return new ResponseCommon(200, 'SUCCESS', authorizedTransactions);
+  }
 }

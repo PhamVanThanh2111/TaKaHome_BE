@@ -150,6 +150,7 @@ export class AuthService {
           avatarUrl: acc.user.avatarUrl,
           status: acc.user.status,
           CCCD: acc.user.CCCD,
+          phone: acc.user.phone,
         },
         createdAt: acc.user.createdAt,
         updatedAt: acc.user.updatedAt,
