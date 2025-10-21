@@ -51,22 +51,13 @@ export class AuthService {
     await this.userRepo.save(user);
 
     // role mặc định cho account mới (TENANT)
-    const defaultRoles = [RoleEnum.TENANT];
-
-    // check roles từ dto (nếu có)
-    if (
-      dto.roles &&
-      dto.roles.length > 0 &&
-      dto.roles.includes(RoleEnum.LANDLORD)
-    ) {
-      defaultRoles.push(RoleEnum.LANDLORD);
-    }
+    const defaultRoles = RoleEnum.TENANT;
 
     const account = this.accountRepo.create({
       email: dto.email,
       password: hash,
       isVerified: false,
-      roles: defaultRoles,
+      roles: dto.roles ? [dto.roles] : [defaultRoles],
       user: user,
     });
     await this.accountRepo.save(account);
@@ -75,14 +66,10 @@ export class AuthService {
     const orgName = this.determineOrgFromRole(defaultRoles);
     if (orgName) {
       try {
-        // Nếu có 2 roles thì lấy role thứ 2 (LANDLORD), ngược lại lấy role đầu tiên (TENANT)
-        const enrollmentRole =
-          defaultRoles.length > 1 ? defaultRoles[1] : defaultRoles[0];
-
         await this.blockchainService.enrollUser({
           userId: user.id,
           orgName: orgName,
-          role: enrollmentRole,
+          role: defaultRoles,
         });
       } catch (error) {
         // Continue without failing registration - blockchain enrollment is optional
@@ -100,10 +87,10 @@ export class AuthService {
   /**
    * Determine organization name from user roles
    */
-  private determineOrgFromRole(roles: RoleEnum[]): string | null {
-    if (roles.includes(RoleEnum.LANDLORD)) return 'OrgLandlord';
-    if (roles.includes(RoleEnum.TENANT)) return 'OrgTenant';
-    if (roles.includes(RoleEnum.ADMIN)) return 'OrgProp';
+  private determineOrgFromRole(role: RoleEnum): string | null {
+    if (role === RoleEnum.LANDLORD) return 'OrgLandlord';
+    if (role === RoleEnum.TENANT) return 'OrgTenant';
+    if (role === RoleEnum.ADMIN) return 'OrgProp';
     return null;
   }
 
