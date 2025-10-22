@@ -37,6 +37,7 @@ export class PaymentReminderCron {
    * Chạy mỗi giờ để gửi payment reminders
    * Sends payment reminders 7, 3, 1 days before due date
    */
+  //Demo
   @Cron(CronExpression.EVERY_HOUR)
   async sendPaymentRemindersFirstMonth(): Promise<void> {
     try {
@@ -73,8 +74,8 @@ export class PaymentReminderCron {
         if ([7, 3, 1].includes(daysToDue)) {
           await this.sendPaymentReminderFirstMonth(booking, daysToDue);
         }
+        // Demo
       }
-
       // Check deposit reminders and cancel overdue deposits
       await this.sendDepositReminders();
       await this.cancelOverdueDeposits();
@@ -152,7 +153,6 @@ export class PaymentReminderCron {
           BookingStatus.ESCROW_FUNDED_L,
           BookingStatus.ESCROW_FUNDED_T,
         ]),
-        escrowDepositFundedAt: IsNull(),
         escrowDepositDueAt: MoreThan(now),
       },
       relations: ['tenant', 'property', 'property.landlord'],
@@ -219,7 +219,6 @@ export class PaymentReminderCron {
             BookingStatus.ESCROW_FUNDED_L,
             BookingStatus.ESCROW_FUNDED_T,
           ]),
-          escrowDepositFundedAt: IsNull(),
           escrowDepositDueAt: LessThanOrEqual(addDays(now, -1)), // 24+ hours overdue
         },
         relations: ['tenant', 'property', 'property.landlord'],

@@ -33,7 +33,7 @@ export class RegisterDto {
   @IsOptional()
   phone?: string;
 
-  @ApiProperty({ example: [RoleEnum.TENANT], required: false })
+  @ApiProperty({ example: RoleEnum.TENANT, required: false })
   @IsOptional()
-  roles?: RoleEnum[];
+  roles?: RoleEnum;
 }

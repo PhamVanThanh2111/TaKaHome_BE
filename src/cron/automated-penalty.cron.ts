@@ -23,6 +23,7 @@ export class AutomatedPenaltyCron {
    * This is the single source of truth for overdue payment processing
    * to avoid duplicate penalty applications.
    */
+  //Demo
   @Cron('0 9 * * *', {
     name: 'process-overdue-payments',
     timeZone: 'Asia/Ho_Chi_Minh',

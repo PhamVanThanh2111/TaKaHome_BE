@@ -97,7 +97,7 @@ export class SmartCAService {
 
       try {
         // Try original @signpdf approach first
-        out = Buffer.from(plainAddPlaceholder(opts));
+        out = Buffer.from(plainAddPlaceholder(opts)) as Buffer;
 
         // Enhance signature dictionary for NEAC compliance
         out = this.enhanceSignatureDictForNeac(out, p);

@@ -358,6 +358,128 @@ export class S3StorageService {
   }
 
   /**
+   * Upload user avatar to S3
+   * Generates structured key: avatar/{userId}/{filename}.{ext}
+   */
+  async uploadAvatar(
+    avatarBuffer: Buffer,
+    userId: string,
+    originalFilename: string,
+    contentType: string = 'image/jpeg',
+  ): Promise<UploadResult> {
+    try {
+      // Validate inputs
+      if (!Buffer.isBuffer(avatarBuffer) || avatarBuffer.length === 0) {
+        throw new BadRequestException('Invalid avatar buffer provided');
+      }
+
+      if (!userId?.trim()) {
+        throw new BadRequestException('User ID is required');
+      }
+
+      if (!originalFilename?.trim()) {
+        throw new BadRequestException('Original filename is required');
+      }
+
+      // Validate file type (only images)
+      const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+      if (!allowedTypes.includes(contentType)) {
+        throw new BadRequestException(
+          'Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed.',
+        );
+      }
+
+      // Extract file extension
+      const fileExtension = originalFilename.split('.').pop()?.toLowerCase() || 'jpg';
+      
+      // Generate unique filename with timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `avatar-${timestamp}.${fileExtension}`;
+      
+      // Generate structured S3 key
+      const key = `avatar/${userId.trim()}/${filename}`;
+
+      // Prepare upload parameters
+      const uploadParams: PutObjectCommandInput = {
+        Bucket: this.s3.bucketName,
+        Key: key,
+        Body: avatarBuffer,
+        ContentType: contentType,
+        ContentDisposition: `inline; filename="${filename}"`,
+        Metadata: {
+          userId: userId.trim(),
+          originalFilename: originalFilename,
+          uploadedAt: new Date().toISOString(),
+          source: 'avatar-upload',
+        },
+        // Server-side encryption
+        ServerSideEncryption: 'AES256',
+        // Cache control for images
+        CacheControl: 'public, max-age=31536000', // 1 year cache
+      };
+
+      // Upload to S3
+      const command = new PutObjectCommand(uploadParams);
+      const result = await this.s3Client.send(command);
+
+      // Generate public URL
+      const url = `https://${this.s3.bucketName}.s3.${this.s3.region}.amazonaws.com/${key}`;
+
+      const uploadResult: UploadResult = {
+        key,
+        url,
+        bucket: this.s3.bucketName,
+        etag: result.ETag,
+        size: avatarBuffer.length,
+      };
+
+      return uploadResult;
+    } catch (error) {
+      console.error('[S3Upload] ❌ Avatar upload failed:', error);
+
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+
+      // AWS S3 specific errors
+      if (error instanceof Error && error.name === 'NoSuchBucket') {
+        throw new BadRequestException(
+          `S3 bucket '${this.s3.bucketName}' does not exist`,
+        );
+      }
+
+      if (error instanceof Error && error.name === 'AccessDenied') {
+        throw new BadRequestException(
+          'Access denied to S3 bucket. Check AWS credentials and permissions.',
+        );
+      }
+
+      throw new BadRequestException(
+        `Failed to upload avatar to S3: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+  }
+
+  /**
+   * Delete user avatar from S3
+   */
+  async deleteAvatar(key: string): Promise<void> {
+    try {
+      const command = new DeleteObjectCommand({
+        Bucket: this.s3.bucketName,
+        Key: key,
+      });
+
+      await this.s3Client.send(command);
+    } catch (error) {
+      console.error('[S3Delete] ❌ Failed to delete avatar:', error);
+      throw new BadRequestException(
+        `Failed to delete avatar from S3: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+  }
+
+  /**
    * Extract S3 key from full S3 URL
    */
   extractKeyFromUrl(s3Url: string): string {

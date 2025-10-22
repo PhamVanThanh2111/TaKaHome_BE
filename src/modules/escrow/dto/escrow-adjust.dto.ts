@@ -15,7 +15,7 @@ export class EscrowAdjustDto {
 
   @ApiProperty({
     required: false,
-    example: 'Khấu trừ do hư hại tài sản',
+    example: 'Hoàn tiền cọc do hủy hợp đồng',
     description: 'Ghi chú giao dịch',
   })
   @IsOptional()

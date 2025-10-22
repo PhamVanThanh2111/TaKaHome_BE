@@ -572,6 +572,10 @@ export class AutomatedPenaltyService {
             const daysPastDue = Math.floor(
               (now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24),
             );
+            //Demo
+            // const daysPastDue = Math.floor(
+            //   (now.getTime() - dueDate.getTime()) / (1000 * 60),
+            // );
 
             if (daysPastDue > 0) {
               this.logger.log(

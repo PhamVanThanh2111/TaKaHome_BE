@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   ConflictException,
   Injectable,
@@ -16,6 +17,9 @@ import { RoleEnum } from '../../common/enums/role.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { BlockchainService } from 'src/modules/blockchain/blockchain.service';
 import { Logger } from '@nestjs/common';
+import { vnNow } from 'src/common/datetime';
+import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
 
 @Injectable()
 export class AuthService {
@@ -28,6 +32,7 @@ export class AuthService {
     private readonly userRepo: Repository<User>,
     private readonly jwtService: JwtService,
     private readonly blockchainService: BlockchainService,
+    private readonly configService: ConfigService,
   ) {}
 
   async register(
@@ -50,22 +55,13 @@ export class AuthService {
     await this.userRepo.save(user);
 
     // role mặc định cho account mới (TENANT)
-    const defaultRoles = [RoleEnum.TENANT];
-
-    // check roles từ dto (nếu có)
-    if (
-      dto.roles &&
-      dto.roles.length > 0 &&
-      dto.roles.includes(RoleEnum.LANDLORD)
-    ) {
-      defaultRoles.push(RoleEnum.LANDLORD);
-    }
+    const defaultRoles = RoleEnum.TENANT;
 
     const account = this.accountRepo.create({
       email: dto.email,
       password: hash,
       isVerified: false,
-      roles: defaultRoles,
+      roles: dto.roles ? [dto.roles] : [defaultRoles],
       user: user,
     });
     await this.accountRepo.save(account);
@@ -74,14 +70,10 @@ export class AuthService {
     const orgName = this.determineOrgFromRole(defaultRoles);
     if (orgName) {
       try {
-        // Nếu có 2 roles thì lấy role thứ 2 (LANDLORD), ngược lại lấy role đầu tiên (TENANT)
-        const enrollmentRole =
-          defaultRoles.length > 1 ? defaultRoles[1] : defaultRoles[0];
-
         await this.blockchainService.enrollUser({
-          userId: user.id.toString(),
+          userId: user.id,
           orgName: orgName,
-          role: enrollmentRole,
+          role: defaultRoles,
         });
       } catch (error) {
         // Continue without failing registration - blockchain enrollment is optional
@@ -99,10 +91,10 @@ export class AuthService {
   /**
    * Determine organization name from user roles
    */
-  private determineOrgFromRole(roles: RoleEnum[]): string | null {
-    if (roles.includes(RoleEnum.LANDLORD)) return 'OrgLandlord';
-    if (roles.includes(RoleEnum.TENANT)) return 'OrgTenant';
-    if (roles.includes(RoleEnum.ADMIN)) return 'OrgProp';
+  private determineOrgFromRole(role: RoleEnum): string | null {
+    if (role === RoleEnum.LANDLORD) return 'OrgLandlord';
+    if (role === RoleEnum.TENANT) return 'OrgTenant';
+    if (role === RoleEnum.ADMIN) return 'OrgProp';
     return null;
   }
 
@@ -134,8 +126,12 @@ export class AuthService {
     const payload = {
       sub: acc.user.id,
       email: acc.email,
-      roles: acc.roles, // RoleEnum[]
+      roles: acc.roles,
     };
+
+    acc.lastLoginAt = vnNow();
+    await this.accountRepo.save(acc);
+
     return new ResponseCommon(200, 'SUCCESS', {
       accessToken: this.jwtService.sign(payload),
       account: {
@@ -148,8 +144,138 @@ export class AuthService {
           fullName: acc.user.fullName,
           avatarUrl: acc.user.avatarUrl,
           status: acc.user.status,
+          CCCD: acc.user.CCCD,
+          phone: acc.user.phone,
         },
+        createdAt: acc.user.createdAt,
+        updatedAt: acc.user.updatedAt,
       },
     });
+  }
+
+  async handleGoogleLogin(code: string): Promise<{
+    accessToken: string;
+    account: any;
+    accountStatus: 'new' | 'existing';
+  }> {
+    try {
+      // Đổi code lấy token
+      const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
+        code,
+        client_id: this.configService.get<string>('GOOGLE_CLIENT_ID'),
+        client_secret: this.configService.get<string>('GOOGLE_CLIENT_SECRET'),
+        redirect_uri: this.configService.get<string>('GOOGLE_REDIRECT_URI'),
+        grant_type: 'authorization_code',
+      });
+
+      const { access_token } = tokenResponse.data as { access_token: string };
+
+      // Lấy thông tin người dùng từ Google
+      const userInfoResponse = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${access_token}` },
+      });
+      console.log('userInfoResponse', userInfoResponse);
+
+      const { email, name, picture } = userInfoResponse.data as {
+        email: string;
+        name: string;
+        picture?: string;
+      };
+
+      // Xử lý trong hệ thống
+      const result = await this.findOrCreateGoogleUser(email, name, picture);
+
+      // Sinh JWT
+      const payload = {
+        sub: result.user.id,
+        email: result.account.email,
+        roles: result.account.roles,
+      };
+
+      // Cập nhật last login
+      result.account.lastLoginAt = vnNow();
+      await this.accountRepo.save(result.account);
+
+      return {
+        accessToken: this.jwtService.sign(payload),
+        account: {
+          id: result.account.id,
+          email: result.account.email,
+          roles: result.account.roles,
+          isVerified: result.account.isVerified,
+          user: {
+            id: result.user.id,
+            fullName: result.user.fullName,
+            avatarUrl: result.user.avatarUrl,
+            status: result.user.status,
+            CCCD: result.user.CCCD,
+            phone: result.user.phone,
+          },
+          createdAt: result.user.createdAt,
+          updatedAt: result.user.updatedAt,
+        },
+        accountStatus: result.isNew ? 'new' : 'existing',
+      };
+    } catch (error) {
+      this.logger.error('Google OAuth error:', error);
+      throw new UnauthorizedException('Google authentication failed');
+    }
+  }
+
+  private async findOrCreateGoogleUser(
+    email: string,
+    name: string,
+    picture?: string,
+  ): Promise<{ account: Account; user: User; isNew: boolean }> {
+    // Kiểm tra user đã tồn tại chưa
+    let account = await this.accountRepo.findOne({
+      where: { email },
+      relations: ['user'],
+    });
+
+    if (account) {
+      // User đã tồn tại
+      return { account, user: account.user, isNew: false };
+    }
+
+    // Tạo user mới
+    const user = this.userRepo.create({
+      email,
+      fullName: name,
+      avatarUrl: picture,
+    });
+    await this.userRepo.save(user);
+
+    // Tạo account mới với role mặc định TENANT
+    const defaultRole = RoleEnum.TENANT;
+    // Tạo password random cho Google OAuth user (họ sẽ không dùng password này)
+    const randomPassword = await bcrypt.hash(`google_oauth_${Date.now()}`, 10);
+    
+    account = this.accountRepo.create({
+      email,
+      password: randomPassword,
+      isVerified: true, // Email đã được Google verify
+      roles: [defaultRole],
+      user: user,
+    });
+    await this.accountRepo.save(account);
+
+    // Enroll blockchain identity
+    const orgName = this.determineOrgFromRole(defaultRole);
+    if (orgName) {
+      try {
+        await this.blockchainService.enrollUser({
+          userId: user.id,
+          orgName: orgName,
+          role: defaultRole,
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Blockchain enrollment failed for Google user ${user.id}: ${error.message}`,
+        );
+      }
+    }
+
+    return { account, user, isNew: true };
   }
 }

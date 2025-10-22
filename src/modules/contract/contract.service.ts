@@ -1,3 +1,7 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/require-await */
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as crypto from 'crypto';
@@ -108,7 +112,7 @@ export class ContractService {
       ? this.toDate(input.endDate)
       : this.addMonths(start, 12);
     const end = proposedEnd > start ? proposedEnd : this.addMonths(start, 12);
-
+    //Demo
     const contract = this.contractRepository.create({
       contractCode:
         input.contractCode ?? (await this.generateContractCode(start)),
@@ -161,7 +165,12 @@ export class ContractService {
     const saved = await this.contractRepository.save(contract);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
-
+  //Demo
+  // private addHours(base: Date, hours: number): Date {
+  //   const result = new Date(base);
+  //   result.setHours(result.getHours() + hours);
+  //   return result;
+  // }
   private ensureStatus(
     contract: Contract,
     expected: ContractStatusEnum[],
@@ -500,9 +509,7 @@ export class ContractService {
         'OrgLandlordMSP',
       );
 
-      const pricing = await this.getCurrentContractPricing(
-        contract.id,
-      );
+      const pricing = await this.getCurrentContractPricing(contract.id);
 
       const contractData = {
         contractId: fullContract.contractCode,

@@ -206,6 +206,45 @@ export class ContractExtensionService {
     );
   }
 
+  /**
+   * Lấy danh sách contract extensions với contractId làm tham số body
+   */
+  async getExtensionsByContractId(
+    contractId: string,
+    userId: string,
+  ): Promise<ResponseCommon<ContractExtension[]>> {
+    // Kiểm tra contract tồn tại
+    const contract = await this.contractRepository.findOne({
+      where: { id: contractId },
+      relations: ['tenant', 'landlord'],
+    });
+
+    if (!contract) {
+      throw new NotFoundException('Contract not found');
+    }
+
+    // Kiểm tra user có liên quan đến contract này không (có thể là TENANT hoặc LANDLORD)
+    const isRelatedUser = contract.tenant.id === userId || contract.landlord.id === userId;
+    
+    if (!isRelatedUser) {
+      throw new ForbiddenException(
+        'You do not have permission to view extensions for this contract. Only tenant or landlord can access this information.',
+      );
+    }
+
+    // Lấy danh sách extensions của contract này
+    const extensions = await this.extensionRepository.find({
+      where: { contractId },
+      order: { createdAt: 'DESC' },
+    });
+
+    return new ResponseCommon(
+      200,
+      'Contract extensions retrieved successfully',
+      extensions,
+    );
+  }
+
   async cancelExtension(
     extensionId: string,
     userId: string,

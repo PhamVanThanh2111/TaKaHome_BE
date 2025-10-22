@@ -30,16 +30,16 @@ export class FavoriteService {
     return new ResponseCommon(200, 'SUCCESS', favorites);
   }
 
-  async findOne(id: number): Promise<ResponseCommon<Favorite | null>> {
+  async findOne(id: string): Promise<ResponseCommon<Favorite | null>> {
     const favorite = await this.favoriteRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['user', 'property'],
     });
     return new ResponseCommon(200, 'SUCCESS', favorite);
   }
 
   async update(
-    id: number,
+    id: string,
     updateFavoriteDto: UpdateFavoriteDto,
   ): Promise<ResponseCommon<Favorite>> {
     await this.favoriteRepository.update(
@@ -47,7 +47,7 @@ export class FavoriteService {
       updateFavoriteDto as Partial<Favorite>,
     );
     const updatedFavorite = await this.favoriteRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['user', 'property'],
     });
     if (!updatedFavorite) {
@@ -56,7 +56,7 @@ export class FavoriteService {
     return new ResponseCommon(200, 'SUCCESS', updatedFavorite);
   }
 
-  async remove(id: number): Promise<ResponseCommon<null>> {
+  async remove(id: string): Promise<ResponseCommon<null>> {
     await this.favoriteRepository.delete(id);
     return new ResponseCommon(200, 'SUCCESS', null);
   }

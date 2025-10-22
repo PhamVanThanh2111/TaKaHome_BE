@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -157,17 +158,23 @@ export class PaymentService {
       method, // 'WALLET' | 'VNPAY'
       status: PaymentStatusEnum.PENDING, // PENDING khi tạo mới
       ...(purpose ? { purpose } : {}),
+      userId: ctx.userId,
     });
     payment = await this.paymentRepository.save(payment);
 
     if (method === PaymentMethodEnum.WALLET) {
       // 2A) Thanh toán bằng ví: trừ ví và chuyển sang PAID
-      await this.walletService.debit(ctx.userId, {
-        amount,
-        type: WalletTxnType.CONTRACT_PAYMENT,
-        refId: payment.id,
-        note: `Pay contract ${contractId} by wallet`,
-      });
+      try {
+        await this.walletService.debit(ctx.userId, {
+          amount,
+          type: WalletTxnType.CONTRACT_PAYMENT,
+          refId: payment.id,
+          note: `Pay contract ${contractId} by wallet`,
+        });
+      } catch (error) {
+        console.error('Error debiting wallet:', error);
+        throw new Error('Failed to process wallet payment');
+      }
 
       payment.status = PaymentStatusEnum.PAID;
       payment.paidAt = vnNow();
@@ -231,9 +238,9 @@ export class PaymentService {
     });
   }
 
-  async findOne(id: number): Promise<ResponseCommon<Payment>> {
+  async findOne(id: string): Promise<ResponseCommon<Payment>> {
     const payment = await this.paymentRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['contract'],
     });
 
@@ -245,12 +252,12 @@ export class PaymentService {
   }
 
   async update(
-    id: number,
+    id: string,
     updatePaymentDto: UpdatePaymentDto,
   ): Promise<ResponseCommon<Payment>> {
     await this.paymentRepository.update(id, updatePaymentDto);
     const updated = await this.paymentRepository.findOne({
-      where: { id: id.toString() },
+      where: { id: id },
       relations: ['contract'],
     });
     if (!updated) {
@@ -828,7 +835,9 @@ export class PaymentService {
         console.error('Missing userId for wallet top-up payment', {
           paymentId: payment.id,
         });
-        throw new BadRequestException('Missing user information for wallet top-up');
+        throw new BadRequestException(
+          'Missing user information for wallet top-up',
+        );
       }
 
       // Verify user exists
@@ -1069,6 +1078,14 @@ export class PaymentService {
     // Period starts from 2 since first payment is period 1
     const period = Math.max(2, monthsDiff + 2);
     return period.toString();
+    // DEMO: Calculate 5-hour periods instead of months
+    // const timeDiffMs = paymentDate.getTime() - startDate.getTime();
+    // const hoursDiff = Math.floor(timeDiffMs / (1000 * 60 * 60)); // Convert to hours
+    // const periodsSinceStart = Math.floor(hoursDiff / 5); // 5-hour periods
+
+    // // Period starts from 2 since first payment is period 1
+    // const period = Math.max(2, periodsSinceStart + 2);
+    // return period.toString();
   }
 
   /**

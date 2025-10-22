@@ -20,9 +20,16 @@ export class InvoiceCronService {
   ) {}
 
   /**
-   * Generate monthly invoices from blockchain every 30 seconds
+   * Generate monthly invoices from blockchain every 60 seconds
+   * DEMO MODE: Runs every 2 minutes (check more frequently for 5-hour cycles)
+   * PRODUCTION: Should run once daily at 8:00 AM
    */
-  @Cron('*/30 * * * * *', {
+  // @Cron('0 */2 * * * *', {
+  //   name: 'generate-monthly-invoices-morning',
+  // })
+  //Production: Run once daily
+  //Demo: Run every 2 minutes to catch 5-hour payment cycles
+  @Cron('0 0 8 * * *', {
     name: 'generate-monthly-invoices-morning',
   })
   async handleGenerateMonthlyInvoicesMorning(): Promise<void> {
@@ -91,6 +98,8 @@ export class InvoiceCronService {
       const todayUtc = vnNow();
       let invoicesCreated = 0;
 
+      // DEMO MODE: Check for 5-hour payment cycles
+
       for (const payment of scheduledPayments) {
         try {
           // Check if payment is due today or overdue
@@ -104,10 +113,16 @@ export class InvoiceCronService {
           const daysDiff = Math.ceil(
             (dueDate.getTime() - todayUtc.getTime()) / (1000 * 60 * 60 * 24),
           );
+          // const hoursDiff = Math.ceil(
+          //   (dueDate.getTime() - todayUtc.getTime()) / (1000 * 60 * 60),
+          // );
+          //let shouldCreateInvoice = false;
+          //shouldCreateInvoice = hoursDiff <= 3;
 
           // Create invoice for payments due in 7 days or less (early notification)
           // or payments that are already due/overdue
           if (daysDiff <= 7) {
+            // if (shouldCreateInvoice) {
             // Find the contract in our database
             const contract = await this.contractRepo.findOne({
               where: { contractCode: payment.contractId },
@@ -126,14 +141,19 @@ export class InvoiceCronService {
               contract.id,
             );
             const period = `${payment.period}`;
-            // const billingPeriod =
+
+            // More precise check: Match exact "Period X" format with word boundaries
+            // This prevents "Period 2" from matching "Period 12"
             const invoiceExists = existingInvoices.data?.some((invoice) =>
-              invoice.items?.some((item) => item.description.includes(period)),
+              invoice.items?.some((item) => {
+                const regex = new RegExp(`Period\\s+${period}\\b`, 'i');
+                return regex.test(item.description);
+              }),
             );
 
             if (invoiceExists) {
-              this.logger.log(
-                `Invoice already exists for contract ${contract.contractCode} period ${period}`,
+              this.logger.debug(
+                `⏭️ Invoice already exists for contract ${contract.contractCode} period ${period}`,
               );
               continue;
             }

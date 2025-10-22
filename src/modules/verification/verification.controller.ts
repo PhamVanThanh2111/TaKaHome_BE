@@ -49,7 +49,7 @@ export class VerificationController {
     description: 'Không tìm thấy verification',
   })
   findOne(@Param('id') id: string) {
-    return this.verificationService.findOne(+id);
+    return this.verificationService.findOne(id);
   }
 
   @Patch(':id')
@@ -59,6 +59,6 @@ export class VerificationController {
     @Param('id') id: string,
     @Body() updateVerificationDto: UpdateVerificationDto,
   ) {
-    return this.verificationService.update(+id, updateVerificationDto);
+    return this.verificationService.update(id, updateVerificationDto);
   }
 }

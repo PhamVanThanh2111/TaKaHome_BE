@@ -8,12 +8,14 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { EscrowService } from './escrow.service';
-import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { RoleEnum } from '../common/enums/role.enum';
 import { EscrowAdjustDto } from './dto/escrow-adjust.dto';
+import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -23,17 +25,92 @@ export class EscrowController {
 
   @Get('balance')
   @ApiOperation({
-    summary: 'Lấy số dư tiền cọc hiện tại theo tenant + property',
+    summary: 'Lấy số dư tiền cọc hiện tại theo contract và người thuê',
   })
   @ApiResponse({ status: 200, description: 'OK' })
   async getBalance(
-    @Query('tenantId') tenantId: string,
-    @Query('propertyId') propertyId: string,
+    @Query('contractId') contractId: string,
+    @CurrentUser() user: JwtUser,
   ) {
-    return this.escrowService.getBalanceByTenantAndProperty(
-      tenantId,
-      propertyId,
+    return this.escrowService.getBalanceByTenantAndContract(
+      user.id,
+      contractId,
     );
+  }
+
+  @Get('transactions')
+  @ApiOperation({
+    summary: 'Lấy danh sách giao dịch escrow của user',
+    description: 'Trả về danh sách các giao dịch escrow mà user có quyền truy cập (là tenant hoặc landlord)',
+  })
+  @ApiQuery({
+    name: 'contractId',
+    required: false,
+    description: 'ID của contract cụ thể (optional). Nếu không truyền sẽ trả về tất cả transactions của user',
+    type: String,
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Danh sách giao dịch escrow',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 200 },
+        message: { type: 'string', example: 'SUCCESS' },
+        data: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              direction: { type: 'string', enum: ['CREDIT', 'DEBIT'] },
+              type: { type: 'string', enum: ['DEPOSIT', 'DEDUCTION', 'REFUND'] },
+              amount: { type: 'string' },
+              status: { type: 'string' },
+              note: { type: 'string' },
+              completedAt: { type: 'string', format: 'date-time' },
+              createdAt: { type: 'string', format: 'date-time' },
+              escrow: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  contractId: { type: 'string' },
+                  currentBalanceTenant: { type: 'string' },
+                  currentBalanceLandlord: { type: 'string' },
+                  contract: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      contractCode: { type: 'string' },
+                      tenant: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          fullName: { type: 'string' }
+                        }
+                      },
+                      landlord: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          fullName: { type: 'string' }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  })
+  async getTransactionHistory(
+    @CurrentUser() user: JwtUser,
+    @Query('contractId') contractId?: string,
+  ) {
+    return this.escrowService.getTransactionHistory(user.id, contractId);
   }
 
   @Post(':id/deduct')
@@ -60,7 +137,6 @@ export class EscrowController {
   }
 
   @Post(':id/refund')
-  @Roles(RoleEnum.ADMIN)
   @ApiOperation({ summary: 'Hoàn trả tiền cọc cho (người thuê + chủ nhà)' })
   @ApiResponse({ status: 200, description: 'Hoàn cọc thành công' })
   async refund(@Param('id') accountId: string, @Body() dto: EscrowAdjustDto) {

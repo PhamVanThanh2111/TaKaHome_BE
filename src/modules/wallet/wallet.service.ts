@@ -163,6 +163,22 @@ export class WalletService {
     }
   }
 
+  /** Lấy lịch sử giao dịch ví của user */
+  async getTransactionHistory(
+    userId: string,
+  ): Promise<ResponseCommon<WalletTransaction[]>> {
+    // Đảm bảo user có ví
+    const wallet = await this.ensureWalletEntity(userId);
+    
+    // Lấy danh sách transactions
+    const transactions = await this.txnRepo.find({
+      where: { walletId: wallet.id },
+      order: { createdAt: 'DESC' },
+    });
+
+    return new ResponseCommon(200, 'SUCCESS', transactions);
+  }
+
   // --- HELPER ---
 
   private async ensureWalletEntity(userId: string): Promise<Wallet> {

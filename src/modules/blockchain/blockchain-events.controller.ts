@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { 
   Controller, 
   Get, 
@@ -18,7 +19,7 @@ import {
 } from '@nestjs/swagger';
 
 import { BlockchainEventService } from './blockchain-event.service';
-import { JwtBlockchainAuthGuard, BlockchainUser } from './guards/jwt-blockchain-auth.guard';
+import { JwtBlockchainAuthGuard } from './guards/jwt-blockchain-auth.guard';
 import { EventSubscriptionOptions } from './interfaces/blockchain-events.interface';
 
 /**
