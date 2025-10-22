@@ -174,7 +174,6 @@ export class AuthService {
       const userInfoResponse = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
         headers: { Authorization: `Bearer ${access_token}` },
       });
-      console.log('userInfoResponse', userInfoResponse);
 
       const { email, name, picture } = userInfoResponse.data as {
         email: string;
