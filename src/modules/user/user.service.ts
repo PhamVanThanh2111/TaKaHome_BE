@@ -129,6 +129,7 @@ export class UserService {
   async recognizeCccd(
     imageBuffer: Buffer,
     originalFilename: string,
+    userId: string,
   ): Promise<ResponseCommon<CccdRecognitionResponseDto>> {
     try {
       // Call CCCD recognition service
@@ -136,7 +137,14 @@ export class UserService {
         imageBuffer,
         originalFilename,
       );
-
+      if (userId) {
+        const user = await this.userRepository.findOne({ where: { id: userId } });
+        if (user) {
+          await this.userRepository.update(userId, {
+            CCCD: result.id,
+          });
+        }
+      }
       return new ResponseCommon(200, 'CCCD recognition completed successfully', result);
     } catch (error) {
       if (error instanceof BadRequestException) {

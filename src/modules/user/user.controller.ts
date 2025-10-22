@@ -209,6 +209,7 @@ export class UserController {
   })
   async recognizeCccd(
     @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: JwtUser,
   ) {
     if (!file) {
       throw new BadRequestException('No image file uploaded');
@@ -231,6 +232,7 @@ export class UserController {
     return this.userService.recognizeCccd(
       file.buffer,
       file.originalname,
+      user.id
     );
   }
 }
