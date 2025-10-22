@@ -24,13 +24,12 @@ export class InvoiceCronService {
    * DEMO MODE: Runs every 2 minutes (check more frequently for 5-hour cycles)
    * PRODUCTION: Should run once daily at 8:00 AM
    */
-  //Production: Run once daily
-  //  @Cron('0 0 8 * * *', {
+  // @Cron('0 */2 * * * *', {
   //   name: 'generate-monthly-invoices-morning',
   // })
-
+  //Production: Run once daily
   //Demo: Run every 2 minutes to catch 5-hour payment cycles
-  @Cron('0 */2 * * * *', {
+  @Cron('0 0 8 * * *', {
     name: 'generate-monthly-invoices-morning',
   })
   async handleGenerateMonthlyInvoicesMorning(): Promise<void> {
@@ -111,19 +110,19 @@ export class InvoiceCronService {
 
           const dueDate = new Date(payment.dueDate);
           const billingPeriod = formatVN(dueDate, 'yyyy-MM');
-          // const daysDiff = Math.ceil(
-          // (dueDate.getTime() - todayUtc.getTime()) / (1000 * 60 * 60 * 24),
-          // );
-          const hoursDiff = Math.ceil(
-            (dueDate.getTime() - todayUtc.getTime()) / (1000 * 60 * 60),
+          const daysDiff = Math.ceil(
+            (dueDate.getTime() - todayUtc.getTime()) / (1000 * 60 * 60 * 24),
           );
-          let shouldCreateInvoice = false;
-          shouldCreateInvoice = hoursDiff <= 3;
+          // const hoursDiff = Math.ceil(
+          //   (dueDate.getTime() - todayUtc.getTime()) / (1000 * 60 * 60),
+          // );
+          //let shouldCreateInvoice = false;
+          //shouldCreateInvoice = hoursDiff <= 3;
 
           // Create invoice for payments due in 7 days or less (early notification)
           // or payments that are already due/overdue
-          // if (daysDiff <= 7) {
-          if (shouldCreateInvoice) {
+          if (daysDiff <= 7) {
+            // if (shouldCreateInvoice) {
             // Find the contract in our database
             const contract = await this.contractRepo.findOne({
               where: { contractCode: payment.contractId },

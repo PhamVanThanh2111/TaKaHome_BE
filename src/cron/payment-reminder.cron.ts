@@ -37,9 +37,8 @@ export class PaymentReminderCron {
    * Chạy mỗi giờ để gửi payment reminders
    * Sends payment reminders 7, 3, 1 days before due date
    */
-  // @Cron(CronExpression.EVERY_HOUR)
   //Demo
-  @Cron('*/3 * * * *')
+  @Cron(CronExpression.EVERY_HOUR)
   async sendPaymentRemindersFirstMonth(): Promise<void> {
     try {
       this.logger.log('🔔 Checking for payment reminders to send...');
@@ -66,27 +65,17 @@ export class PaymentReminderCron {
       for (const booking of upcomingPayments) {
         if (!booking.firstRentDueAt) continue;
 
-        // const daysToDue = Math.ceil(
-        //   (booking.firstRentDueAt.getTime() - now.getTime()) /
-        //     (1000 * 60 * 60 * 24),
-        // );
-
-        // // Send reminders at specific intervals
-        // if ([7, 3, 1].includes(daysToDue)) {
-        //   await this.sendPaymentReminderFirstMonth(booking, daysToDue);
-        // }
-        // Demo
-        const reminderIntervals = [3 * 60, 1 * 60, 30];
-
-        const minutesToDue = Math.ceil(
-          (booking.firstRentDueAt.getTime() - now.getTime()) / (1000 * 60),
+        const daysToDue = Math.ceil(
+          (booking.firstRentDueAt.getTime() - now.getTime()) /
+            (1000 * 60 * 60 * 24),
         );
 
-        if (reminderIntervals.includes(minutesToDue)) {
-          await this.sendPaymentReminderFirstMonth(booking, minutesToDue);
+        // Send reminders at specific intervals
+        if ([7, 3, 1].includes(daysToDue)) {
+          await this.sendPaymentReminderFirstMonth(booking, daysToDue);
         }
+        // Demo
       }
-
       // Check deposit reminders and cancel overdue deposits
       await this.sendDepositReminders();
       await this.cancelOverdueDeposits();

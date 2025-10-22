@@ -166,11 +166,11 @@ export class PaymentService {
       // 2A) Thanh toán bằng ví: trừ ví và chuyển sang PAID
       try {
         await this.walletService.debit(ctx.userId, {
-        amount,
-        type: WalletTxnType.CONTRACT_PAYMENT,
-        refId: payment.id,
-        note: `Pay contract ${contractId} by wallet`,
-      });
+          amount,
+          type: WalletTxnType.CONTRACT_PAYMENT,
+          refId: payment.id,
+          note: `Pay contract ${contractId} by wallet`,
+        });
       } catch (error) {
         console.error('Error debiting wallet:', error);
         throw new Error('Failed to process wallet payment');
@@ -1070,22 +1070,22 @@ export class PaymentService {
     paymentDate: Date,
   ): string {
     const startDate = contract.startDate;
-    // const monthsDiff = Math.floor(
-    //   (paymentDate.getFullYear() - startDate.getFullYear()) * 12 +
-    //     (paymentDate.getMonth() - startDate.getMonth()),
-    // );
-
-    // // Period starts from 2 since first payment is period 1
-    // const period = Math.max(2, monthsDiff + 2);
-    // return period.toString();
-    // DEMO: Calculate 5-hour periods instead of months
-    const timeDiffMs = paymentDate.getTime() - startDate.getTime();
-    const hoursDiff = Math.floor(timeDiffMs / (1000 * 60 * 60)); // Convert to hours
-    const periodsSinceStart = Math.floor(hoursDiff / 5); // 5-hour periods
+    const monthsDiff = Math.floor(
+      (paymentDate.getFullYear() - startDate.getFullYear()) * 12 +
+        (paymentDate.getMonth() - startDate.getMonth()),
+    );
 
     // Period starts from 2 since first payment is period 1
-    const period = Math.max(2, periodsSinceStart + 2);
+    const period = Math.max(2, monthsDiff + 2);
     return period.toString();
+    // DEMO: Calculate 5-hour periods instead of months
+    // const timeDiffMs = paymentDate.getTime() - startDate.getTime();
+    // const hoursDiff = Math.floor(timeDiffMs / (1000 * 60 * 60)); // Convert to hours
+    // const periodsSinceStart = Math.floor(hoursDiff / 5); // 5-hour periods
+
+    // // Period starts from 2 since first payment is period 1
+    // const period = Math.max(2, periodsSinceStart + 2);
+    // return period.toString();
   }
 
   /**
