@@ -64,7 +64,7 @@ export class AuthController {
       const result = await this.authService.handleGoogleLogin(code);
 
       return res.redirect(
-        `${process.env.FRONTEND_URL}/dashboard?token=${result.accessToken}&status=${result.accountStatus}`
+        `${process.env.FRONTEND_URL}/login-success?token=${result.accessToken}&status=${result.accountStatus}`
       );
     } catch (error) {
       console.error('Google OAuth callback error:', error);
