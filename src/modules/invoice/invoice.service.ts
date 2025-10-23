@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -97,9 +98,16 @@ export class InvoiceService {
 
   async createUtilityBill(dto: CreateUtilityBillDto): Promise<ResponseCommon<Invoice>> {
     // Validate input: chỉ được có KwhNo hoặc M3No, không được cả hai
-    if ((dto.KwhNo && dto.M3No) || (!dto.KwhNo && !dto.M3No)) {
+    if (dto.KwhNo && dto.M3No) {
       throw new BadRequestException(
-        'Vui lòng chỉ nhập số lượng điện (KwhNo) hoặc nước (M3No), không được để trống cả hai hoặc nhập cả hai'
+        'Vui lòng chỉ nhập số lượng điện (KwhNo) hoặc nước (M3No), không được nhập cả hai'
+      );
+    }
+
+    if (!dto.KwhNo && !dto.M3No && !dto.amount) {
+    // bat buoc phai co amount
+      throw new BadRequestException(
+        'Với các dịch vụ khác không phải điện hoặc nước, vui lòng nhập trường amount'
       );
     }
 
@@ -166,10 +174,22 @@ export class InvoiceService {
     }
 
     // Tạo invoice item
-    const invoiceItem = this.itemRepository.create({
+    let invoiceItem;
+    if (dto.KwhNo || dto.M3No) {
+      invoiceItem = this.itemRepository.create({
       description: `${description}: ${dto.KwhNo || dto.M3No} ${unitType} × ${dto.KwhNo ? Number(contract.property.electricityPricePerKwh).toLocaleString('vi-VN') : Number(contract.property.waterPricePerM3).toLocaleString('vi-VN')} VND/${unitType}`,
       amount: totalAmount,
-    });
+      });
+    } else {
+      // For other service types (e.g., SECURITY) use a simple service description + amount
+      const serviceDesc = (dto as any).description ?? `Tiền dịch vụ ${dto.serviceType}${dto.billingPeriod ? ' tháng ' + dto.billingPeriod : ''}`;
+      totalAmount = dto.amount!;
+      const amount = (dto as any).amount ?? totalAmount;
+      invoiceItem = this.itemRepository.create({
+      description: serviceDesc,
+      amount,
+      });
+    }
 
     // Tạo invoice
     const code = this.generateCode();

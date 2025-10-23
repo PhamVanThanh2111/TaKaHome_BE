@@ -1,4 +1,12 @@
-import { IsNotEmpty, IsString, IsOptional, IsNumber, ValidateIf, IsDateString, IsEnum } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  IsOptional,
+  IsNumber,
+  ValidateIf,
+  IsDateString,
+  IsEnum,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { ServiceTypeEnum } from '../../common/enums/service-type.enum';
 
@@ -54,4 +62,13 @@ export class CreateUtilityBillDto {
     required: false,
   })
   M3No?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @ApiProperty({
+    example: 1000000,
+    description: 'Tổng số tiền của hóa đơn - Với trường hợp không phải là tiền điện hoặc nước',
+    required: false,
+  })
+  amount?: number;
 }
