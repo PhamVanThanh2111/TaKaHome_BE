@@ -412,6 +412,7 @@ export class ContractExtensionService {
             contractId: extension.contract.id,
             role: 'LANDLORD',
             signatureIndex: 0,
+            filenameSuffix: '-extension',
             metadata: {
               extensionId: extension.id,
               transactionId: signResult.transactionId || '',
@@ -527,6 +528,7 @@ export class ContractExtensionService {
             contractId: extension.contract.id,
             role: 'TENANT',
             signatureIndex: 1,
+            filenameSuffix: '-extension',
             metadata: {
               extensionId: extension.id,
               transactionId: signResult.transactionId || '',
