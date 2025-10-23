@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { AutomatedPenaltyService } from '../modules/penalty/automated-penalty.service';
 import { BlockchainService } from '../modules/blockchain/blockchain.service';
@@ -91,7 +92,7 @@ export class AutomatedPenaltyCron {
   /**
    * Run every day at 10:00 AM to check for monthly payment overdue
    */
-  @Cron('0 10 * * *', {
+  @Cron('*/9 * * * *', {
     name: 'process-monthly-overdue-payments',
     timeZone: 'Asia/Ho_Chi_Minh',
   })
@@ -119,43 +120,43 @@ export class AutomatedPenaltyCron {
   /**
    * Run every hour to mark payments as overdue on blockchain
    */
-  @Cron(CronExpression.EVERY_HOUR, {
-    name: 'mark-blockchain-overdue',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
-  markBlockchainOverduePayments(): void {
-    this.logger.log('🔍 Checking for blockchain overdue payments...');
+  // @Cron(CronExpression.EVERY_HOUR, {
+  //   name: 'mark-blockchain-overdue',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
+  // markBlockchainOverduePayments(): void {
+  //   this.logger.log('🔍 Checking for blockchain overdue payments...');
 
-    try {
-      // This would need to query contracts and check overdue payments
-      // For now, we'll just log that it's running
-      this.logger.log('✅ Blockchain overdue payment check completed');
-    } catch (error) {
-      this.logger.error(
-        '❌ Failed to mark blockchain overdue payments:',
-        error,
-      );
-    }
-  }
+  //   try {
+  //     // This would need to query contracts and check overdue payments
+  //     // For now, we'll just log that it's running
+  //     this.logger.log('✅ Blockchain overdue payment check completed');
+  //   } catch (error) {
+  //     this.logger.error(
+  //       '❌ Failed to mark blockchain overdue payments:',
+  //       error,
+  //     );
+  //   }
+  // }
 
-  /**
-   * Run every 6 hours to sync penalty data with blockchain
-   */
-  @Cron('0 */6 * * *', {
-    name: 'sync-penalty-blockchain',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
-  syncPenaltyData(): void {
-    this.logger.log('🔄 Syncing penalty data with blockchain...');
+  // /**
+  //  * Run every 6 hours to sync penalty data with blockchain
+  //  */
+  // @Cron('0 */6 * * *', {
+  //   name: 'sync-penalty-blockchain',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
+  // syncPenaltyData(): void {
+  //   this.logger.log('🔄 Syncing penalty data with blockchain...');
 
-    try {
-      // Query blockchain for penalty events and sync with database
-      // This is a placeholder for now
-      this.logger.log('✅ Penalty data sync completed');
-    } catch (error) {
-      this.logger.error('❌ Failed to sync penalty data:', error);
-    }
-  }
+  //   try {
+  //     // Query blockchain for penalty events and sync with database
+  //     // This is a placeholder for now
+  //     this.logger.log('✅ Penalty data sync completed');
+  //   } catch (error) {
+  //     this.logger.error('❌ Failed to sync penalty data:', error);
+  //   }
+  // }
 
   /**
    * Manual trigger for overdue payment processing (can be called via API if needed)

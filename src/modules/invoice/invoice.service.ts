@@ -39,9 +39,11 @@ export class InvoiceService {
     private configService: ConfigService,
   ) {
     // Khởi tạo Google Document AI client với cấu hình an toàn
-    const keyFileContent = this.configService.get<string>('GOOGLE_CLOUD_KEY_FILE');
+    const keyFileContent = this.configService.get<string>(
+      'GOOGLE_CLOUD_KEY_FILE',
+    );
     const projectId = this.configService.get<string>('GOOGLE_CLOUD_PROJECT_ID');
-    
+
     if (keyFileContent && projectId) {
       try {
         // Parse JSON credentials từ biến môi trường
@@ -49,9 +51,14 @@ export class InvoiceService {
         try {
           credentials = JSON.parse(keyFileContent);
         } catch (parseError) {
-          console.warn('Không thể parse Google Cloud credentials JSON:', (parseError as Error).message);
+          console.warn(
+            'Không thể parse Google Cloud credentials JSON:',
+            (parseError as Error).message,
+          );
           this.documentAIClient = null;
-          this.processorId = this.configService.get<string>('GOOGLE_DOCUMENT_AI_PROCESSOR_ID');
+          this.processorId = this.configService.get<string>(
+            'GOOGLE_DOCUMENT_AI_PROCESSOR_ID',
+          );
           return;
         }
 
@@ -62,15 +69,22 @@ export class InvoiceService {
           timeout: 30000, // 30 seconds
         });
       } catch (error) {
-        console.warn('Không thể khởi tạo Google Document AI client:', (error as Error).message);
+        console.warn(
+          'Không thể khởi tạo Google Document AI client:',
+          (error as Error).message,
+        );
         this.documentAIClient = null;
       }
     } else {
-      console.warn('Google Cloud cấu hình chưa đầy đủ. Document AI sẽ không khả dụng.');
+      console.warn(
+        'Google Cloud cấu hình chưa đầy đủ. Document AI sẽ không khả dụng.',
+      );
       this.documentAIClient = null;
     }
-    
-    this.processorId = this.configService.get<string>('GOOGLE_DOCUMENT_AI_PROCESSOR_ID');
+
+    this.processorId = this.configService.get<string>(
+      'GOOGLE_DOCUMENT_AI_PROCESSOR_ID',
+    );
   }
 
   async create(dto: CreateInvoiceDto): Promise<ResponseCommon<Invoice>> {
@@ -170,7 +184,6 @@ export class InvoiceService {
     _imageBuffer: Buffer,
     _mimeType: string,
   ): Promise<ProcessInvoiceResponseDto> {
-    
     try {
       // Mark parameters as used to satisfy linter in mock mode
       void _imageBuffer;
@@ -237,7 +250,6 @@ export class InvoiceService {
       // ----- Mock response (used instead of live Document AI) -----
       // Keep function async-compatible by returning a resolved Promise
       return Promise.resolve(this.mockProcessInvoiceResponse());
-
     } catch (error) {
       console.error('Lỗi khi xử lý hóa đơn với Google Document AI:', error);
       // Trả về response lỗi để đảm bảo hàm luôn có return theo kiểu ProcessInvoiceResponseDto
@@ -262,12 +274,36 @@ export class InvoiceService {
       status: 'success',
       message: 'Xử lý hóa đơn thành công',
       extractedData: [
-        { name: 'net_amount', value: '116.000', confidence: 0.5832309126853943 },
-        { name: 'invoice_type', value: 'restaurant_statement', confidence: 0.4611542522907257 },
-        { name: 'receiver_name', value: 'Quách', confidence: 0.3313143849372864 },
-        { name: 'total_amount', value: '133.400', confidence: 0.3292408883571625 },
-        { name: 'supplier_phone', value: '024 7300 9866', confidence: 0.24820193648338318 },
-        { name: 'supplier_name', value: 'CÔNG TY TNHH MỘT THÀNH VIÊN NƯỚC S', confidence: 0.13891878724098206 },
+        {
+          name: 'net_amount',
+          value: '116.000',
+          confidence: 0.5832309126853943,
+        },
+        {
+          name: 'invoice_type',
+          value: 'restaurant_statement',
+          confidence: 0.4611542522907257,
+        },
+        {
+          name: 'receiver_name',
+          value: 'Quách',
+          confidence: 0.3313143849372864,
+        },
+        {
+          name: 'total_amount',
+          value: '133.400',
+          confidence: 0.3292408883571625,
+        },
+        {
+          name: 'supplier_phone',
+          value: '024 7300 9866',
+          confidence: 0.24820193648338318,
+        },
+        {
+          name: 'supplier_name',
+          value: 'CÔNG TY TNHH MỘT THÀNH VIÊN NƯỚC S',
+          confidence: 0.13891878724098206,
+        },
         { name: 'line_item', value: '4 DV 29.000 116.000', confidence: 1 },
       ],
       rawData: {
