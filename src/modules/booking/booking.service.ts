@@ -762,7 +762,7 @@ export class BookingService {
         contract.id,
       );
       const monthlyRent = pricing.monthlyRent;
-      
+
       if (!monthlyRent) {
         console.warn(
           `Cannot create invoice: missing price for contract ${contract.id}`,
@@ -783,6 +783,7 @@ export class BookingService {
             amount: monthlyRent,
           },
         ],
+        billingPeriod: formatVN(dueDate, 'yyyy-MM'),
       });
 
       console.log(

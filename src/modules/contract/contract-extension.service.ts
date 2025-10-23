@@ -211,9 +211,13 @@ export class ContractExtensionService {
       console.log(
         '[BlockchainExtension] 📝 Recording extension to blockchain...',
       );
+
       const recordResult = await this.blockchainService.recordContractExtension(
-        contract.id,
-        contract.endDate.toISOString(), // newEndDate
+        contract.contractCode,
+        ((d) => (d.setDate(d.getDate() + 1), d))(
+          new Date(contract.updatedAt),
+        ).toISOString(),
+        // contract.endDate.toISOString(), // newEndDate
         newRentAmount.toString(), // newRentAmount
         extension.extensionContractFileUrl || '', // extensionAgreementHash (URL của hợp đồng gia hạn)
         extension.requestNote || 'Contract extension', // extensionNotes
@@ -244,7 +248,7 @@ export class ContractExtensionService {
       );
       const scheduleResult =
         await this.blockchainService.createExtensionPaymentSchedule(
-          contract.id,
+          contract.contractCode,
           extensionNumber.toString(),
           blockchainUser,
         );
