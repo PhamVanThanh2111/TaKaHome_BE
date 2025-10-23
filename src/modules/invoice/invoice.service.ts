@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -169,64 +167,76 @@ export class InvoiceService {
 
   // ---- Google Document AI methods ----
   async processInvoiceImage(
-    imageBuffer: Buffer,
-    mimeType: string,
+    _imageBuffer: Buffer,
+    _mimeType: string,
   ): Promise<ProcessInvoiceResponseDto> {
     
     try {
+      // Mark parameters as used to satisfy linter in mock mode
+      void _imageBuffer;
+      void _mimeType;
+      // NOTE: Temporarily using a mock implementation to avoid incurring
+      // Google Document AI calls while testing / on CI/deploy environments.
+      // The original live request has been commented out below for reference.
+
+      // ----- Live Document AI call (commented) -----
       // Kiểm tra cấu hình Google Cloud
-      if (!this.documentAIClient) {
-        throw new Error('Google Document AI chưa được cấu hình. Sử dụng dữ liệu mẫu.');
-      }
+      // if (!this.documentAIClient) {
+      //   throw new Error('Google Document AI chưa được cấu hình. Sử dụng dữ liệu mẫu.');
+      // }
+      //
+      // if (!this.processorId) {
+      //   throw new Error('Processor ID chưa được cấu hình. Sử dụng dữ liệu mẫu.');
+      // }
+      //
+      // // Kiểm tra project ID format
+      // const projectId = this.configService.get<string>('GOOGLE_CLOUD_PROJECT_ID');
+      // if (!projectId || !this.isValidProjectId(projectId)) {
+      //   throw new Error('Project ID không hợp lệ. Sử dụng dữ liệu mẫu.');
+      // }
+      //
+      // const encodedImage = imageBuffer.toString('base64');
+      //
+      // // Tạo promise với timeout để tránh hang
+      // const processPromise = this.documentAIClient.processDocument({
+      //   name: this.processorId,
+      //   rawDocument: {
+      //     content: encodedImage,
+      //     mimeType: mimeType,
+      //   },
+      // });
+      //
+      // // Thêm timeout wrapper
+      // const timeoutPromise = new Promise((_, reject) =>
+      //   setTimeout(() => reject(new Error('Request timeout after 25 seconds')), 25000)
+      // );
+      //
+      // const result = await Promise.race([processPromise, timeoutPromise]) as any;
+      // const [processResult] = result as any[];
+      //
+      // const entities = processResult?.document?.entities || [];
+      //
+      // const extractedData = Array.isArray(entities) ? entities.map((entity: any) => ({
+      //   name: entity?.type || 'unknown',
+      //   value: entity?.mentionText || entity?.normalizedValue?.text || 'N/A',
+      //   confidence: entity?.confidence || 0,
+      // })) : [];
+      //
+      // // Trả về response với rawData đã được simplified để tránh quá lớn
+      // return {
+      //   status: 'success',
+      //   message: 'Xử lý hóa đơn thành công',
+      //   extractedData,
+      //   rawData: {
+      //     entitiesCount: extractedData.length,
+      //     documentText: processResult?.document?.text?.substring(0, 500) + '...' || 'N/A',
+      //     processedAt: new Date().toISOString(),
+      //   },
+      // };
 
-      if (!this.processorId) {
-        throw new Error('Processor ID chưa được cấu hình. Sử dụng dữ liệu mẫu.');
-      }
-
-      // Kiểm tra project ID format
-      const projectId = this.configService.get<string>('GOOGLE_CLOUD_PROJECT_ID');
-      if (!projectId || !this.isValidProjectId(projectId)) {
-        throw new Error('Project ID không hợp lệ. Sử dụng dữ liệu mẫu.');
-      }
-
-      const encodedImage = imageBuffer.toString('base64');
-
-      // Tạo promise với timeout để tránh hang
-      const processPromise = this.documentAIClient.processDocument({
-        name: this.processorId,
-        rawDocument: {
-          content: encodedImage,
-          mimeType: mimeType,
-        },
-      });
-
-      // Thêm timeout wrapper
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Request timeout after 25 seconds')), 25000)
-      );
-
-      const result = await Promise.race([processPromise, timeoutPromise]) as any;
-      const [processResult] = result as any[];
-
-      const entities = processResult?.document?.entities || [];
-
-      const extractedData = Array.isArray(entities) ? entities.map((entity: any) => ({
-        name: entity?.type || 'unknown',
-        value: entity?.mentionText || entity?.normalizedValue?.text || 'N/A',
-        confidence: entity?.confidence || 0,
-      })) : [];
-
-      // Trả về response với rawData đã được simplified để tránh quá lớn
-      return {
-        status: 'success',
-        message: 'Xử lý hóa đơn thành công',
-        extractedData,
-        rawData: {
-          entitiesCount: extractedData.length,
-          documentText: processResult?.document?.text?.substring(0, 500) + '...' || 'N/A',
-          processedAt: new Date().toISOString(),
-        },
-      };
+      // ----- Mock response (used instead of live Document AI) -----
+      // Keep function async-compatible by returning a resolved Promise
+      return Promise.resolve(this.mockProcessInvoiceResponse());
 
     } catch (error) {
       console.error('Lỗi khi xử lý hóa đơn với Google Document AI:', error);
@@ -242,6 +252,31 @@ export class InvoiceService {
         },
       };
     }
+  }
+
+  /**
+   * Trả về dữ liệu mock giống như response từ Document AI để tiết kiệm chi phí
+   */
+  private mockProcessInvoiceResponse(): ProcessInvoiceResponseDto {
+    return {
+      status: 'success',
+      message: 'Xử lý hóa đơn thành công',
+      extractedData: [
+        { name: 'net_amount', value: '116.000', confidence: 0.5832309126853943 },
+        { name: 'invoice_type', value: 'restaurant_statement', confidence: 0.4611542522907257 },
+        { name: 'receiver_name', value: 'Quách', confidence: 0.3313143849372864 },
+        { name: 'total_amount', value: '133.400', confidence: 0.3292408883571625 },
+        { name: 'supplier_phone', value: '024 7300 9866', confidence: 0.24820193648338318 },
+        { name: 'supplier_name', value: 'CÔNG TY TNHH MỘT THÀNH VIÊN NƯỚC S', confidence: 0.13891878724098206 },
+        { name: 'line_item', value: '4 DV 29.000 116.000', confidence: 1 },
+      ],
+      rawData: {
+        entitiesCount: 7,
+        documentText:
+          'NU\nTY\nOC SACH\nKý hiệu: 1K25TAE\nSố: 00065565\nCÔNG TY TNHH MỘT THÀNH VIÊN NƯỚC SẠCH HÀ NỘI\nĐịa chi: 44- đường Yên Phụ, Phường Trúc Bạch, Quận Ba Đình, Thành phố Hà Nội\nMã số thuế: 0100106225\nXí nghiệp Kinh doanh Nước sạch Cầu Giấy\nHA NOI\nHÓA ĐƠN GIÁ TRỊ GIA TĂNG (TIỀN NƯỚC)\n(Bản thể hiện của hóa đơn điện tử)\nTháng 01 năm 2025\nTên khách hàng: Quách Kim Cúc\nĐịa chi: N181/9/B11 Xuân Thuỷ\nMã hóa đơn:525010655653\nMã số khách hàng: 512002769\nSố hộ sử dụng: 1\nKhối Số đọc:E045-9076\nTài khoản:\nMã số thuế:\n...',
+        processedAt: '2025-10-23T09:45:51.344Z',
+      },
+    };
   }
 
   /**
