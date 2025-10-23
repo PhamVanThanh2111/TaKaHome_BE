@@ -18,6 +18,7 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiConsumes, ApiBody } from '
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
+import { CreateUtilityBillDto } from './dto/create-utility-bill.dto';
 import { InvoiceResponseDto } from './dto/invoice-response.dto';
 import { ProcessInvoiceResponseDto } from './dto/process-invoice.dto';
 import { Roles } from 'src/common/decorators/roles.decorator';
@@ -81,6 +82,22 @@ export class InvoiceController {
   @ApiResponse({ status: HttpStatus.OK, type: InvoiceResponseDto })
   cancel(@Param('id') id: string) {
     return this.invoiceService.cancel(id);
+  }
+
+  @Post('utility-bill')
+  @Roles('LANDLORD', 'ADMIN')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ 
+    summary: 'Tạo hóa đơn tiền điện/nước cho phòng trọ',
+    description: 'Tạo hóa đơn tiền điện hoặc nước dựa trên số lượng sử dụng và giá đơn vị'
+  })
+  @ApiResponse({ status: HttpStatus.CREATED, type: InvoiceResponseDto })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Dữ liệu không hợp lệ hoặc chỉ được tạo một loại hóa đơn (điện hoặc nước)',
+  })
+  createUtilityBill(@Body() dto: CreateUtilityBillDto) {
+    return this.invoiceService.createUtilityBill(dto);
   }
 
   @Post('process-invoice')

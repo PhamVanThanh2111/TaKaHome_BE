@@ -6,9 +6,12 @@ import { ConfigService } from '@nestjs/config';
 import { DocumentProcessorServiceClient } from '@google-cloud/documentai';
 import { zonedTimeToUtc } from 'date-fns-tz';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
+import { CreateUtilityBillDto } from './dto/create-utility-bill.dto';
 import { InvoiceItem } from './entities/invoice-item.entity';
 import { Invoice } from './entities/invoice.entity';
+import { Contract } from '../contract/entities/contract.entity';
 import { InvoiceStatusEnum } from '../common/enums/invoice-status.enum';
+import { ServiceTypeEnum } from '../common/enums/service-type.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { VN_TZ, formatVN, vnNow } from '../../common/datetime';
 
@@ -36,6 +39,8 @@ export class InvoiceService {
     private readonly invoiceRepository: Repository<Invoice>,
     @InjectRepository(InvoiceItem)
     private readonly itemRepository: Repository<InvoiceItem>,
+    @InjectRepository(Contract)
+    private readonly contractRepository: Repository<Contract>,
     private configService: ConfigService,
   ) {
     // Khởi tạo Google Document AI client với cấu hình an toàn
@@ -85,8 +90,102 @@ export class InvoiceService {
       dueDate: zonedTimeToUtc(dueInput, VN_TZ),
       items,
       totalAmount: total,
-      billingPeriod: dto.billingPeriod,
     });
+    const saved = await this.invoiceRepository.save(invoice);
+    return new ResponseCommon(200, 'SUCCESS', saved);
+  }
+
+  async createUtilityBill(dto: CreateUtilityBillDto): Promise<ResponseCommon<Invoice>> {
+    // Validate input: chỉ được có KwhNo hoặc M3No, không được cả hai
+    if ((dto.KwhNo && dto.M3No) || (!dto.KwhNo && !dto.M3No)) {
+      throw new BadRequestException(
+        'Vui lòng chỉ nhập số lượng điện (KwhNo) hoặc nước (M3No), không được để trống cả hai hoặc nhập cả hai'
+      );
+    }
+
+    // Validate serviceType với input data
+    if (dto.KwhNo && dto.serviceType !== ServiceTypeEnum.ELECTRICITY) {
+      throw new BadRequestException('Loại dịch vụ phải là ELECTRICITY khi nhập số điện');
+    }
+    if (dto.M3No && dto.serviceType !== ServiceTypeEnum.WATER) {
+      throw new BadRequestException('Loại dịch vụ phải là WATER khi nhập số nước');
+    }
+
+    // Kiểm tra xem đã có hóa đơn cùng loại trong kỳ billing này chưa
+    const existingInvoice = await this.invoiceRepository.findOne({
+      where: {
+        contract: { id: dto.contractId },
+        serviceType: dto.serviceType,
+        billingPeriod: dto.billingPeriod,
+      },
+    });
+
+    if (existingInvoice) {
+      throw new BadRequestException(
+        `Đã tồn tại hóa đơn ${dto.serviceType} cho kỳ ${dto.billingPeriod}. Không thể tạo hóa đơn trùng lặp.`
+      );
+    }
+
+    // Lấy thông tin contract với property để tính giá
+    const contract = await this.contractRepository.findOne({
+      where: { id: dto.contractId },
+      relations: ['property', 'room', 'room.roomType'],
+    });
+
+    if (!contract) {
+      throw new BadRequestException('Không tìm thấy hợp đồng');
+    }
+
+    if (!contract.property) {
+      throw new BadRequestException('Hợp đồng không có thông tin bất động sản');
+    }
+
+    // Tính toán chi phí dựa trên loại hóa đơn
+    let totalAmount = 0;
+    let description = '';
+    let unitType = '';
+
+    if (dto.KwhNo) {
+      // Hóa đơn tiền điện
+      const electricityPrice = contract.property.electricityPricePerKwh;
+      if (!electricityPrice) {
+        throw new BadRequestException('Giá điện chưa được thiết lập cho bất động sản này');
+      }
+      totalAmount = dto.KwhNo * Number(electricityPrice);
+      description = `Tiền điện tháng ${dto.billingPeriod}`;
+      unitType = 'kWh';
+    } else if (dto.M3No) {
+      // Hóa đơn tiền nước
+      const waterPrice = contract.property.waterPricePerM3;
+      if (!waterPrice) {
+        throw new BadRequestException('Giá nước chưa được thiết lập cho bất động sản này');
+      }
+      totalAmount = dto.M3No * Number(waterPrice);
+      description = `Tiền nước tháng ${dto.billingPeriod}`;
+      unitType = 'm³';
+    }
+
+    // Tạo invoice item
+    const invoiceItem = this.itemRepository.create({
+      description: `${description}: ${dto.KwhNo || dto.M3No} ${unitType} × ${dto.KwhNo ? Number(contract.property.electricityPricePerKwh).toLocaleString('vi-VN') : Number(contract.property.waterPricePerM3).toLocaleString('vi-VN')} VND/${unitType}`,
+      amount: totalAmount,
+    });
+
+    // Tạo invoice
+    const code = this.generateCode();
+    const dueInput = dto.dueDate.length === 10 ? `${dto.dueDate}T00:00:00` : dto.dueDate;
+    
+    const invoice = this.invoiceRepository.create({
+      invoiceCode: code,
+      contract: { id: dto.contractId },
+      dueDate: zonedTimeToUtc(dueInput, VN_TZ),
+      items: [invoiceItem],
+      totalAmount,
+      billingPeriod: dto.billingPeriod,
+      serviceType: dto.serviceType,
+      status: InvoiceStatusEnum.PENDING,
+    });
+
     const saved = await this.invoiceRepository.save(invoice);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }

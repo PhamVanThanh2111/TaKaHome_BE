@@ -8,13 +8,19 @@ import {
   UpdateDateColumn,
   OneToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Contract } from '../../contract/entities/contract.entity';
 import { Payment } from '../../payment/entities/payment.entity';
 import { InvoiceStatusEnum } from '../../common/enums/invoice-status.enum';
+import { ServiceTypeEnum } from '../../common/enums/service-type.enum';
 import { InvoiceItem } from './invoice-item.entity';
 
 @Entity()
+@Index(['contract', 'serviceType', 'billingPeriod'], { 
+  unique: true,
+  where: 'serviceType IS NOT NULL AND billingPeriod IS NOT NULL'
+})
 export class Invoice {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -47,6 +53,13 @@ export class Invoice {
 
   @Column({ type: 'varchar', length: 7, nullable: true })
   billingPeriod?: string;
+
+  @Column({
+    type: 'enum',
+    enum: ServiceTypeEnum,
+    nullable: true,
+  })
+  serviceType?: ServiceTypeEnum;
 
   @CreateDateColumn({
     type: 'timestamptz',
