@@ -37,24 +37,4 @@ export class RespondContractExtensionDto {
   @IsNumber()
   @Min(0)
   newMonthlyRent?: number;
-
-  @ApiProperty({
-    description: 'Giá điện mới (chỉ áp dụng với BOARDING)',
-    example: 3500,
-    required: false,
-  })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  newElectricityPrice?: number;
-
-  @ApiProperty({
-    description: 'Giá nước mới (chỉ áp dụng với BOARDING)',
-    example: 25000,
-    required: false,
-  })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  newWaterPrice?: number;
 }

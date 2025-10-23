@@ -17,7 +17,6 @@ export enum ExtensionStatus {
   AWAITING_ESCROW = 'AWAITING_ESCROW', // Chờ đóng ký quỹ
   ESCROW_FUNDED_T = 'ESCROW_FUNDED_T',
   ESCROW_FUNDED_L = 'ESCROW_FUNDED_L',
-  DUAL_ESCROW_FUNDED = 'DUAL_ESCROW_FUNDED',
   ACTIVE = 'ACTIVE', // Extension đã có hiệu lực
   REJECTED = 'REJECTED', // Landlord từ chối hoặc tenant không đồng ý với giá
   CANCELLED = 'CANCELLED', // Tenant hủy yêu cầu
@@ -40,12 +39,6 @@ export class ContractExtension {
 
   @Column({ nullable: true })
   newMonthlyRent?: number; // Giá thuê mới
-
-  @Column({ nullable: true })
-  newElectricityPrice?: number; // Giá điện mới (chỉ cho phòng trọ)
-
-  @Column({ nullable: true })
-  newWaterPrice?: number; // Giá nước mới (chỉ cho phòng trọ)
 
   @Column({ type: 'text', nullable: true })
   requestNote?: string; // Ghi chú từ người thuê

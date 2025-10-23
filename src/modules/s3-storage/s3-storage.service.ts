@@ -22,6 +22,7 @@ export interface UploadContractPdfOptions {
   contractId: string;
   role: 'LANDLORD' | 'TENANT';
   signatureIndex: number;
+  filenameSuffix?: string;
   metadata?: Record<string, string>;
 }
 
@@ -113,7 +114,7 @@ export class S3StorageService {
     options: UploadContractPdfOptions,
   ): Promise<UploadResult> {
     try {
-      const { contractId, role, signatureIndex, metadata = {} } = options;
+      const { contractId, role, signatureIndex, filenameSuffix = '', metadata = {} } = options;
 
       // Validate inputs
       if (!Buffer.isBuffer(pdfBuffer) || pdfBuffer.length === 0) {
@@ -126,7 +127,7 @@ export class S3StorageService {
 
       // Generate structured S3 key
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const key = `contracts/${contractId.trim()}/${role.toLowerCase()}-signed-${timestamp}.pdf`;
+      const key = `contracts/${contractId.trim()}/${role.toLowerCase()}-signed${filenameSuffix}-${timestamp}.pdf`;
 
       // Prepare upload parameters
       const uploadParams: PutObjectCommandInput = {
@@ -134,7 +135,7 @@ export class S3StorageService {
         Key: key,
         Body: pdfBuffer,
         ContentType: 'application/pdf',
-        ContentDisposition: `attachment; filename="${role.toLowerCase()}-contract-${contractId}.pdf"`,
+        ContentDisposition: `attachment; filename="${role.toLowerCase()}-contract${filenameSuffix}-${contractId}.pdf"`,
         Metadata: {
           contractId: contractId.trim(),
           role: role,

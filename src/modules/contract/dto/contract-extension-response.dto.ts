@@ -28,20 +28,6 @@ export class ContractExtensionResponseDto {
   newMonthlyRent?: number;
 
   @ApiProperty({
-    description: 'Giá điện mới (nếu có)',
-    example: 3500,
-    required: false,
-  })
-  newElectricityPrice?: number;
-
-  @ApiProperty({
-    description: 'Giá nước mới (nếu có)',
-    example: 25000,
-    required: false,
-  })
-  newWaterPrice?: number;
-
-  @ApiProperty({
     description: 'Ghi chú từ người thuê',
     example: 'Mong muốn gia hạn thêm 6 tháng nữa',
     required: false,

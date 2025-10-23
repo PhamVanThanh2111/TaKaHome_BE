@@ -946,8 +946,6 @@ export class ContractService {
       // Sử dụng giá từ ContractExtension
       return {
         monthlyRent: activeExtension.newMonthlyRent,
-        electricityPrice: activeExtension.newElectricityPrice,
-        waterPrice: activeExtension.newWaterPrice,
       };
     }
 
@@ -988,7 +986,7 @@ export class ContractService {
 
     // Check if both escrows are funded
     if (ext.landlordEscrowDepositFundedAt) {
-      ext.status = ExtensionStatus.DUAL_ESCROW_FUNDED;
+      ext.status = ExtensionStatus.ACTIVE;
       ext.activatedAt = vnNow();
       // Apply extension to contract
       await this.applyActiveExtension(extension!.id, ext);
@@ -1020,7 +1018,7 @@ export class ContractService {
 
     // Check if both escrows are funded
     if (ext.tenantEscrowDepositFundedAt) {
-      ext.status = ExtensionStatus.DUAL_ESCROW_FUNDED;
+      ext.status = ExtensionStatus.ACTIVE;
       ext.activatedAt = vnNow();
       // Apply extension to contract
       await this.applyActiveExtension(extension!.id, ext);
