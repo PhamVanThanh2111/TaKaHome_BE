@@ -20,6 +20,8 @@ import { vnNow } from '../../common/datetime';
 import { addMonths, addHours } from 'date-fns';
 import { SmartCAService } from '../smartca/smartca.service';
 import { S3StorageService } from '../s3-storage/s3-storage.service';
+import { Escrow } from '../escrow/entities/escrow.entity';
+import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { User } from '../user/entities/user.entity';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -33,6 +35,8 @@ export class ContractExtensionService {
     private contractRepository: Repository<Contract>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(Escrow)
+    private escrowRepository: Repository<Escrow>,
     private smartcaService: SmartCAService,
     private s3StorageService: S3StorageService,
   ) {}
@@ -451,7 +455,14 @@ export class ContractExtensionService {
   ): Promise<ResponseCommon<ContractExtension>> {
     const extension = await this.extensionRepository.findOne({
       where: { id: extensionId },
-      relations: ['contract', 'contract.tenant', 'contract.landlord'],
+      relations: [
+        'contract', 
+        'contract.tenant', 
+        'contract.landlord',
+        'contract.property',
+        'contract.room',
+        'contract.room.roomType'
+      ],
     });
 
     if (!extension) {
@@ -531,11 +542,12 @@ export class ContractExtensionService {
         extension.extensionContractFileUrl = uploadResult.url;
       }
 
-      // Cập nhật extension và set deadline cho ký quỹ (24 giờ)
-      extension.status = ExtensionStatus.AWAITING_ESCROW;
+      // Cập nhật extension và kiểm tra ký quỹ
       extension.tenantSignedAt = vnNow();
       extension.transactionIdTenantSign = signResult.transactionId;
-      extension.escrowDepositDueAt = addHours(vnNow(), 24);
+
+      // Kiểm tra số tiền ký quỹ hiện tại và yêu cầu
+      await this.checkAndUpdateEscrowStatus(extension);
 
       const saved = await this.extensionRepository.save(extension);
 
@@ -549,6 +561,69 @@ export class ContractExtensionService {
       throw new BadRequestException(
         `Failed to complete tenant extension signing: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
+    }
+  }
+
+  /**
+   * Kiểm tra và cập nhật trạng thái ký quỹ dựa trên số dư hiện tại
+   */
+  private async checkAndUpdateEscrowStatus(extension: ContractExtension): Promise<void> {
+    const contract = extension.contract;
+    
+    // Lấy thông tin ký quỹ hiện tại
+    const escrowAccount = await this.escrowRepository.findOne({
+      where: { contractId: contract.id },
+    });
+
+    if (!escrowAccount) {
+      throw new BadRequestException('Escrow account not found for this contract');
+    }
+
+    // Xác định số tiền ký quỹ yêu cầu dựa trên loại property
+    let requiredDeposit = 0;
+    
+    if (contract.property.type === PropertyTypeEnum.BOARDING) {
+      // Với BOARDING, lấy deposit từ RoomType
+      if (contract.room?.roomType?.deposit) {
+        requiredDeposit = contract.room.roomType.deposit;
+      }
+    } else {
+      // Với HOUSING hoặc APARTMENT, lấy deposit từ Property
+      if (contract.property.deposit) {
+        requiredDeposit = contract.property.deposit;
+      }
+    }
+
+    if (requiredDeposit === 0) {
+      throw new BadRequestException('Deposit amount not configured for this property');
+    }
+
+    // Chuyển đổi số dư hiện tại từ string sang number
+    const currentTenantBalance = parseInt(escrowAccount.currentBalanceTenant, 10);
+    const currentLandlordBalance = parseInt(escrowAccount.currentBalanceLandlord, 10);
+
+    // Kiểm tra xem mỗi bên có đủ ký quỹ không
+    const tenantHasEnough = currentTenantBalance >= requiredDeposit;
+    const landlordHasEnough = currentLandlordBalance >= requiredDeposit;
+
+    // Cập nhật trạng thái dựa trên kết quả kiểm tra
+    if (tenantHasEnough && landlordHasEnough) {
+      // Cả hai bên đều đủ ký quỹ => ACTIVE ngay lập tức
+      extension.status = ExtensionStatus.ACTIVE;
+      extension.activatedAt = vnNow();
+      await this.applyExtension(extension);
+    } else if (tenantHasEnough && !landlordHasEnough) {
+      // Chỉ tenant đủ ký quỹ
+      extension.status = ExtensionStatus.ESCROW_FUNDED_T;
+      extension.tenantEscrowDepositFundedAt = vnNow();
+    } else if (!tenantHasEnough && landlordHasEnough) {
+      // Chỉ landlord đủ ký quỹ
+      extension.status = ExtensionStatus.ESCROW_FUNDED_L;
+      extension.landlordEscrowDepositFundedAt = vnNow();
+    } else {
+      // Cả hai bên đều thiếu ký quỹ
+      extension.status = ExtensionStatus.AWAITING_ESCROW;
+      extension.escrowDepositDueAt = addHours(vnNow(), 24);
     }
   }
 }
