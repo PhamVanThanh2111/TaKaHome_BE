@@ -88,13 +88,13 @@ export class InvoiceController {
   @Roles('LANDLORD', 'ADMIN')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ 
-    summary: 'Tạo hóa đơn tiền điện/nước cho phòng trọ',
-    description: 'Tạo hóa đơn tiền điện hoặc nước dựa trên số lượng sử dụng và giá đơn vị'
+    summary: 'Tạo hóa đơn dịch vụ cho phòng trọ',
+    description: 'Tạo hóa đơn cho các dịch vụ như điện, nước, bảo vệ, gửi xe, internet, vệ sinh. Có thể tạo một hoặc nhiều dịch vụ trong cùng một hóa đơn.'
   })
   @ApiResponse({ status: HttpStatus.CREATED, type: InvoiceResponseDto })
   @ApiResponse({
     status: HttpStatus.BAD_REQUEST,
-    description: 'Dữ liệu không hợp lệ hoặc chỉ được tạo một loại hóa đơn (điện hoặc nước)',
+    description: 'Dữ liệu không hợp lệ hoặc dịch vụ đã tồn tại trong kỳ billing',
   })
   createUtilityBill(@Body() dto: CreateUtilityBillDto) {
     return this.invoiceService.createUtilityBill(dto);

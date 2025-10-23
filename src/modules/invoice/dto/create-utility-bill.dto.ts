@@ -1,14 +1,13 @@
 import {
   IsNotEmpty,
   IsString,
-  IsOptional,
-  IsNumber,
-  ValidateIf,
   IsDateString,
-  IsEnum,
+  IsArray,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
-import { ServiceTypeEnum } from '../../common/enums/service-type.enum';
+import { ServiceItemDto } from './service-item.dto';
 
 export class CreateUtilityBillDto {
   @IsNotEmpty()
@@ -35,40 +34,24 @@ export class CreateUtilityBillDto {
   billingPeriod: string;
 
   @IsNotEmpty()
-  @IsEnum(ServiceTypeEnum)
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ServiceItemDto)
   @ApiProperty({
-    enum: ServiceTypeEnum,
-    description: 'Loại dịch vụ',
-    example: ServiceTypeEnum.ELECTRICITY,
+    type: [ServiceItemDto],
+    description: 'Danh sách các dịch vụ và số tiền tương ứng',
+    example: [
+      {
+        serviceType: 'PARKING',
+        amount: 50000,
+        description: 'Tiền gửi xe máy tháng 01/2025',
+      },
+      {
+        serviceType: 'INTERNET',
+        amount: 200000,
+        description: 'Tiền internet tháng 01/2025',
+      },
+    ],
   })
-  serviceType: ServiceTypeEnum;
-
-  @IsOptional()
-  @IsNumber()
-  @ValidateIf((obj: CreateUtilityBillDto) => !obj.M3No) // KwhNo bắt buộc nếu không có M3No
-  @ApiProperty({
-    example: 150,
-    description: 'Số lượng kWh sử dụng (chỉ cho hóa đơn tiền điện)',
-    required: false,
-  })
-  KwhNo?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @ValidateIf((obj: CreateUtilityBillDto) => !obj.KwhNo) // M3No bắt buộc nếu không có KwhNo
-  @ApiProperty({
-    example: 5,
-    description: 'Số lượng m³ nước sử dụng (chỉ cho hóa đơn tiền nước)',
-    required: false,
-  })
-  M3No?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @ApiProperty({
-    example: 1000000,
-    description: 'Tổng số tiền của hóa đơn - Với trường hợp không phải là tiền điện hoặc nước',
-    required: false,
-  })
-  amount?: number;
+  services: ServiceItemDto[];
 }
