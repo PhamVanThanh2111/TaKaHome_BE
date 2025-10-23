@@ -149,12 +149,6 @@ export class ContractExtensionService {
       if (dto.newMonthlyRent !== undefined) {
         extension.newMonthlyRent = dto.newMonthlyRent;
       }
-      if (dto.newElectricityPrice !== undefined) {
-        extension.newElectricityPrice = dto.newElectricityPrice;
-      }
-      if (dto.newWaterPrice !== undefined) {
-        extension.newWaterPrice = dto.newWaterPrice;
-      }
     }
 
     const saved = await this.extensionRepository.save(extension);
@@ -412,6 +406,7 @@ export class ContractExtensionService {
             contractId: extension.contract.id,
             role: 'LANDLORD',
             signatureIndex: 0,
+            filenameSuffix: '-extension',
             metadata: {
               extensionId: extension.id,
               transactionId: signResult.transactionId || '',
@@ -527,6 +522,7 @@ export class ContractExtensionService {
             contractId: extension.contract.id,
             role: 'TENANT',
             signatureIndex: 1,
+            filenameSuffix: '-extension',
             metadata: {
               extensionId: extension.id,
               transactionId: signResult.transactionId || '',

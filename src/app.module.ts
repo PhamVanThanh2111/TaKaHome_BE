@@ -29,7 +29,6 @@ import frontendConfig from './config/frontend.config';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { EscrowModule } from './modules/escrow/escrow.module';
 import { InvoiceModule } from './modules/invoice/invoice.module';
-import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { SmartCAModule } from './modules/smartca/smartca.module';
 import { CronModule } from './cron/cron.module';
 import { StatisticsModule } from './modules/statistics/statistics.module';
@@ -88,7 +87,6 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
     WalletModule,
     EscrowModule,
     InvoiceModule,
-    MaintenanceModule,
     CronModule,
     StatisticsModule,
   ],

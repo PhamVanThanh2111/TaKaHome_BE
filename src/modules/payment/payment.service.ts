@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
@@ -21,6 +23,8 @@ import { BookingService } from '../booking/booking.service';
 import { BlockchainService } from '../blockchain/blockchain.service';
 import { ContractService } from '../contract/contract.service';
 import { ExtensionStatus } from '../contract/entities/contract-extension.entity';
+import { Escrow } from '../escrow/entities/escrow.entity';
+import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import {
   addMinutesVN,
@@ -40,6 +44,8 @@ export class PaymentService {
     private paymentRepository: Repository<Payment>,
     @InjectRepository(Invoice)
     private readonly invoiceRepository: Repository<Invoice>,
+    @InjectRepository(Escrow)
+    private readonly escrowRepository: Repository<Escrow>,
     @Inject(vnpayConfig.KEY)
     private readonly vnpay: ConfigType<typeof vnpayConfig>,
     private readonly walletService: WalletService,
@@ -1183,6 +1189,73 @@ export class PaymentService {
           'Landlord extension escrow deposit already paid',
         );
       }
+    }
+
+    // Validate payment amount against required deposit
+    await this.validateExtensionEscrowAmount(dto, contract);
+  }
+
+  /**
+   * Validate extension escrow payment amount
+   */
+  private async validateExtensionEscrowAmount(
+    dto: CreatePaymentDto,
+    contract: any,
+  ): Promise<void> {
+    // Lấy thông tin escrow account
+    const escrowAccount = await this.escrowRepository.findOne({
+      where: { contractId: contract.id as string },
+    });
+
+    if (!escrowAccount) {
+      throw new BadRequestException('Escrow account not found for this contract');
+    }
+
+    // Xác định số tiền ký quỹ yêu cầu dựa trên loại property
+    let requiredDeposit = 0;
+    
+    if (contract.property?.type === PropertyTypeEnum.BOARDING) {
+      // Với BOARDING, lấy deposit từ RoomType
+      if (contract.room?.roomType?.deposit) {
+        requiredDeposit = Number((contract as any).room.roomType.deposit);
+      }
+    } else {
+      // Với HOUSING hoặc APARTMENT, lấy deposit từ Property
+      if (contract.property?.deposit) {
+        requiredDeposit = Number((contract as any).property.deposit);
+      }
+    }
+
+    if (requiredDeposit === 0) {
+      throw new BadRequestException('Deposit amount not configured for this property');
+    }
+
+    // Chuyển đổi số dư hiện tại từ string sang number
+    const currentTenantBalance = parseInt(escrowAccount.currentBalanceTenant, 10);
+    const currentLandlordBalance = parseInt(escrowAccount.currentBalanceLandlord, 10);
+
+    // Tính số tiền thực sự cần đóng
+    let actualAmountNeeded = 0;
+    let userType = '';
+
+    if (dto.purpose === PaymentPurpose.TENANT_EXTENSION_ESCROW_DEPOSIT) {
+      actualAmountNeeded = Math.max(0, requiredDeposit - currentTenantBalance);
+      userType = 'Tenant';
+    } else {
+      actualAmountNeeded = Math.max(0, requiredDeposit - currentLandlordBalance);
+      userType = 'Landlord';
+    }
+
+    // Kiểm tra số tiền thanh toán phải >= số tiền thực sự cần đóng
+    if (dto.amount < actualAmountNeeded) {
+      throw new BadRequestException(
+        `${userType} extension escrow payment amount (${dto.amount.toLocaleString()} VND) must be at least ${actualAmountNeeded.toLocaleString()} VND. ` +
+        `Required deposit: ${requiredDeposit.toLocaleString()} VND, Current balance: ${
+          dto.purpose === PaymentPurpose.TENANT_EXTENSION_ESCROW_DEPOSIT 
+            ? currentTenantBalance.toLocaleString() 
+            : currentLandlordBalance.toLocaleString()
+        } VND.`
+      );
     }
   }
 

@@ -40,12 +40,6 @@ export class ContractExtension {
   @Column({ nullable: true })
   newMonthlyRent?: number; // Giá thuê mới
 
-  @Column({ nullable: true })
-  newElectricityPrice?: number; // Giá điện mới (chỉ cho phòng trọ)
-
-  @Column({ nullable: true })
-  newWaterPrice?: number; // Giá nước mới (chỉ cho phòng trọ)
-
   @Column({ type: 'text', nullable: true })
   requestNote?: string; // Ghi chú từ người thuê
 
