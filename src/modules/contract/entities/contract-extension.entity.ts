@@ -17,7 +17,6 @@ export enum ExtensionStatus {
   AWAITING_ESCROW = 'AWAITING_ESCROW', // Chờ đóng ký quỹ
   ESCROW_FUNDED_T = 'ESCROW_FUNDED_T',
   ESCROW_FUNDED_L = 'ESCROW_FUNDED_L',
-  DUAL_ESCROW_FUNDED = 'DUAL_ESCROW_FUNDED',
   ACTIVE = 'ACTIVE', // Extension đã có hiệu lực
   REJECTED = 'REJECTED', // Landlord từ chối hoặc tenant không đồng ý với giá
   CANCELLED = 'CANCELLED', // Tenant hủy yêu cầu
