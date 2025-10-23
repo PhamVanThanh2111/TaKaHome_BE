@@ -23,6 +23,7 @@ import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { Escrow } from '../escrow/entities/escrow.entity';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { User } from '../user/entities/user.entity';
+import { BlockchainService } from '../blockchain/blockchain.service';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -39,6 +40,7 @@ export class ContractExtensionService {
     private escrowRepository: Repository<Escrow>,
     private smartcaService: SmartCAService,
     private s3StorageService: S3StorageService,
+    private blockchainService: BlockchainService,
   ) {}
 
   async requestExtension(
@@ -170,6 +172,130 @@ export class ContractExtensionService {
     // Chỉ gia hạn contract, giá sẽ được lưu trong ContractExtension
     // Không thay đổi giá trong Property/RoomType để tránh ảnh hưởng đến các contract khác
     await this.contractRepository.save(contract);
+
+    // Ghi nhận extension lên blockchain
+    await this.recordExtensionToBlockchain(extension, contract);
+  }
+
+  /**
+   * Ghi nhận extension lên blockchain và tạo payment schedule
+   */
+  private async recordExtensionToBlockchain(
+    extension: ContractExtension,
+    contract: Contract,
+  ): Promise<void> {
+    try {
+      // Lấy giá thuê hiện tại
+      let currentRentAmount = 0;
+      if (
+        contract.property.type === PropertyTypeEnum.BOARDING &&
+        contract.room?.roomType
+      ) {
+        currentRentAmount = contract.room.roomType.price;
+      } else if (contract.property.price) {
+        currentRentAmount = contract.property.price;
+      }
+
+      // Lấy giá thuê mới (nếu có thay đổi)
+      const newRentAmount = extension.newMonthlyRent || currentRentAmount;
+
+      // Xác định user để thực hiện giao dịch blockchain
+      // Sử dụng landlord làm người thực hiện giao dịch
+      const blockchainUser = {
+        userId: contract.landlord.id,
+        orgName: 'OrgLandlord',
+        mspId: 'OrgLandlordMSP',
+      };
+
+      // Bước 1: Ghi nhận extension lên blockchain
+      console.log(
+        '[BlockchainExtension] 📝 Recording extension to blockchain...',
+      );
+      const recordResult = await this.blockchainService.recordContractExtension(
+        contract.id,
+        contract.endDate.toISOString(), // newEndDate
+        newRentAmount.toString(), // newRentAmount
+        extension.extensionContractFileUrl || '', // extensionAgreementHash (URL của hợp đồng gia hạn)
+        extension.requestNote || 'Contract extension', // extensionNotes
+        blockchainUser,
+      );
+
+      if (!recordResult.success) {
+        throw new Error(
+          `Failed to record extension to blockchain: ${recordResult.error}`,
+        );
+      }
+
+      console.log(
+        '[BlockchainExtension] ✅ Extension recorded successfully:',
+        recordResult.data,
+      );
+
+      // Lấy extension number từ kết quả
+      const extensionNumber = recordResult.data?.currentExtensionNumber;
+
+      if (!extensionNumber) {
+        throw new Error('Extension number not returned from blockchain');
+      }
+
+      // Bước 2: Tạo payment schedule cho extension
+      console.log(
+        `[BlockchainExtension] 📅 Creating payment schedule for extension ${extensionNumber}...`,
+      );
+      const scheduleResult =
+        await this.blockchainService.createExtensionPaymentSchedule(
+          contract.id,
+          extensionNumber.toString(),
+          blockchainUser,
+        );
+
+      if (!scheduleResult.success) {
+        throw new Error(
+          `Failed to create extension payment schedule: ${scheduleResult.error}`,
+        );
+      }
+
+      const schedulesCreated = scheduleResult.data?.length || 0;
+
+      console.log(
+        `[BlockchainExtension] ✅ Payment schedule created successfully: ${schedulesCreated} periods`,
+      );
+
+      // Log thông tin blockchain để audit
+      console.log(
+        '[BlockchainExtension] 🎉 Blockchain integration completed:',
+        {
+          contractId: contract.id,
+          extensionId: extension.id,
+          extensionNumber: extensionNumber,
+          newEndDate: contract.endDate.toISOString(),
+          newRentAmount: newRentAmount,
+          paymentPeriodsCreated: schedulesCreated,
+        },
+      );
+    } catch (error) {
+      // Log error nhưng không fail transaction
+      // Extension vẫn được apply trong database
+      console.error(
+        '[BlockchainExtension] ❌ Failed to record to blockchain:',
+        {
+          error: error instanceof Error ? error.message : 'Unknown error',
+          contractId: contract.id,
+          extensionId: extension.id,
+          stack: error instanceof Error ? error.stack : undefined,
+        },
+      );
+
+      // Có thể throw error nếu muốn fail cả transaction
+      // throw new BadRequestException(
+      //   `Failed to record extension to blockchain: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      // );
+
+      // Hoặc chỉ log warning và tiếp tục
+      console.warn(
+        '[BlockchainExtension] ⚠️ Extension applied to database but blockchain record failed',
+      );
+    }
   }
 
   async getContractExtensions(
@@ -222,8 +348,9 @@ export class ContractExtensionService {
     }
 
     // Kiểm tra user có liên quan đến contract này không (có thể là TENANT hoặc LANDLORD)
-    const isRelatedUser = contract.tenant.id === userId || contract.landlord.id === userId;
-    
+    const isRelatedUser =
+      contract.tenant.id === userId || contract.landlord.id === userId;
+
     if (!isRelatedUser) {
       throw new ForbiddenException(
         'You do not have permission to view extensions for this contract. Only tenant or landlord can access this information.',
@@ -451,12 +578,12 @@ export class ContractExtensionService {
     const extension = await this.extensionRepository.findOne({
       where: { id: extensionId },
       relations: [
-        'contract', 
-        'contract.tenant', 
+        'contract',
+        'contract.tenant',
         'contract.landlord',
         'contract.property',
         'contract.room',
-        'contract.room.roomType'
+        'contract.room.roomType',
       ],
     });
 
@@ -563,21 +690,25 @@ export class ContractExtensionService {
   /**
    * Kiểm tra và cập nhật trạng thái ký quỹ dựa trên số dư hiện tại
    */
-  private async checkAndUpdateEscrowStatus(extension: ContractExtension): Promise<void> {
+  private async checkAndUpdateEscrowStatus(
+    extension: ContractExtension,
+  ): Promise<void> {
     const contract = extension.contract;
-    
+
     // Lấy thông tin ký quỹ hiện tại
     const escrowAccount = await this.escrowRepository.findOne({
       where: { contractId: contract.id },
     });
 
     if (!escrowAccount) {
-      throw new BadRequestException('Escrow account not found for this contract');
+      throw new BadRequestException(
+        'Escrow account not found for this contract',
+      );
     }
 
     // Xác định số tiền ký quỹ yêu cầu dựa trên loại property
     let requiredDeposit = 0;
-    
+
     if (contract.property.type === PropertyTypeEnum.BOARDING) {
       // Với BOARDING, lấy deposit từ RoomType
       if (contract.room?.roomType?.deposit) {
@@ -591,12 +722,20 @@ export class ContractExtensionService {
     }
 
     if (requiredDeposit === 0) {
-      throw new BadRequestException('Deposit amount not configured for this property');
+      throw new BadRequestException(
+        'Deposit amount not configured for this property',
+      );
     }
 
     // Chuyển đổi số dư hiện tại từ string sang number
-    const currentTenantBalance = parseInt(escrowAccount.currentBalanceTenant, 10);
-    const currentLandlordBalance = parseInt(escrowAccount.currentBalanceLandlord, 10);
+    const currentTenantBalance = parseInt(
+      escrowAccount.currentBalanceTenant,
+      10,
+    );
+    const currentLandlordBalance = parseInt(
+      escrowAccount.currentBalanceLandlord,
+      10,
+    );
 
     // Kiểm tra xem mỗi bên có đủ ký quỹ không
     const tenantHasEnough = currentTenantBalance >= requiredDeposit;
