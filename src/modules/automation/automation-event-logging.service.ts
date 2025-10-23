@@ -40,7 +40,7 @@ export interface AutomationEventLog {
 }
 
 /**
- * Automation Event Logging Service  
+ * Automation Event Logging Service
  * Provides comprehensive logging and tracking for all automated events
  */
 @Injectable()
@@ -63,7 +63,7 @@ export class AutomationEventLoggingService {
     description: string,
     metadata?: Record<string, any>,
     executionTimeMs?: number,
-    errorMessage?: string
+    errorMessage?: string,
   ): Promise<AutomationEventLog> {
     const event: AutomationEventLog = {
       id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -83,19 +83,20 @@ export class AutomationEventLoggingService {
     this.events.push(event);
 
     // Log to console for immediate visibility
-    const logLevel = status === EventStatus.FAILED ? 'error' : 
-                    status === EventStatus.SUCCESS ? 'log' : 'warn';
-    
-    this.logger[logLevel](
-      `${eventType} - ${status}: ${description}`,
-      {
-        targetEntity,
-        targetId,
-        executionTimeMs,
-        metadata,
-        errorMessage
-      }
-    );
+    const logLevel =
+      status === EventStatus.FAILED
+        ? 'error'
+        : status === EventStatus.SUCCESS
+          ? 'log'
+          : 'warn';
+
+    this.logger[logLevel](`${eventType} - ${status}: ${description}`, {
+      targetEntity,
+      targetId,
+      executionTimeMs,
+      metadata,
+      errorMessage,
+    });
 
     return event;
   }
@@ -112,24 +113,31 @@ export class AutomationEventLoggingService {
       fromDate?: Date;
       toDate?: Date;
     },
-    limit = 100
+    limit = 100,
   ): Promise<AutomationEventLog[]> {
     let filteredEvents = [...this.events];
 
     if (filters) {
-      filteredEvents = filteredEvents.filter(event => {
-        if (filters.eventType && !filters.eventType.includes(event.eventType)) return false;
-        if (filters.status && !filters.status.includes(event.status)) return false;
-        if (filters.targetEntity && event.targetEntity !== filters.targetEntity) return false;
-        if (filters.targetId && event.targetId !== filters.targetId) return false;
-        if (filters.fromDate && event.executedAt < filters.fromDate) return false;
+      filteredEvents = filteredEvents.filter((event) => {
+        if (filters.eventType && !filters.eventType.includes(event.eventType))
+          return false;
+        if (filters.status && !filters.status.includes(event.status))
+          return false;
+        if (filters.targetEntity && event.targetEntity !== filters.targetEntity)
+          return false;
+        if (filters.targetId && event.targetId !== filters.targetId)
+          return false;
+        if (filters.fromDate && event.executedAt < filters.fromDate)
+          return false;
         if (filters.toDate && event.executedAt > filters.toDate) return false;
         return true;
       });
     }
 
     // Sort by most recent first
-    filteredEvents.sort((a, b) => b.executedAt.getTime() - a.executedAt.getTime());
+    filteredEvents.sort(
+      (a, b) => b.executedAt.getTime() - a.executedAt.getTime(),
+    );
 
     return filteredEvents.slice(0, limit);
   }
@@ -146,37 +154,44 @@ export class AutomationEventLoggingService {
     timeline: Array<{ date: string; count: number }>;
   }> {
     const fromDate = addDaysVN(vnNow(), -days);
-    const recentEvents = this.events.filter(event => event.executedAt >= fromDate);
+    const recentEvents = this.events.filter(
+      (event) => event.executedAt >= fromDate,
+    );
 
     const totalEvents = recentEvents.length;
-    const successfulEvents = recentEvents.filter(e => e.status === EventStatus.SUCCESS).length;
-    const successRate = totalEvents > 0 ? (successfulEvents / totalEvents) * 100 : 0;
+    const successfulEvents = recentEvents.filter(
+      (e) => e.status === EventStatus.SUCCESS,
+    ).length;
+    const successRate =
+      totalEvents > 0 ? (successfulEvents / totalEvents) * 100 : 0;
 
     // Group by event type
     const eventsByType: Record<string, number> = {};
-    recentEvents.forEach(event => {
+    recentEvents.forEach((event) => {
       eventsByType[event.eventType] = (eventsByType[event.eventType] || 0) + 1;
     });
 
     // Group by status
     const eventsByStatus: Record<string, number> = {};
-    recentEvents.forEach(event => {
+    recentEvents.forEach((event) => {
       eventsByStatus[event.status] = (eventsByStatus[event.status] || 0) + 1;
     });
 
     // Calculate average execution time
-    const eventsWithTime = recentEvents.filter(e => e.executionTimeMs);
-    const averageExecutionTime = eventsWithTime.length > 0 
-      ? eventsWithTime.reduce((sum, e) => sum + (e.executionTimeMs || 0), 0) / eventsWithTime.length
-      : 0;
+    const eventsWithTime = recentEvents.filter((e) => e.executionTimeMs);
+    const averageExecutionTime =
+      eventsWithTime.length > 0
+        ? eventsWithTime.reduce((sum, e) => sum + (e.executionTimeMs || 0), 0) /
+          eventsWithTime.length
+        : 0;
 
     // Create timeline data
     const timeline: Array<{ date: string; count: number }> = [];
     for (let i = days - 1; i >= 0; i--) {
       const date = addDaysVN(vnNow(), -i);
       const dateStr = date.toISOString().split('T')[0];
-      const count = recentEvents.filter(e => 
-        e.executedAt.toISOString().split('T')[0] === dateStr
+      const count = recentEvents.filter(
+        (e) => e.executedAt.toISOString().split('T')[0] === dateStr,
       ).length;
       timeline.push({ date: dateStr, count });
     }
@@ -196,7 +211,7 @@ export class AutomationEventLoggingService {
    */
   async getFailedEvents(limit = 20): Promise<AutomationEventLog[]> {
     return this.events
-      .filter(event => event.status === EventStatus.FAILED)
+      .filter((event) => event.status === EventStatus.FAILED)
       .sort((a, b) => b.executedAt.getTime() - a.executedAt.getTime())
       .slice(0, limit);
   }
@@ -205,11 +220,14 @@ export class AutomationEventLoggingService {
    * Get events for a specific target
    */
   async getEventsForTarget(
-    targetEntity: string, 
-    targetId: string
+    targetEntity: string,
+    targetId: string,
   ): Promise<AutomationEventLog[]> {
     return this.events
-      .filter(event => event.targetEntity === targetEntity && event.targetId === targetId)
+      .filter(
+        (event) =>
+          event.targetEntity === targetEntity && event.targetId === targetId,
+      )
       .sort((a, b) => b.executedAt.getTime() - a.executedAt.getTime());
   }
 
@@ -222,14 +240,14 @@ export class AutomationEventLoggingService {
     targetId: string,
     description: string,
     operation: () => Promise<T>,
-    metadata?: Record<string, any>
+    metadata?: Record<string, any>,
   ): Promise<T> {
     const startTime = Date.now();
-    
+
     try {
       const result = await operation();
       const executionTime = Date.now() - startTime;
-      
+
       await this.logEvent(
         eventType,
         targetEntity,
@@ -237,13 +255,13 @@ export class AutomationEventLoggingService {
         EventStatus.SUCCESS,
         description,
         metadata,
-        executionTime
+        executionTime,
       );
-      
+
       return result;
     } catch (error) {
       const executionTime = Date.now() - startTime;
-      
+
       await this.logEvent(
         eventType,
         targetEntity,
@@ -252,9 +270,9 @@ export class AutomationEventLoggingService {
         description,
         metadata,
         executionTime,
-        error instanceof Error ? error.message : String(error)
+        error instanceof Error ? error.message : String(error),
       );
-      
+
       throw error;
     }
   }
@@ -265,15 +283,15 @@ export class AutomationEventLoggingService {
   async cleanupOldEvents(olderThanDays = 30): Promise<number> {
     const cutoffDate = addDaysVN(vnNow(), -olderThanDays);
     const initialCount = this.events.length;
-    
-    this.events = this.events.filter(event => event.executedAt > cutoffDate);
-    
+
+    this.events = this.events.filter((event) => event.executedAt > cutoffDate);
+
     const removedCount = initialCount - this.events.length;
-    
+
     if (removedCount > 0) {
       this.logger.log(`🧹 Cleaned up ${removedCount} old automation events`);
     }
-    
+
     return removedCount;
   }
 
@@ -299,7 +317,7 @@ export class AutomationEventLoggingService {
   }> {
     const stats = await this.getAutomationStats(days);
     const failedEvents = await this.getFailedEvents(100);
-    
+
     // Sort event types by frequency
     const mostCommonEvents = Object.entries(stats.eventsByType)
       .sort(([, a], [, b]) => b - a)
@@ -307,9 +325,14 @@ export class AutomationEventLoggingService {
       .map(([type, count]) => ({ type, count }));
 
     // Calculate system reliability
-    const reliability = stats.successRate >= 95 ? 'Excellent' :
-                       stats.successRate >= 90 ? 'Good' :
-                       stats.successRate >= 80 ? 'Fair' : 'Needs Attention';
+    const reliability =
+      stats.successRate >= 95
+        ? 'Excellent'
+        : stats.successRate >= 90
+          ? 'Good'
+          : stats.successRate >= 80
+            ? 'Fair'
+            : 'Needs Attention';
 
     // Generate recommendations
     const recommendations: string[] = [];
@@ -317,10 +340,14 @@ export class AutomationEventLoggingService {
       recommendations.push('Investigate and address failed automation events');
     }
     if (stats.averageExecutionTime > 5000) {
-      recommendations.push('Optimize performance - average execution time is high');
+      recommendations.push(
+        'Optimize performance - average execution time is high',
+      );
     }
     if (failedEvents.length > 10) {
-      recommendations.push('Multiple failed events detected - review system health');
+      recommendations.push(
+        'Multiple failed events detected - review system health',
+      );
     }
 
     return {
@@ -332,10 +359,15 @@ export class AutomationEventLoggingService {
         systemReliability: reliability,
       },
       details: {
-        paymentReminders: stats.eventsByType[AutomationEventType.PAYMENT_REMINDER_SENT] || 0,
-        penaltiesApplied: stats.eventsByType[AutomationEventType.PENALTY_APPLIED] || 0,
-        contractReminders: stats.eventsByType[AutomationEventType.CONTRACT_EXPIRY_REMINDER] || 0,
-        blockchainEvents: stats.eventsByType[AutomationEventType.BLOCKCHAIN_EVENT_TRIGGERED] || 0,
+        paymentReminders:
+          stats.eventsByType[AutomationEventType.PAYMENT_REMINDER_SENT] || 0,
+        penaltiesApplied:
+          stats.eventsByType[AutomationEventType.PENALTY_APPLIED] || 0,
+        contractReminders:
+          stats.eventsByType[AutomationEventType.CONTRACT_EXPIRY_REMINDER] || 0,
+        blockchainEvents:
+          stats.eventsByType[AutomationEventType.BLOCKCHAIN_EVENT_TRIGGERED] ||
+          0,
         failedOperations: stats.eventsByStatus[EventStatus.FAILED] || 0,
       },
       recommendations,

@@ -14,6 +14,7 @@ import { BlockchainModule } from 'src/modules/blockchain/blockchain.module';
   imports: [
     TypeOrmModule.forFeature([User, Account]),
     PassportModule,
+    ConfigModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
