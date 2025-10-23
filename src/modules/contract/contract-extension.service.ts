@@ -149,12 +149,6 @@ export class ContractExtensionService {
       if (dto.newMonthlyRent !== undefined) {
         extension.newMonthlyRent = dto.newMonthlyRent;
       }
-      if (dto.newElectricityPrice !== undefined) {
-        extension.newElectricityPrice = dto.newElectricityPrice;
-      }
-      if (dto.newWaterPrice !== undefined) {
-        extension.newWaterPrice = dto.newWaterPrice;
-      }
     }
 
     const saved = await this.extensionRepository.save(extension);

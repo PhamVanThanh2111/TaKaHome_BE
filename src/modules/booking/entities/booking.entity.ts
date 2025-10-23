@@ -5,14 +5,12 @@ import {
   ManyToOne,
   CreateDateColumn,
   UpdateDateColumn,
-  OneToMany,
   JoinColumn,
   OneToOne,
 } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { Property } from '../../property/entities/property.entity';
 import { BookingStatus } from 'src/modules/common/enums/booking-status.enum';
-import { MaintenanceTicket } from 'src/modules/maintenance/entities/maintenance-ticket.entity';
 import { Contract } from '../../contract/entities/contract.entity';
 import { Room } from 'src/modules/property/entities/room.entity';
 
@@ -86,7 +84,4 @@ export class Booking {
     default: () => 'CURRENT_TIMESTAMP',
   })
   updatedAt: Date;
-
-  @OneToMany(() => MaintenanceTicket, (t) => t.booking)
-  maintenanceTickets: MaintenanceTicket[];
 }

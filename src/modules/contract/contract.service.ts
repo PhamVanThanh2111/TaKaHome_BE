@@ -946,8 +946,6 @@ export class ContractService {
       // Sử dụng giá từ ContractExtension
       return {
         monthlyRent: activeExtension.newMonthlyRent,
-        electricityPrice: activeExtension.newElectricityPrice,
-        waterPrice: activeExtension.newWaterPrice,
       };
     }
 
