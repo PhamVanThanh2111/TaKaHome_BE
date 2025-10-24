@@ -6,9 +6,12 @@ import { ConfigService } from '@nestjs/config';
 import { DocumentProcessorServiceClient } from '@google-cloud/documentai';
 import { zonedTimeToUtc } from 'date-fns-tz';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
+import { CreateUtilityBillDto } from './dto/create-utility-bill.dto';
 import { InvoiceItem } from './entities/invoice-item.entity';
 import { Invoice } from './entities/invoice.entity';
+import { Contract } from '../contract/entities/contract.entity';
 import { InvoiceStatusEnum } from '../common/enums/invoice-status.enum';
+import { ServiceTypeEnum } from '../common/enums/service-type.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { VN_TZ, formatVN, vnNow } from '../../common/datetime';
 
@@ -36,6 +39,8 @@ export class InvoiceService {
     private readonly invoiceRepository: Repository<Invoice>,
     @InjectRepository(InvoiceItem)
     private readonly itemRepository: Repository<InvoiceItem>,
+    @InjectRepository(Contract)
+    private readonly contractRepository: Repository<Contract>,
     private configService: ConfigService,
   ) {
     // Khởi tạo Google Document AI client với cấu hình an toàn
@@ -99,8 +104,132 @@ export class InvoiceService {
       dueDate: zonedTimeToUtc(dueInput, VN_TZ),
       items,
       totalAmount: total,
-      billingPeriod: dto.billingPeriod,
     });
+    const saved = await this.invoiceRepository.save(invoice);
+    return new ResponseCommon(200, 'SUCCESS', saved);
+  }
+
+  async createUtilityBill(dto: CreateUtilityBillDto): Promise<ResponseCommon<Invoice>> {
+    // Backward compatibility: nếu sử dụng old format, convert sang new format
+    // Validate services array
+    if (!dto.services || dto.services.length === 0) {
+      throw new BadRequestException('Danh sách dịch vụ không được để trống');
+    }
+
+    // Kiểm tra duplicate serviceType trong cùng một invoice
+    const serviceTypes = dto.services.map(s => s.serviceType);
+    const uniqueServiceTypes = new Set(serviceTypes);
+    if (serviceTypes.length !== uniqueServiceTypes.size) {
+      throw new BadRequestException('Không được có dịch vụ trùng lặp trong cùng một hóa đơn');
+    }
+
+    // Validate từng service item
+    for (const service of dto.services) {
+      if (service.serviceType === ServiceTypeEnum.ELECTRICITY && !service.KwhNo) {
+        throw new BadRequestException('KwhNo là bắt buộc cho dịch vụ ELECTRICITY');
+      }
+      if (service.serviceType === ServiceTypeEnum.WATER && !service.M3No) {
+        throw new BadRequestException('M3No là bắt buộc cho dịch vụ WATER');
+      }
+      if (service.serviceType !== ServiceTypeEnum.ELECTRICITY && service.serviceType !== ServiceTypeEnum.WATER && !service.amount) {
+        throw new BadRequestException(`Amount là bắt buộc cho dịch vụ ${service.serviceType}`);
+      }
+    }
+
+    // Lấy thông tin contract với property để tính giá
+    const contract = await this.contractRepository.findOne({
+      where: { id: dto.contractId },
+      relations: ['property', 'room', 'room.roomType'],
+    });
+
+    if (!contract) {
+      throw new BadRequestException('Không tìm thấy hợp đồng');
+    }
+
+    if (!contract.property) {
+      throw new BadRequestException('Hợp đồng không có thông tin bất động sản');
+    }
+
+    // Kiểm tra duplicate trong database cho từng service type
+    for (const service of dto.services) {
+      // Tìm tất cả invoices của contract trong billingPeriod này
+      const existingInvoices = await this.invoiceRepository.find({
+        where: {
+          contract: { id: dto.contractId },
+          billingPeriod: dto.billingPeriod,
+        },
+        relations: ['items'],
+      });
+
+      // Kiểm tra xem có item nào với serviceType trùng lặp không
+      const hasExistingServiceType = existingInvoices.some(invoice => 
+        invoice.items.some(item => item.serviceType === service.serviceType)
+      );
+
+      if (hasExistingServiceType) {
+        throw new BadRequestException(
+          `Đã tồn tại hóa đơn có dịch vụ ${service.serviceType} cho kỳ ${dto.billingPeriod}. Không thể tạo hóa đơn trùng lặp.`
+        );
+      }
+    }
+
+    // Tạo invoice items cho từng service
+    const invoiceItems: InvoiceItem[] = [];
+    let totalInvoiceAmount = 0;
+
+    for (const service of dto.services) {
+      let itemAmount = 0;
+      let itemDescription = '';
+
+      if (service.serviceType === ServiceTypeEnum.ELECTRICITY && service.KwhNo) {
+        // Hóa đơn tiền điện
+        const electricityPrice = contract.property.electricityPricePerKwh;
+        if (!electricityPrice) {
+          throw new BadRequestException('Giá điện chưa được thiết lập cho bất động sản này');
+        }
+        itemAmount = service.KwhNo * Number(electricityPrice);
+        itemDescription = service.description || `Tiền điện tháng ${dto.billingPeriod}: ${service.KwhNo} kWh × ${Number(electricityPrice).toLocaleString('vi-VN')} VND/kWh`;
+      } else if (service.serviceType === ServiceTypeEnum.WATER && service.M3No) {
+        // Hóa đơn tiền nước
+        const waterPrice = contract.property.waterPricePerM3;
+        if (!waterPrice) {
+          throw new BadRequestException('Giá nước chưa được thiết lập cho bất động sản này');
+        }
+        itemAmount = service.M3No * Number(waterPrice);
+        itemDescription = service.description || `Tiền nước tháng ${dto.billingPeriod}: ${service.M3No} m³ × ${Number(waterPrice).toLocaleString('vi-VN')} VND/m³`;
+      } else {
+        // Các dịch vụ khác
+        if (!service.amount) {
+          throw new BadRequestException(`Amount là bắt buộc cho dịch vụ ${service.serviceType}`);
+        }
+        itemAmount = service.amount;
+        itemDescription = service.description || `Tiền dịch vụ ${service.serviceType}${dto.billingPeriod ? ' tháng ' + dto.billingPeriod : ''}`;
+      }
+
+      const invoiceItem = this.itemRepository.create({
+        description: itemDescription,
+        amount: itemAmount,
+        serviceType: service.serviceType,
+      });
+
+      invoiceItems.push(invoiceItem);
+      totalInvoiceAmount += itemAmount;
+    }
+
+    // Tạo invoice
+    const code = this.generateCode();
+    const dueInput = dto.dueDate.length === 10 ? `${dto.dueDate}T00:00:00` : dto.dueDate;
+    
+    const invoice = this.invoiceRepository.create({
+      invoiceCode: code,
+      contract: { id: dto.contractId },
+      dueDate: zonedTimeToUtc(dueInput, VN_TZ),
+      items: invoiceItems,
+      totalAmount: totalInvoiceAmount,
+      billingPeriod: dto.billingPeriod,
+      status: InvoiceStatusEnum.PENDING,
+    });
+
     const saved = await this.invoiceRepository.save(invoice);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
@@ -313,14 +442,5 @@ export class InvoiceService {
         processedAt: '2025-10-23T09:45:51.344Z',
       },
     };
-  }
-
-  /**
-   * Kiểm tra tính hợp lệ của Google Cloud Project ID
-   */
-  private isValidProjectId(projectId: string): boolean {
-    // Project ID phải có độ dài 6-30 ký tự, chỉ chứa chữ thường, số và dấu gạch ngang
-    const projectIdRegex = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
-    return projectIdRegex.test(projectId);
   }
 }

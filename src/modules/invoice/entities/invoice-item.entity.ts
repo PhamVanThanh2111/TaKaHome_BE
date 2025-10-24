@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
 import { Invoice } from './invoice.entity';
+import { ServiceTypeEnum } from '../../common/enums/service-type.enum';
 @Entity()
 export class InvoiceItem {
   @PrimaryGeneratedColumn('uuid')
@@ -13,4 +14,11 @@ export class InvoiceItem {
 
   @Column()
   amount: number;
+
+  @Column({
+    type: 'enum',
+    enum: ServiceTypeEnum,
+    nullable: true,
+  })
+  serviceType?: ServiceTypeEnum;
 }
