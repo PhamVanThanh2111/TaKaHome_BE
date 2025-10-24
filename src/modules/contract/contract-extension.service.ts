@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   Injectable,
   NotFoundException,
@@ -38,8 +40,8 @@ export class ContractExtensionService {
     @InjectRepository(Escrow)
     private escrowRepository: Repository<Escrow>,
     private smartcaService: SmartCAService,
-  private s3StorageService: S3StorageService,
-  private pdfFillService: PdfFillService,
+    private s3StorageService: S3StorageService,
+    private pdfFillService: PdfFillService,
   ) {}
 
   async requestExtension(
@@ -103,12 +105,12 @@ export class ContractExtensionService {
     // Nếu có ít nhất 3 extension và tất cả đều bị REJECTED
     if (recentExtensions.length >= 3) {
       const allRejected = recentExtensions.every(
-        extension => extension.status === ExtensionStatus.REJECTED
+        (extension) => extension.status === ExtensionStatus.REJECTED,
       );
 
       if (allRejected) {
         throw new BadRequestException(
-          'Cannot request extension. Landlord has rejected 3 consecutive extension requests for this contract. Please contact landlord directly.'
+          'Cannot request extension. Landlord has rejected 3 consecutive extension requests for this contract. Please contact landlord directly.',
         );
       }
     }
@@ -243,8 +245,9 @@ export class ContractExtensionService {
     }
 
     // Kiểm tra user có liên quan đến contract này không (có thể là TENANT hoặc LANDLORD)
-    const isRelatedUser = contract.tenant.id === userId || contract.landlord.id === userId;
-    
+    const isRelatedUser =
+      contract.tenant.id === userId || contract.landlord.id === userId;
+
     if (!isRelatedUser) {
       throw new ForbiddenException(
         'You do not have permission to view extensions for this contract. Only tenant or landlord can access this information.',
@@ -407,15 +410,24 @@ export class ContractExtensionService {
 
       // Original contract dates
       if (extension.contract?.startDate) {
-        fieldValues.contract_start = formatVN(extension.contract.startDate, 'dd/MM/yyyy');
+        fieldValues.contract_start = formatVN(
+          extension.contract.startDate,
+          'dd/MM/yyyy',
+        );
       }
       if (extension.contract?.endDate) {
-        fieldValues.contract_end = formatVN(extension.contract.endDate, 'dd/MM/yyyy');
+        fieldValues.contract_end = formatVN(
+          extension.contract.endDate,
+          'dd/MM/yyyy',
+        );
       }
 
       // Extension-specific fields
       fieldValues.extension_months = String(extension.extensionMonths ?? '');
-      if (extension.newMonthlyRent !== undefined && extension.newMonthlyRent !== null) {
+      if (
+        extension.newMonthlyRent !== undefined &&
+        extension.newMonthlyRent !== null
+      ) {
         fieldValues.new_monthly_rent = String(extension.newMonthlyRent);
       }
 
@@ -447,6 +459,8 @@ export class ContractExtensionService {
         );
       }
 
+      let signedPdfPresignedUrl: string | undefined;
+
       // Upload signed PDF to S3
       if (signResult.signedPdf) {
         const uploadResult = await this.s3StorageService.uploadContractPdf(
@@ -467,6 +481,11 @@ export class ContractExtensionService {
           },
         );
 
+        signedPdfPresignedUrl = await this.s3StorageService.getPresignedGetUrl(
+          uploadResult.key,
+          300,
+        );
+
         extension.extensionContractFileUrl = uploadResult.url;
       }
 
@@ -477,11 +496,10 @@ export class ContractExtensionService {
 
       const saved = await this.extensionRepository.save(extension);
 
-      return new ResponseCommon(
-        200,
-        'Landlord signed extension successfully',
-        saved,
-      );
+      return new ResponseCommon(200, 'Landlord signed extension successfully', {
+        ...saved,
+        signedPdfUrl: signedPdfPresignedUrl,
+      });
     } catch (error) {
       console.error('[LandlordSignExtension] ❌ Failed:', error);
       throw new BadRequestException(
@@ -500,12 +518,12 @@ export class ContractExtensionService {
     const extension = await this.extensionRepository.findOne({
       where: { id: extensionId },
       relations: [
-        'contract', 
-        'contract.tenant', 
+        'contract',
+        'contract.tenant',
         'contract.landlord',
         'contract.property',
         'contract.room',
-        'contract.room.roomType'
+        'contract.room.roomType',
       ],
     });
 
@@ -563,6 +581,8 @@ export class ContractExtensionService {
         );
       }
 
+      let signedPdfPresignedUrl: string | undefined;
+
       // Upload fully-signed PDF to S3
       if (signResult.signedPdf) {
         const uploadResult = await this.s3StorageService.uploadContractPdf(
@@ -584,6 +604,11 @@ export class ContractExtensionService {
           },
         );
 
+        signedPdfPresignedUrl = await this.s3StorageService.getPresignedGetUrl(
+          uploadResult.key,
+          300,
+        );
+
         extension.extensionContractFileUrl = uploadResult.url;
       }
 
@@ -596,11 +621,10 @@ export class ContractExtensionService {
 
       const saved = await this.extensionRepository.save(extension);
 
-      return new ResponseCommon(
-        200,
-        'Tenant signed extension successfully',
-        saved,
-      );
+      return new ResponseCommon(200, 'Tenant signed extension successfully', {
+        ...saved,
+        signedPdfUrl: signedPdfPresignedUrl,
+      });
     } catch (error) {
       console.error('[TenantSignExtension] ❌ Failed:', error);
       throw new BadRequestException(
@@ -612,21 +636,25 @@ export class ContractExtensionService {
   /**
    * Kiểm tra và cập nhật trạng thái ký quỹ dựa trên số dư hiện tại
    */
-  private async checkAndUpdateEscrowStatus(extension: ContractExtension): Promise<void> {
+  private async checkAndUpdateEscrowStatus(
+    extension: ContractExtension,
+  ): Promise<void> {
     const contract = extension.contract;
-    
+
     // Lấy thông tin ký quỹ hiện tại
     const escrowAccount = await this.escrowRepository.findOne({
       where: { contractId: contract.id },
     });
 
     if (!escrowAccount) {
-      throw new BadRequestException('Escrow account not found for this contract');
+      throw new BadRequestException(
+        'Escrow account not found for this contract',
+      );
     }
 
     // Xác định số tiền ký quỹ yêu cầu dựa trên loại property
     let requiredDeposit = 0;
-    
+
     if (contract.property.type === PropertyTypeEnum.BOARDING) {
       // Với BOARDING, lấy deposit từ RoomType
       if (contract.room?.roomType?.deposit) {
@@ -640,12 +668,20 @@ export class ContractExtensionService {
     }
 
     if (requiredDeposit === 0) {
-      throw new BadRequestException('Deposit amount not configured for this property');
+      throw new BadRequestException(
+        'Deposit amount not configured for this property',
+      );
     }
 
     // Chuyển đổi số dư hiện tại từ string sang number
-    const currentTenantBalance = parseInt(escrowAccount.currentBalanceTenant, 10);
-    const currentLandlordBalance = parseInt(escrowAccount.currentBalanceLandlord, 10);
+    const currentTenantBalance = parseInt(
+      escrowAccount.currentBalanceTenant,
+      10,
+    );
+    const currentLandlordBalance = parseInt(
+      escrowAccount.currentBalanceLandlord,
+      10,
+    );
 
     // Kiểm tra xem mỗi bên có đủ ký quỹ không
     const tenantHasEnough = currentTenantBalance >= requiredDeposit;
