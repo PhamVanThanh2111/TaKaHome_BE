@@ -148,7 +148,7 @@ export class AutomatedPenaltyService {
 
       // Record penalty on blockchain
       await this.recordPenaltyOnBlockchain(
-        booking.contractId,
+        booking.contract?.contractCode || booking.contractId,
         'tenant',
         penaltyInfo.amount,
         `Payment overdue by ${daysPastDue} days`,
@@ -166,7 +166,7 @@ export class AutomatedPenaltyService {
 
       // Record penalty in database
       await this.recordPenaltyInDatabase({
-        contractId: booking.contractId,
+        contractId: booking.contract?.contractCode || booking.contractId,
         bookingId: booking.id,
         tenantId: booking.tenant.id,
         penaltyType: 'OVERDUE_PAYMENT',
@@ -844,7 +844,7 @@ export class AutomatedPenaltyService {
           `📅 Daily penalty for contract ${contract.contractCode} period ${period} - using recordPenalty`,
         );
         await this.recordPenaltyOnBlockchain(
-          contract.id,
+          contract.contractCode,
           'tenant',
           penaltyInfo.amount,
           `Monthly payment period ${period} overdue by ${daysPastDue} days - Daily penalty`,
@@ -1411,7 +1411,7 @@ export class AutomatedPenaltyService {
 
       // Record penalty on blockchain
       await this.recordPenaltyOnBlockchain(
-        booking.contractId,
+        booking.contract?.contractCode || booking.contractId,
         'landlord',
         penaltyAmount,
         reason,
