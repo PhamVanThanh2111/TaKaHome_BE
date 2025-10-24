@@ -16,15 +16,15 @@ import { CreateContractExtensionDto } from './dto/create-contract-extension.dto'
 import { RespondContractExtensionDto } from './dto/respond-contract-extension.dto';
 import { TenantRespondExtensionDto } from './dto/tenant-respond-extension.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
-import { vnNow } from '../../common/datetime';
+import { vnNow, formatVN } from '../../common/datetime';
 import { addMonths, addHours } from 'date-fns';
 import { SmartCAService } from '../smartca/smartca.service';
 import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { Escrow } from '../escrow/entities/escrow.entity';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { User } from '../user/entities/user.entity';
-import * as path from 'path';
-import * as fs from 'fs';
+// path/fs imports removed - not needed after template filling via PdfFillService
+import { PdfFillService, PdfTemplateType } from './pdf-fill.service';
 
 @Injectable()
 export class ContractExtensionService {
@@ -38,7 +38,8 @@ export class ContractExtensionService {
     @InjectRepository(Escrow)
     private escrowRepository: Repository<Escrow>,
     private smartcaService: SmartCAService,
-    private s3StorageService: S3StorageService,
+  private s3StorageService: S3StorageService,
+  private pdfFillService: PdfFillService,
   ) {}
 
   async requestExtension(
@@ -359,27 +360,55 @@ export class ContractExtensionService {
     }
 
     try {
-      // Read PDF file từ assets
-      const pdfPath = path.join(
-        process.cwd(),
-        'src',
-        'assets',
-        'contracts',
-        'HopDongChoThueNhaNguyenCan.pdf',
-      );
-
-      if (!fs.existsSync(pdfPath)) {
-        throw new BadRequestException(`PDF file not found at: ${pdfPath}`);
-      }
-
-      const pdfBuffer = fs.readFileSync(pdfPath);
+      // Build field values and fill the extension PDF template (PhuLucHopDongGiaHan)
       const landlord = await this.userRepository.findOne({
         where: { id: userId },
       });
 
+      const now = vnNow();
+      const fieldValues: Record<string, string> = {};
+      fieldValues.date = formatVN(now, 'dd/MM/yyyy');
+
+      // Landlord / Tenant info
+      if (extension.contract?.landlord?.fullName) {
+        fieldValues.landlord_name = extension.contract.landlord.fullName;
+        fieldValues.landlord_sign = extension.contract.landlord.fullName;
+      }
+      if (extension.contract?.landlord?.CCCD) {
+        fieldValues.landlord_cccd = extension.contract.landlord.CCCD;
+      }
+      if (extension.contract?.tenant?.fullName) {
+        fieldValues.tenant_name = extension.contract.tenant.fullName;
+        fieldValues.tenant_sign = extension.contract.tenant.fullName;
+      }
+      if (extension.contract?.tenant?.CCCD) {
+        fieldValues.tenant_cccd = extension.contract.tenant.CCCD;
+      }
+
+      // Original contract dates
+      if (extension.contract?.startDate) {
+        fieldValues.contract_start = formatVN(extension.contract.startDate, 'dd/MM/yyyy');
+      }
+      if (extension.contract?.endDate) {
+        fieldValues.contract_end = formatVN(extension.contract.endDate, 'dd/MM/yyyy');
+      }
+
+      // Extension-specific fields
+      fieldValues.extension_months = String(extension.extensionMonths ?? '');
+      if (extension.newMonthlyRent !== undefined && extension.newMonthlyRent !== null) {
+        fieldValues.new_monthly_rent = String(extension.newMonthlyRent);
+      }
+
+      // Fill and flatten the extension PDF template
+      const filledPdfBuffer = await this.pdfFillService.fillPdfTemplate(
+        fieldValues,
+        PdfTemplateType.PHU_LUC_HOP_DONG_GIA_HAN,
+        true, // flatten before signing per requirement
+      );
+
       // Landlord ký hợp đồng gia hạn (signatureIndex: 0)
       const signResult = await this.smartcaService.signPdfOneShot({
-        pdfBuffer,
+        pdfBuffer: filledPdfBuffer,
         signatureIndex: 0,
         userIdOverride: landlord?.CCCD,
         contractId: extension.contract.id,
