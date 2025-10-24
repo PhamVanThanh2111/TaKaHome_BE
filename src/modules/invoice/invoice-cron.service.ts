@@ -29,8 +29,8 @@ export class InvoiceCronService {
   //   name: 'generate-monthly-invoices-morning',
   // })
 
-  //Demo: Run every 2 minutes to catch 5-hour payment cycles
-  @Cron('0 */2 * * * *', {
+  //Demo: Run every 30 minutes to catch 5-hour payment cycles
+  @Cron('0 */30 * * * *', {
     name: 'generate-monthly-invoices-morning',
   })
   async handleGenerateMonthlyInvoicesMorning(): Promise<void> {
