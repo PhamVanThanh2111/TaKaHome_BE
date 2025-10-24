@@ -13,16 +13,16 @@ import {
 import { Response } from 'express';
 import { ContractService } from './contract.service';
 import { ContractExtensionService } from './contract-extension.service';
-import { PdfFillService } from './pdf-fill.service';
+import { PdfFillService, PdfTemplateType } from './pdf-fill.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
-import { TestFillPdfDto } from './dto/test-fill-pdf.dto';
+import { FillPdfDto } from './dto/fill-pdf.dto';
 import { CreateContractExtensionDto } from './dto/create-contract-extension.dto';
 import { RespondContractExtensionDto } from './dto/respond-contract-extension.dto';
 import { TenantRespondExtensionDto } from './dto/tenant-respond-extension.dto';
 import { GetContractExtensionsDto } from './dto/get-contract-extensions.dto';
 import { ContractExtensionResponseDto } from './dto/contract-extension-response.dto';
-import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ContractResponseDto } from './dto/contract-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
@@ -299,11 +299,11 @@ export class ContractController {
   // PDF Template Testing Endpoints
   // ================================
 
-  @Get('test/template-fields')
+  @Get('test/template-fields/:templateType')
   @ApiOperation({
     summary: 'Lấy danh sách các field trong PDF template',
     description:
-      'API để kiểm tra các field có sẵn trong file hopdongthue-template.pdf',
+      'API để kiểm tra các field có sẵn trong file PDF template theo loại',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -316,6 +316,7 @@ export class ContractController {
         data: {
           type: 'object',
           properties: {
+            templateType: { type: 'string', example: 'HopDongChoThueNhaNguyenCan' },
             fields: {
               type: 'array',
               items: { type: 'string' },
@@ -331,12 +332,21 @@ export class ContractController {
       },
     },
   })
-  async getTemplateFields() {
-    const fields = await this.pdfFillService.getTemplateFields();
+  async getTemplateFields(@Param('templateType') templateType: string) {
+    // Validate templateType
+    const validTypes = Object.values(PdfTemplateType);
+    if (!validTypes.includes(templateType as PdfTemplateType)) {
+      throw new Error(`Invalid template type. Valid types: ${validTypes.join(', ')}`);
+    }
+
+    const fields = await this.pdfFillService.getTemplateFields(templateType as PdfTemplateType);
     return {
       statusCode: 200,
       message: 'SUCCESS',
-      data: { fields },
+      data: { 
+        templateType,
+        fields 
+      },
     };
   }
 
@@ -345,7 +355,7 @@ export class ContractController {
   @ApiOperation({
     summary: 'Test điền thông tin vào PDF template',
     description:
-      'API test để điền thông tin vào các field trong hopdongthue-template.pdf và trả về file PDF đã điền',
+      'API test để điền thông tin vào các field trong PDF template và trả về file PDF đã điền. Hỗ trợ nhiều loại template và tự động bỏ qua các field không tồn tại.',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -363,36 +373,41 @@ export class ContractController {
     status: HttpStatus.BAD_REQUEST,
     description: 'Dữ liệu đầu vào không hợp lệ',
   })
-  async testFillPdf(@Body() dto: TestFillPdfDto, @Res() res: Response) {
-    // Chuẩn bị dữ liệu để điền vào PDF
-    const fieldValues: Record<string, string> = {
-      landlord_name: dto.landlord_name,
-      tenant_name: dto.tenant_name,
-      landlord_cccd: dto.landlord_cccd,
-      tenant_cccd: dto.tenant_cccd,
-    };
+  @ApiBody({ type: FillPdfDto })
+  async testFillPdf(@Body() dto: FillPdfDto, @Res() res: Response) {
+    // Chuẩn bị dữ liệu để điền vào PDF từ tất cả các field trong DTO
+    const fieldValues: Record<string, string> = {};
 
-    // Thêm các field optional nếu có
-    if (dto.property_address) {
-      fieldValues.property_address = dto.property_address;
-    }
-    if (dto.rent_amount) {
-      fieldValues.rent_amount = dto.rent_amount;
-    }
-    if (dto.start_date) {
-      fieldValues.start_date = dto.start_date;
-    }
-    if (dto.end_date) {
-      fieldValues.end_date = dto.end_date;
-    }
+    // Các field bắt buộc
+    fieldValues.landlord_name = dto.landlord_name;
+    fieldValues.tenant_name = dto.tenant_name;
+    fieldValues.landlord_cccd = dto.landlord_cccd;
+    fieldValues.tenant_cccd = dto.tenant_cccd;
 
-    // Điền thông tin vào PDF
-    const pdfBuffer = await this.pdfFillService.fillPdfTemplate(fieldValues);
+    // Các field optional - chỉ thêm nếu có giá trị
+    if (dto.landlord_phone) fieldValues.landlord_phone = dto.landlord_phone;
+    if (dto.tenant_phone) fieldValues.tenant_phone = dto.tenant_phone;
+    if (dto.address) fieldValues.address = dto.address;
+    if (dto.area) fieldValues.area = dto.area;
+    if (dto.rent) fieldValues.rent = dto.rent;
+    if (dto.deposit) fieldValues.deposit = dto.deposit;
+    if (dto.date) fieldValues.date = dto.date;
+    if (dto.landlord_sign) fieldValues.landlord_sign = dto.landlord_sign;
+    if (dto.tenant_sign) fieldValues.tenant_sign = dto.tenant_sign;
+
+    // Điền thông tin vào PDF với template được chỉ định
+    const pdfBuffer = await this.pdfFillService.fillPdfTemplate(
+      fieldValues, 
+      dto.templateType
+    );
+
+    // Tạo tên file dựa trên template type
+    const fileName = `${dto.templateType}-filled.pdf`;
 
     // Trả về file PDF
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': 'attachment; filename="contract-filled.pdf"',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
       'Content-Length': pdfBuffer.length,
     });
 
