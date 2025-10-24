@@ -510,6 +510,8 @@ export class PaymentService {
           'contract.tenant',
           'contract.property',
           'contract.landlord',
+          'invoice',
+          'invoice.items',
         ],
       });
 
