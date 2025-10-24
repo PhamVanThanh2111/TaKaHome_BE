@@ -258,6 +258,9 @@ export class ContractService {
     } else if (signatureIndex === 1) {
       // TENANT signing (signatureIndex: 1)
       contract.transactionIdTenantSign = transactionId;
+    } else {
+      this.logger.warn(`Invalid signatureIndex: ${signatureIndex}`);
+      return;
     }
 
     await this.contractRepository.save(contract);
