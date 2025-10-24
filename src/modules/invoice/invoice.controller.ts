@@ -30,6 +30,7 @@ export class InvoiceController {
   constructor(private readonly invoiceService: InvoiceService) {}
 
   @Post()
+  @Roles('LANDLORD', 'ADMIN')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo hóa đơn' })
   @ApiResponse({ status: HttpStatus.CREATED, type: InvoiceResponseDto })
