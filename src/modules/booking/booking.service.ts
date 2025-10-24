@@ -27,11 +27,10 @@ import {
 import { SmartCAService } from '../smartca/smartca.service';
 import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { InvoiceService } from '../invoice/invoice.service';
-import * as fs from 'fs';
-import * as path from 'path';
+import { PdfFillService, PdfTemplateType } from '../contract/pdf-fill.service';
+import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { Property } from '../property/entities/property.entity';
 import { Room } from '../property/entities/room.entity';
-import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { User } from '../user/entities/user.entity';
 import { RoleEnum } from '../common/enums/role.enum';
 
@@ -51,6 +50,7 @@ export class BookingService {
     private contractService: ContractService,
     private smartcaService: SmartCAService,
     private s3StorageService: S3StorageService,
+    private pdfFillService: PdfFillService,
     @Inject(forwardRef(() => InvoiceService))
     private invoiceService: InvoiceService,
   ) {}
@@ -63,7 +63,7 @@ export class BookingService {
     if (!dto.propertyId && !dto.roomId) {
       throw new BadRequestException(
         'Either propertyId or roomId must be provided',
-      );
+    );
     }
 
     if (dto.propertyId && dto.roomId) {
@@ -159,20 +159,26 @@ export class BookingService {
     let keyUrl: string | undefined;
 
     try {
-      // Read PDF file from assets
-      const pdfPath = path.join(
-        process.cwd(),
-        'src',
-        'assets',
-        'contracts',
-        'HopDongChoThueNhaNguyenCan.pdf',
+      // Determine appropriate PDF template based on property type
+      const pdfTemplate = this.determinePdfTemplate(booking);
+      
+      // Build field values from booking information
+      const fieldValues = this.buildPdfFieldValues(booking);
+
+      // Fill PDF template with booking information and FLATTEN before signing
+      // NOTE: according to the signing flow, the PDF must be flattened first
+      const pdfBuffer = await this.pdfFillService.fillPdfTemplate(
+        fieldValues,
+        pdfTemplate,
+        true, // flatten before signing as requested
       );
 
-      if (!fs.existsSync(pdfPath)) {
-        throw new BadRequestException(`PDF file not found at: ${pdfPath}`);
-      }
+      // debug removed
 
-      const pdfBuffer = fs.readFileSync(pdfPath);
+      const landlord = await this.userRepository.findOne({
+        where: { id: userId },
+      });
+      
       // Landlord signs the contract (signatureIndex: 0)
       const signResult = await this.smartcaService.signPdfOneShot({
         pdfBuffer,
@@ -206,6 +212,7 @@ export class BookingService {
       // Upload the signed PDF to S3
       if (signResult.signedPdf) {
         try {
+          // Use the signed PDF directly (it already has the booking information filled and flattened)
           const uploadResult = await this.s3StorageService.uploadContractPdf(
             signResult.signedPdf,
             {
@@ -237,6 +244,7 @@ export class BookingService {
           );
         }
       }
+
     } catch (error) {
       console.error('[LandlordApprove] ❌ Landlord approval failed:', error);
       throw new BadRequestException(
@@ -981,6 +989,206 @@ export class BookingService {
         },
         error,
       );
+    }
+  }
+
+  /**
+   * Determine the appropriate PDF template based on property type
+   */
+  private determinePdfTemplate(booking: Booking): PdfTemplateType {
+    // If booking has a room, it's BOARDING type
+    if (booking.room) {
+      return PdfTemplateType.HOP_DONG_CHO_THUE_NHA_TRO;
+    }
+    // Otherwise it's HOUSING or APARTMENT
+    return PdfTemplateType.HOP_DONG_CHO_THUE_NHA_NGUYEN_CAN;
+  }
+
+  /**
+   * Build field values for PDF template from booking information
+   */
+  private buildPdfFieldValues(booking: Booking): Record<string, string> {
+    const fieldValues: Record<string, string> = {};
+
+    // Common fields for both templates
+    // Date
+    const now = new Date();
+    fieldValues.date = formatVN(now, 'dd/MM/yyyy');
+
+    // Tenant information
+    if (booking.tenant) {
+      if (booking.tenant.fullName) {
+        fieldValues.tenant_name = booking.tenant.fullName;
+        fieldValues.tenant_sign = booking.tenant.fullName;
+      }
+      if (booking.tenant.CCCD) {
+        fieldValues.tenant_cccd = booking.tenant.CCCD;
+      }
+      if (booking.tenant.phone) {
+        fieldValues.tenant_phone = booking.tenant.phone;
+      }
+    }
+
+    // Landlord information
+    if (booking.property?.landlord) {
+      if (booking.property.landlord.fullName) {
+        fieldValues.landlord_name = booking.property.landlord.fullName;
+        fieldValues.landlord_sign = booking.property.landlord.fullName;
+      }
+      if (booking.property.landlord.CCCD) {
+        fieldValues.landlord_cccd = booking.property.landlord.CCCD;
+      }
+      if (booking.property.landlord.phone) {
+        fieldValues.landlord_phone = booking.property.landlord.phone;
+      }
+    }
+
+    // Determine template type to set appropriate fields
+    const isBoarding = booking.room;
+
+    if (isBoarding) {
+      // HopDongChoThueNhaTro template - room-specific pricing
+      if (booking.room?.roomType) {
+        if (booking.room.roomType.price) {
+          fieldValues.rent = booking.room.roomType.price.toString();
+        }
+        if (booking.room.roomType.deposit) {
+          fieldValues.deposit = booking.room.roomType.deposit.toString();
+        }
+      }
+    } else {
+      // HopDongChoThueNhaNguyenCan template - property-specific fields
+      if (booking.property) {
+        if (booking.property.address) {
+          fieldValues.address = booking.property.address;
+        }
+        if (booking.property.area) {
+          fieldValues.area = booking.property.area.toString();
+        }
+        if (booking.property.price) {
+          fieldValues.rent = booking.property.price.toString();
+        }
+        if (booking.property.deposit) {
+          fieldValues.deposit = booking.property.deposit.toString();
+        }
+      }
+    }
+
+    return fieldValues;
+  }
+
+  /**
+   * Fill PDF template and flatten form fields to make content non-editable
+   * This method fills the PDF with booking information and flattens the form
+   */
+  private async fillPdfTemplateAndFlatten(
+    fieldValues: Record<string, string>,
+    templateType: PdfTemplateType,
+  ): Promise<Buffer> {
+    try {
+      // Import PDFDocument and PDFTextField
+      const { PDFDocument, PDFTextField } = await import('pdf-lib');
+      const fs = await import('fs');
+
+      // Get template path
+      const fileName = `${templateType}.pdf`;
+      const templatePath = `${process.cwd()}/src/assets/contracts/${fileName}`;
+
+      // Check if template exists
+      if (!fs.existsSync(templatePath)) {
+        throw new Error(`Template file not found: ${templatePath}`);
+      }
+
+      // Read and load PDF
+      const templateBytes = fs.readFileSync(templatePath);
+      const pdfDoc = await PDFDocument.load(templateBytes);
+      const form = pdfDoc.getForm();
+
+      // Log all fields in the PDF for debugging
+      const fields = form.getFields();
+      console.log(`📋 Found ${fields.length} fields in PDF template: ${templateType}`);
+      fields.forEach((field) => {
+        const fieldName = field.getName();
+        console.log(`📝 Field: ${fieldName} (Type: ${field.constructor.name})`);
+      });
+
+      // Fill form fields - fill ALL text fields including landlord_sign and tenant_sign
+      Object.entries(fieldValues).forEach(([fieldName, value]) => {
+        if (!value) return;
+
+        try {
+          const field = form.getField(fieldName);
+          if (field instanceof PDFTextField) {
+            // Process Vietnamese text
+            const processedValue = this.processVietnameseText(value);
+            field.setText(processedValue);
+            console.log(`✅ Filled field "${fieldName}" with: ${processedValue}`);
+          }
+        } catch {
+          // Field not found - this is expected for some fields
+          console.log(`⚠️ Field "${fieldName}" not found in template`);
+        }
+      });
+
+      // Flatten the form to make it non-editable (except for signature fields if needed)
+      // Note: This will make the filled content permanent and non-editable
+      form.flatten();
+      console.log(`� Form fields flattened - content is now non-editable`);
+
+      // Save PDF with flattened form fields
+      const pdfBytes = await pdfDoc.save();
+      console.log(`✅ PDF prepared with data filled and flattened. Size: ${pdfBytes.length} bytes`);
+      
+      return Buffer.from(pdfBytes);
+    } catch (error) {
+      console.error('❌ Error filling PDF template while preserving signatures:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Process Vietnamese text for PDF compatibility
+   */
+  private processVietnameseText(text: string): string {
+    try {
+      const vietnameseMap: Record<string, string> = {
+        'à': 'a', 'á': 'a', 'ạ': 'a', 'ả': 'a', 'ã': 'a',
+        'â': 'a', 'ầ': 'a', 'ấ': 'a', 'ậ': 'a', 'ẩ': 'a', 'ẫ': 'a',
+        'ă': 'a', 'ằ': 'a', 'ắ': 'a', 'ặ': 'a', 'ẳ': 'a', 'ẵ': 'a',
+        'À': 'A', 'Á': 'A', 'Ạ': 'A', 'Ả': 'A', 'Ã': 'A',
+        'Â': 'A', 'Ầ': 'A', 'Ấ': 'A', 'Ậ': 'A', 'Ẩ': 'A', 'Ẫ': 'A',
+        'Ă': 'A', 'Ằ': 'A', 'Ắ': 'A', 'Ặ': 'A', 'Ẳ': 'A', 'Ẵ': 'A',
+        'è': 'e', 'é': 'e', 'ẹ': 'e', 'ẻ': 'e', 'ẽ': 'e',
+        'ê': 'e', 'ề': 'e', 'ế': 'e', 'ệ': 'e', 'ể': 'e', 'ễ': 'e',
+        'È': 'E', 'É': 'E', 'Ẹ': 'E', 'Ẻ': 'E', 'Ẽ': 'E',
+        'Ê': 'E', 'Ề': 'E', 'Ế': 'E', 'Ệ': 'E', 'Ể': 'E', 'Ễ': 'E',
+        'ì': 'i', 'í': 'i', 'ị': 'i', 'ỉ': 'i', 'ĩ': 'i',
+        'Ì': 'I', 'Í': 'I', 'Ị': 'I', 'Ỉ': 'I', 'Ĩ': 'I',
+        'ò': 'o', 'ó': 'o', 'ọ': 'o', 'ỏ': 'o', 'õ': 'o',
+        'ô': 'o', 'ồ': 'o', 'ố': 'o', 'ộ': 'o', 'ổ': 'o', 'ỗ': 'o',
+        'ơ': 'o', 'ờ': 'o', 'ớ': 'o', 'ợ': 'o', 'ở': 'o', 'ỡ': 'o',
+        'Ò': 'O', 'Ó': 'O', 'Ọ': 'O', 'Ỏ': 'O', 'Õ': 'O',
+        'Ô': 'O', 'Ồ': 'O', 'Ố': 'O', 'Ộ': 'O', 'Ổ': 'O', 'Ỗ': 'O',
+        'Ơ': 'O', 'Ờ': 'O', 'Ớ': 'O', 'Ợ': 'O', 'Ở': 'O', 'Ỡ': 'O',
+        'ù': 'u', 'ú': 'u', 'ụ': 'u', 'ủ': 'u', 'ũ': 'u',
+        'ư': 'u', 'ừ': 'u', 'ứ': 'u', 'ự': 'u', 'ử': 'u', 'ữ': 'u',
+        'Ù': 'U', 'Ú': 'U', 'Ụ': 'U', 'Ủ': 'U', 'Ũ': 'U',
+        'Ư': 'U', 'Ừ': 'U', 'Ứ': 'U', 'Ự': 'U', 'Ử': 'U', 'Ữ': 'U',
+        'ỳ': 'y', 'ý': 'y', 'ỵ': 'y', 'ỷ': 'y', 'ỹ': 'y',
+        'Ỳ': 'Y', 'Ý': 'Y', 'Ỵ': 'Y', 'Ỷ': 'Y', 'Ỹ': 'Y',
+        'đ': 'd', 'Đ': 'D'
+      };
+
+      let result = text;
+      for (const [vietnamese, latin] of Object.entries(vietnameseMap)) {
+        result = result.replace(new RegExp(vietnamese, 'g'), latin);
+      }
+
+      result = result.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return result;
+    } catch (error) {
+      console.warn(`Warning processing Vietnamese text: ${error}`);
+      return text;
     }
   }
 }
