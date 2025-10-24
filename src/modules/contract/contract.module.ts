@@ -42,6 +42,6 @@ import { SmartCAModule } from '../smartca/smartca.module';
     DisputeHandlingService,
     PdfFillService,
   ],
-  exports: [ContractService, ContractTerminationService, TypeOrmModule],
+  exports: [ContractService, ContractTerminationService, PdfFillService, TypeOrmModule],
 })
 export class ContractModule {}

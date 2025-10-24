@@ -33,6 +33,7 @@ export class PdfFillService {
   async fillPdfTemplate(
     fieldValues: Record<string, string>,
     templateType: PdfTemplateType = PdfTemplateType.HOP_DONG_CHO_THUE_NHA_NGUYEN_CAN,
+    flatten = true,
   ): Promise<Buffer> {
     try {
       // Đường dẫn đến file template
@@ -87,11 +88,15 @@ export class PdfFillService {
         }
       });
 
-      // Flatten form để các field không còn editable
-      form.flatten();
+      // Flatten form để các field không còn editable (optional)
+      if (flatten) {
+        form.flatten();
+      }
 
-      // Lưu PDF đã điền thông tin
-      const pdfBytes = await pdfDoc.save();
+  // Lưu PDF đã điền thông tin
+  // Disable object streams to produce a more compatible traditional xref table
+  // which many low-level PDF parsers expect (helps placeholder insertion).
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
 
       this.logger.log(
         `✅ PDF filled successfully, template: ${templateType}, size: ${pdfBytes.length} bytes`,

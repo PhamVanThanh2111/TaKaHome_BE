@@ -5,6 +5,8 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import { ConfigType } from '@nestjs/config';
 import { plainAddPlaceholder } from '@signpdf/placeholder-plain';
 import { randomUUID } from 'crypto';
@@ -102,10 +104,20 @@ export class SmartCAService {
         // Enhance signature dictionary for NEAC compliance
         out = this.enhanceSignatureDictForNeac(out, p);
       } catch (error) {
-        console.warn(
-          '⚠️ @signpdf failed, using safe fallback approach:',
-          error.message,
-        );
+        // Log full error and save the failing PDF for offline inspection
+        try {
+          console.warn('⚠️ @signpdf plainAddPlaceholder failed:', error && (error.stack || error.message || error));
+          const debugDir = path.join(process.cwd(), 'tmp-debug');
+          if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir);
+          const errPdf = Buffer.from(out);
+          const pdfName = `smartca-plainadd-error-${Date.now()}.pdf`;
+          fs.writeFileSync(path.join(debugDir, pdfName), errPdf);
+          const errName = `smartca-plainadd-error-${Date.now()}.log`;
+          fs.writeFileSync(path.join(debugDir, errName), String(error && (error.stack || error.message || error)));
+          console.debug(`[SmartCA] Saved failing PDF -> tmp-debug/${pdfName} and log -> tmp-debug/${errName}`);
+        } catch (saveErr) {
+          console.warn('[SmartCA] Failed saving plainAddPlaceholder error artifacts:', saveErr && saveErr.message);
+        }
 
         // Fallback: Return original PDF with minimal safe normalization
         out = this.applySafeNeacNormalization(out);
@@ -146,6 +158,28 @@ export class SmartCAService {
       throw new BadRequestException(
         `Found ${byteRanges.length} /ByteRange but only ${contents.length} /Contents`,
       );
+    }
+
+    // Debug: save prepared PDF with placeholders and log signature scan
+    try {
+      try {
+        const debugDir = path.join(process.cwd(), 'tmp-debug');
+        if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir);
+        const fileName = `smartca-prepared-${Date.now()}.pdf`;
+        fs.writeFileSync(path.join(debugDir, fileName), out);
+        console.debug(`[SmartCA] Wrote prepared PDF with placeholders to tmp-debug/${fileName} (size=${out.length} bytes)`);
+      } catch (err) {
+        console.warn('[SmartCA] Failed to write prepared PDF debug file:', err && err.message);
+      }
+      // Also output debugScanSignatures result for quick view
+      try {
+        const scan = this.debugScanSignatures(out);
+        console.debug('[SmartCA] debugScanSignatures (prepared):', scan);
+      } catch (scanErr) {
+        console.warn('[SmartCA] debugScanSignatures failed on prepared PDF:', scanErr && scanErr.message);
+      }
+    } catch {
+      // ignore all debug failures
     }
 
     return out;
