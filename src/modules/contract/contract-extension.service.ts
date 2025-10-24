@@ -92,6 +92,26 @@ export class ContractExtensionService {
       );
     }
 
+    // Kiểm tra nếu landlord đã từ chối 3 lần liên tiếp
+    const recentExtensions = await this.extensionRepository.find({
+      where: { contractId: dto.contractId },
+      order: { createdAt: 'DESC' },
+      take: 3, // Lấy 3 extension gần nhất
+    });
+
+    // Nếu có ít nhất 3 extension và tất cả đều bị REJECTED
+    if (recentExtensions.length >= 3) {
+      const allRejected = recentExtensions.every(
+        extension => extension.status === ExtensionStatus.REJECTED
+      );
+
+      if (allRejected) {
+        throw new BadRequestException(
+          'Cannot request extension. Landlord has rejected 3 consecutive extension requests for this contract. Please contact landlord directly.'
+        );
+      }
+    }
+
     // Tạo extension request
     const extension = this.extensionRepository.create({
       ...dto,
