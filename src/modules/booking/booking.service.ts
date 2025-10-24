@@ -168,26 +168,7 @@ export class BookingService {
         true, // flatten before signing as requested
       );
 
-      // Debug: scan and save the filled PDF before sending to SmartCA
-      try {
-        console.debug(`[LandlordApprove] Filled PDF size before signing: ${pdfBuffer.length} bytes`);
-        const preSignScan = await this.smartcaService.debugScanSignatures(pdfBuffer);
-        console.debug('[LandlordApprove] debugScanSignatures (before preparePlaceholder):', preSignScan);
-        // Save to tmp-debug for offline inspection
-        try {
-          const path = require('path');
-          const fs = require('fs');
-          const debugDir = path.join(process.cwd(), 'tmp-debug');
-          if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir);
-          const fileName = `booking-${booking.id}-filled-before-sign-${Date.now()}.pdf`;
-          fs.writeFileSync(path.join(debugDir, fileName), pdfBuffer);
-          console.debug(`[LandlordApprove] Wrote filled PDF before signing to tmp-debug/${fileName}`);
-        } catch (err) {
-          console.warn('[LandlordApprove] Failed to write filled PDF debug file:', err && err.message);
-        }
-      } catch (scanErr) {
-        console.warn('[LandlordApprove] debugScanSignatures failed on filled PDF:', scanErr && scanErr.message);
-      }
+      // debug removed
 
       const landlord = await this.userRepository.findOne({
         where: { id: userId },
