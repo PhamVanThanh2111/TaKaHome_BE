@@ -142,6 +142,11 @@ export class BookingService {
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.PENDING_LANDLORD]);
 
+    // Cache user để tránh multiple queries
+    const landlord = await this.userRepository.findOne({
+      where: { id: userId },
+    });
+
     // Ensure contract exists before landlord signing
     const contract = await this.ensureContractForBooking(booking);
     if (!contract) {
@@ -168,9 +173,6 @@ export class BookingService {
       }
 
       const pdfBuffer = fs.readFileSync(pdfPath);
-      const landlord = await this.userRepository.findOne({
-        where: { id: userId },
-      });
       // Landlord signs the contract (signatureIndex: 0)
       const signResult = await this.smartcaService.signPdfOneShot({
         pdfBuffer,
@@ -305,6 +307,7 @@ export class BookingService {
   ): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.PENDING_SIGNATURE]);
+    
     const contract = await this.ensureContractForBooking(booking);
     if (!contract) {
       throw new BadRequestException(
@@ -385,7 +388,11 @@ export class BookingService {
           300, // 5 minutes
         );
 
-        // Update contract with new URL (fully-signed PDF)
+        if (signResult.transactionId) {
+          contract.transactionIdTenantSign = signResult.transactionId;
+        }
+
+        // Update contract with new URL (fully-signed PDF) and save
         contract.contractFileUrl = uploadResult.url;
         await this.contractRepository.save(contract);
       }
