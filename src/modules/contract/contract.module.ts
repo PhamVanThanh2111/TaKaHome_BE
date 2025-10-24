@@ -9,6 +9,7 @@ import { BlockchainModule } from '../blockchain/blockchain.module';
 import { S3StorageModule } from '../s3-storage/s3-storage.module';
 import { ContractTerminationService } from './contract-termination.service';
 import { DisputeHandlingService } from './dispute-handling.service';
+import { PdfFillService } from './pdf-fill.service';
 import { Booking } from '../booking/entities/booking.entity';
 import { User } from '../user/entities/user.entity';
 import { Escrow } from '../escrow/entities/escrow.entity';
@@ -19,7 +20,13 @@ import { SmartCAModule } from '../smartca/smartca.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Contract, ContractExtension, Booking, User, Escrow]),
+    TypeOrmModule.forFeature([
+      Contract,
+      ContractExtension,
+      Booking,
+      User,
+      Escrow,
+    ]),
     BlockchainModule,
     S3StorageModule,
     SmartCAModule,
@@ -33,6 +40,7 @@ import { SmartCAModule } from '../smartca/smartca.module';
     ContractExtensionService,
     ContractTerminationService,
     DisputeHandlingService,
+    PdfFillService,
   ],
   exports: [ContractService, ContractTerminationService, TypeOrmModule],
 })

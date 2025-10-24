@@ -8,11 +8,15 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ContractService } from './contract.service';
 import { ContractExtensionService } from './contract-extension.service';
+import { PdfFillService } from './pdf-fill.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
+import { TestFillPdfDto } from './dto/test-fill-pdf.dto';
 import { CreateContractExtensionDto } from './dto/create-contract-extension.dto';
 import { RespondContractExtensionDto } from './dto/respond-contract-extension.dto';
 import { TenantRespondExtensionDto } from './dto/tenant-respond-extension.dto';
@@ -34,6 +38,7 @@ export class ContractController {
   constructor(
     private readonly contractService: ContractService,
     private readonly contractExtensionService: ContractExtensionService,
+    private readonly pdfFillService: PdfFillService,
   ) {}
 
   @Post()
@@ -243,9 +248,10 @@ export class ContractController {
 
   @Post('extensions/list')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Lấy danh sách contract extensions theo contractId',
-    description: 'API này cho phép lấy danh sách tất cả các yêu cầu gia hạn của một hợp đồng. Người dùng phải là TENANT hoặc LANDLORD của hợp đồng đó.'
+    description:
+      'API này cho phép lấy danh sách tất cả các yêu cầu gia hạn của một hợp đồng. Người dùng phải là TENANT hoặc LANDLORD của hợp đồng đó.',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -255,10 +261,13 @@ export class ContractController {
       type: 'object',
       properties: {
         statusCode: { type: 'number', example: 200 },
-        message: { type: 'string', example: 'Contract extensions retrieved successfully' },
+        message: {
+          type: 'string',
+          example: 'Contract extensions retrieved successfully',
+        },
         data: {
           type: 'array',
-          items: { $ref: '#/components/schemas/ContractExtensionResponseDto' }
+          items: { $ref: '#/components/schemas/ContractExtensionResponseDto' },
         },
       },
     },
@@ -269,7 +278,8 @@ export class ContractController {
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
-    description: 'Không có quyền truy cập - chỉ tenant hoặc landlord mới có thể xem',
+    description:
+      'Không có quyền truy cập - chỉ tenant hoặc landlord mới có thể xem',
   })
   @ApiResponse({
     status: HttpStatus.BAD_REQUEST,
@@ -283,5 +293,109 @@ export class ContractController {
       dto.contractId,
       user.id,
     );
+  }
+
+  // ================================
+  // PDF Template Testing Endpoints
+  // ================================
+
+  @Get('test/template-fields')
+  @ApiOperation({
+    summary: 'Lấy danh sách các field trong PDF template',
+    description:
+      'API để kiểm tra các field có sẵn trong file hopdongthue-template.pdf',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Danh sách các field trong template',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 200 },
+        message: { type: 'string', example: 'SUCCESS' },
+        data: {
+          type: 'object',
+          properties: {
+            fields: {
+              type: 'array',
+              items: { type: 'string' },
+              example: [
+                'landlord_name',
+                'tenant_name',
+                'landlord_cccd',
+                'tenant_cccd',
+              ],
+            },
+          },
+        },
+      },
+    },
+  })
+  async getTemplateFields() {
+    const fields = await this.pdfFillService.getTemplateFields();
+    return {
+      statusCode: 200,
+      message: 'SUCCESS',
+      data: { fields },
+    };
+  }
+
+  @Post('test/fill-pdf')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Test điền thông tin vào PDF template',
+    description:
+      'API test để điền thông tin vào các field trong hopdongthue-template.pdf và trả về file PDF đã điền',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'File PDF đã được điền thông tin',
+    content: {
+      'application/pdf': {
+        schema: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Dữ liệu đầu vào không hợp lệ',
+  })
+  async testFillPdf(@Body() dto: TestFillPdfDto, @Res() res: Response) {
+    // Chuẩn bị dữ liệu để điền vào PDF
+    const fieldValues: Record<string, string> = {
+      landlord_name: dto.landlord_name,
+      tenant_name: dto.tenant_name,
+      landlord_cccd: dto.landlord_cccd,
+      tenant_cccd: dto.tenant_cccd,
+    };
+
+    // Thêm các field optional nếu có
+    if (dto.property_address) {
+      fieldValues.property_address = dto.property_address;
+    }
+    if (dto.rent_amount) {
+      fieldValues.rent_amount = dto.rent_amount;
+    }
+    if (dto.start_date) {
+      fieldValues.start_date = dto.start_date;
+    }
+    if (dto.end_date) {
+      fieldValues.end_date = dto.end_date;
+    }
+
+    // Điền thông tin vào PDF
+    const pdfBuffer = await this.pdfFillService.fillPdfTemplate(fieldValues);
+
+    // Trả về file PDF
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment; filename="contract-filled.pdf"',
+      'Content-Length': pdfBuffer.length,
+    });
+
+    res.send(pdfBuffer);
   }
 }
