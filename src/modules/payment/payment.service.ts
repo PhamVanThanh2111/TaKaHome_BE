@@ -936,6 +936,7 @@ export class PaymentService {
         }
         const paymentDate = payment.paidAt || vnNow();
         period = this.calculatePaymentPeriod(contract, paymentDate);
+        return;
       }
 
       await this.blockchainService.recordPayment(

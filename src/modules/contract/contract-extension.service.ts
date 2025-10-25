@@ -239,7 +239,7 @@ export class ContractExtensionService {
 
       const recordResult = await this.blockchainService.recordContractExtension(
         contract.contractCode,
-        ((d) => (d.setDate(d.getDate() + 1), d))(
+        ((d) => (d.setDate(d.getDate() + 5), d))(
           new Date(contract.updatedAt),
         ).toISOString(),
         // contract.endDate.toISOString(), // newEndDate
