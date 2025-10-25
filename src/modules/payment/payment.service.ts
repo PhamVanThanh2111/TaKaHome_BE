@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
@@ -21,6 +23,8 @@ import { BookingService } from '../booking/booking.service';
 import { BlockchainService } from '../blockchain/blockchain.service';
 import { ContractService } from '../contract/contract.service';
 import { ExtensionStatus } from '../contract/entities/contract-extension.entity';
+import { Escrow } from '../escrow/entities/escrow.entity';
+import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import {
   addMinutesVN,
@@ -40,6 +44,8 @@ export class PaymentService {
     private paymentRepository: Repository<Payment>,
     @InjectRepository(Invoice)
     private readonly invoiceRepository: Repository<Invoice>,
+    @InjectRepository(Escrow)
+    private readonly escrowRepository: Repository<Escrow>,
     @Inject(vnpayConfig.KEY)
     private readonly vnpay: ConfigType<typeof vnpayConfig>,
     private readonly walletService: WalletService,
@@ -504,6 +510,8 @@ export class PaymentService {
           'contract.tenant',
           'contract.property',
           'contract.landlord',
+          'invoice',
+          'invoice.items',
         ],
       });
 
@@ -591,6 +599,8 @@ export class PaymentService {
           'contract.tenant',
           'contract.property',
           'contract.landlord',
+          'invoice',
+          'invoice.items',
         ],
       }));
 
@@ -780,8 +790,18 @@ export class PaymentService {
       // 1. Credit landlord wallet
       await this.creditMonthlyRentToLandlord(payment);
 
-      // 2. Record payment on blockchain
-      await this.recordMonthlyPaymentOnBlockchain(payment);
+      // 2. Reload payment with invoice relations before blockchain recording
+      const paymentWithInvoice = await this.paymentRepository.findOne({
+        where: { id: payment.id },
+        relations: ['contract', 'contract.tenant', 'invoice', 'invoice.items'],
+      });
+
+      if (!paymentWithInvoice) {
+        throw new Error(`Payment ${payment.id} not found`);
+      }
+
+      // 3. Record payment on blockchain
+      await this.recordMonthlyPaymentOnBlockchain(paymentWithInvoice);
 
       console.log(
         `✅ Monthly rent payment processed for contract ${payment.contract?.contractCode}`,
@@ -871,10 +891,8 @@ export class PaymentService {
   ): Promise<void> {
     try {
       const contract = payment.contract;
-      if (!contract?.contractCode || !contract.startDate) {
-        console.warn(
-          'Cannot record monthly payment: missing contract code or start date',
-        );
+      if (!contract?.contractCode) {
+        console.warn('Cannot record monthly payment: missing contract code');
         return;
       }
 
@@ -885,9 +903,41 @@ export class PaymentService {
         mspId: 'orgMSP',
       };
 
-      // Calculate period based on contract start date and payment date
-      const paymentDate = vnNow();
-      const period = this.calculatePaymentPeriod(contract, paymentDate);
+      // Get period from linked invoice if available
+      let period: string;
+
+      if (payment.invoice?.items) {
+        // Try to extract period from invoice item description
+        const extractedPeriod = this.extractPeriodFromInvoice(payment.invoice);
+        if (extractedPeriod) {
+          period = extractedPeriod;
+          console.log(
+            `📋 Using period ${period} from invoice ${payment.invoice.id}`,
+          );
+        } else {
+          // Fallback to calculation if extraction fails
+          console.warn(
+            'Failed to extract period from invoice, falling back to calculation',
+          );
+          if (!contract.startDate) {
+            console.warn(
+              'Cannot calculate period: missing contract start date',
+            );
+            return;
+          }
+          const paymentDate = payment.paidAt || vnNow();
+          period = this.calculatePaymentPeriod(contract, paymentDate);
+        }
+      } else {
+        // No invoice linked, calculate period
+        if (!contract.startDate) {
+          console.warn('Cannot calculate period: missing contract start date');
+          return;
+        }
+        const paymentDate = payment.paidAt || vnNow();
+        period = this.calculatePaymentPeriod(contract, paymentDate);
+        return;
+      }
 
       await this.blockchainService.recordPayment(
         contract.contractCode,
@@ -994,31 +1044,11 @@ export class PaymentService {
         return;
       }
 
-      // For FIRST_MONTH_RENT, find invoice with "first month" description
-      // For MONTHLY_RENT, calculate period and match
-      let searchCriteria: string;
-
-      if (payment.purpose === PaymentPurpose.FIRST_MONTH_RENT) {
-        searchCriteria = 'first month';
-      } else {
-        // MONTHLY_RENT - calculate period
-        if (!contract.startDate) {
-          console.warn(
-            `Cannot calculate period: missing contract start date for payment ${payment.id}`,
-          );
-          return;
-        }
-        const paymentDate = payment.paidAt || new Date();
-        const period = this.calculatePaymentPeriod(contract, paymentDate);
-        searchCriteria = `period ${period}`;
-      }
-
-      // Find matching invoice for this contract and amount
+      // Find matching invoice for this contract
       const invoices = await this.invoiceRepository.find({
         where: {
           contract: { id: contract.id },
           status: InvoiceStatusEnum.PENDING,
-          totalAmount: payment.amount,
         },
         relations: ['items'],
         order: { createdAt: 'ASC' }, // Link to oldest unpaid invoice first
@@ -1026,17 +1056,26 @@ export class PaymentService {
 
       if (invoices.length === 0) {
         console.warn(
-          `No matching invoice found for payment ${payment.id} (contract: ${contract.id}, amount: ${payment.amount})`,
+          `No matching invoice found for payment ${payment.id} (contract: ${contract.id})`,
         );
         return;
       }
 
-      // Try to match invoice by search criteria in description
-      let targetInvoice = invoices.find((inv) =>
-        inv.items?.some((item) =>
-          item.description.toLowerCase().includes(searchCriteria.toLowerCase()),
-        ),
-      );
+      let targetInvoice: Invoice | undefined;
+
+      if (payment.purpose === PaymentPurpose.FIRST_MONTH_RENT) {
+        // Find invoice with "first month" in description
+        targetInvoice = invoices.find((inv) =>
+          inv.items?.some((item) =>
+            item.description.toLowerCase().includes('first month'),
+          ),
+        );
+      } else {
+        // For MONTHLY_RENT, find the oldest pending invoice with amount match
+        targetInvoice = invoices.find(
+          (inv) => inv.totalAmount === payment.amount,
+        );
+      }
 
       // If no specific match, use the oldest invoice
       if (!targetInvoice) {
@@ -1052,7 +1091,7 @@ export class PaymentService {
       await this.invoiceRepository.save(targetInvoice);
 
       console.log(
-        `✅ Linked payment ${payment.id} with invoice ${targetInvoice.id} (${searchCriteria})`,
+        `✅ Linked payment ${payment.id} with invoice ${targetInvoice.id}`,
       );
     } catch (error) {
       console.error('❌ Failed to link payment with invoice:', error);
@@ -1070,22 +1109,57 @@ export class PaymentService {
     paymentDate: Date,
   ): string {
     const startDate = contract.startDate;
-    const monthsDiff = Math.floor(
-      (paymentDate.getFullYear() - startDate.getFullYear()) * 12 +
-        (paymentDate.getMonth() - startDate.getMonth()),
-    );
-
-    // Period starts from 2 since first payment is period 1
-    const period = Math.max(2, monthsDiff + 2);
-    return period.toString();
-    // DEMO: Calculate 5-hour periods instead of months
-    // const timeDiffMs = paymentDate.getTime() - startDate.getTime();
-    // const hoursDiff = Math.floor(timeDiffMs / (1000 * 60 * 60)); // Convert to hours
-    // const periodsSinceStart = Math.floor(hoursDiff / 5); // 5-hour periods
+    // const monthsDiff = Math.floor(
+    //   (paymentDate.getFullYear() - startDate.getFullYear()) * 12 +
+    //     (paymentDate.getMonth() - startDate.getMonth()),
+    // );
 
     // // Period starts from 2 since first payment is period 1
-    // const period = Math.max(2, periodsSinceStart + 2);
+    // const period = Math.max(2, monthsDiff + 2);
     // return period.toString();
+    // DEMO: Calculate 5-hour periods instead of months
+    const timeDiffMs = paymentDate.getTime() - startDate.getTime();
+    const hoursDiff = Math.floor(timeDiffMs / (1000 * 60 * 60)); // Convert to hours
+    const periodsSinceStart = Math.floor(hoursDiff / 5); // 5-hour periods
+
+    // Period starts from 2 since first payment is period 1
+    const period = Math.max(2, periodsSinceStart + 2);
+    return period.toString();
+  }
+
+  /**
+   * Extract period number from invoice item description
+   * Expected format: "Monthly rent - Period 2" or "Monthly rent - Period X"
+   * @returns period number as string or null if not found
+   */
+  private extractPeriodFromInvoice(invoice: Invoice): string | null {
+    try {
+      if (!invoice.items || invoice.items.length === 0) {
+        return null;
+      }
+
+      // Search for period in all invoice items
+      for (const item of invoice.items) {
+        const description = item.description || '';
+
+        // Match pattern: "Period X" where X is a number
+        const periodMatch = description.match(/period\s+(\d+)/i);
+
+        if (periodMatch && periodMatch[1]) {
+          const period = periodMatch[1];
+          console.log(
+            `🔍 Extracted period ${period} from description: "${description}"`,
+          );
+          return period;
+        }
+      }
+
+      console.warn('No period found in invoice items');
+      return null;
+    } catch (error) {
+      console.error('Error extracting period from invoice:', error);
+      return null;
+    }
   }
 
   /**
@@ -1183,6 +1257,86 @@ export class PaymentService {
           'Landlord extension escrow deposit already paid',
         );
       }
+    }
+
+    // Validate payment amount against required deposit
+    await this.validateExtensionEscrowAmount(dto, contract);
+  }
+
+  /**
+   * Validate extension escrow payment amount
+   */
+  private async validateExtensionEscrowAmount(
+    dto: CreatePaymentDto,
+    contract: any,
+  ): Promise<void> {
+    // Lấy thông tin escrow account
+    const escrowAccount = await this.escrowRepository.findOne({
+      where: { contractId: contract.id as string },
+    });
+
+    if (!escrowAccount) {
+      throw new BadRequestException(
+        'Escrow account not found for this contract',
+      );
+    }
+
+    // Xác định số tiền ký quỹ yêu cầu dựa trên loại property
+    let requiredDeposit = 0;
+
+    if (contract.property?.type === PropertyTypeEnum.BOARDING) {
+      // Với BOARDING, lấy deposit từ RoomType
+      if (contract.room?.roomType?.deposit) {
+        requiredDeposit = Number((contract as any).room.roomType.deposit);
+      }
+    } else {
+      // Với HOUSING hoặc APARTMENT, lấy deposit từ Property
+      if (contract.property?.deposit) {
+        requiredDeposit = Number((contract as any).property.deposit);
+      }
+    }
+
+    if (requiredDeposit === 0) {
+      throw new BadRequestException(
+        'Deposit amount not configured for this property',
+      );
+    }
+
+    // Chuyển đổi số dư hiện tại từ string sang number
+    const currentTenantBalance = parseInt(
+      escrowAccount.currentBalanceTenant,
+      10,
+    );
+    const currentLandlordBalance = parseInt(
+      escrowAccount.currentBalanceLandlord,
+      10,
+    );
+
+    // Tính số tiền thực sự cần đóng
+    let actualAmountNeeded = 0;
+    let userType = '';
+
+    if (dto.purpose === PaymentPurpose.TENANT_EXTENSION_ESCROW_DEPOSIT) {
+      actualAmountNeeded = Math.max(0, requiredDeposit - currentTenantBalance);
+      userType = 'Tenant';
+    } else {
+      actualAmountNeeded = Math.max(
+        0,
+        requiredDeposit - currentLandlordBalance,
+      );
+      userType = 'Landlord';
+    }
+
+    // Kiểm tra số tiền thanh toán phải >= số tiền thực sự cần đóng
+    if (dto.amount < actualAmountNeeded) {
+      throw new BadRequestException(
+        `${userType} extension escrow payment amount (${dto.amount.toLocaleString()} VND) must be at least ${actualAmountNeeded.toLocaleString()} VND. ` +
+          `Required deposit: ${requiredDeposit.toLocaleString()} VND, Current balance: ${
+            dto.purpose === PaymentPurpose.TENANT_EXTENSION_ESCROW_DEPOSIT
+              ? currentTenantBalance.toLocaleString()
+              : currentLandlordBalance.toLocaleString()
+          } VND.`,
+      );
     }
   }
 

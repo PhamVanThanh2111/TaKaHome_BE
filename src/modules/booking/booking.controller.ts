@@ -78,9 +78,13 @@ export class BookingController {
 
   // --- Nghiệp vụ flow ---
   @Post(':id/approve')
-  @ApiOperation({ summary: 'Chủ nhà duyệt booking' })
+  @ApiOperation({ summary: 'Chủ nhà duyệt booking và ký số hợp đồng' })
   @Roles(RoleEnum.LANDLORD, RoleEnum.ADMIN)
-  @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    type: BookingResponseDto,
+    description: 'Trả về booking với signedPdfUrl sau khi chủ nhà ký số thành công'
+  })
   approve(@Param('id') id: string, @CurrentUser() user: JwtUser) {
     return this.bookingService.landlordApprove(id, user.id);
   }

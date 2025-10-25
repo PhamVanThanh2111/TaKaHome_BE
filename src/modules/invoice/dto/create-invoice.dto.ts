@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsDateString,
+  IsEnum,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -10,6 +11,7 @@ import {
   Matches,
   ValidateNested,
 } from 'class-validator';
+import { ServiceTypeEnum } from 'src/modules/common/enums/service-type.enum';
 
 export class CreateInvoiceItemDto {
   @ApiProperty({ example: 'Tiền thuê phòng tháng 8/2024' })
@@ -19,6 +21,14 @@ export class CreateInvoiceItemDto {
   @ApiProperty({ example: 8000000 })
   @IsNumber()
   amount: number;
+
+  @ApiProperty({
+    example: ServiceTypeEnum.RENT,
+    description: 'Loại dịch vụ (nếu là hóa đơn dịch vụ)',
+  })
+  @IsOptional()
+  @IsEnum(ServiceTypeEnum)
+  serviceType?: ServiceTypeEnum;
 }
 
 export class CreateInvoiceDto {
