@@ -166,6 +166,7 @@ export class SmartCAService {
     contactInfo?: string;
     signerName?: string;
     creator?: string;
+    signingOption?: string; // 'VNPT' or 'SELF_CA'
   }): Promise<{
     success: boolean;
     signedPdf?: Buffer;
@@ -211,7 +212,7 @@ export class SmartCAService {
         ],
       });
 
-      // Step 2: Sign to CMS using VNPT SmartCA
+      // Step 2: Sign to CMS (default: SELF_CA). signingOption is accepted for future use.
       const signResult = await this.signToCmsPades({
         pdf: preparedPdf,
         signatureIndex,
@@ -219,6 +220,7 @@ export class SmartCAService {
         contractId: options.contractId,
         intervalMs,
         timeoutMs,
+        signingOption: options.signingOption,
       });
 
       if (!signResult.cmsBase64) {
@@ -442,6 +444,7 @@ export class SmartCAService {
     contractId?: string;
     intervalMs?: number;
     timeoutMs?: number;
+    signingOption?: string; // 'VNPT' | 'SELF_CA' - currently accepted but VNPT flow remains default
   }) {
     const signatureIndex = options.signatureIndex ?? 0;
 

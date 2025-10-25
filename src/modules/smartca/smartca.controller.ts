@@ -549,6 +549,7 @@ export class SmartCAController {
       contactInfo?: string;
       signerName?: string;
       creator?: string;
+      signingOption?: string;
     },
     @Res() res: Response,
   ) {
@@ -580,6 +581,7 @@ export class SmartCAController {
         contactInfo: body.contactInfo?.trim() || '',
         signerName: body.signerName?.trim() || 'Digital Signature',
         creator: body.creator?.trim() || 'SmartCA VNPT 2025',
+        signingOption: body.signingOption?.trim() || 'SELF_CA',
       });
 
       if (!result.success) {
