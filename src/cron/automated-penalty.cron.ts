@@ -29,7 +29,7 @@ export class AutomatedPenaltyCron {
   //   name: 'process-overdue-payments',
   //   timeZone: 'Asia/Ho_Chi_Minh',
   // })
-  @Cron('*/11 * * * *', {
+  @Cron('*/7 * * * *', {
     name: 'process-overdue-payments',
     timeZone: 'Asia/Ho_Chi_Minh',
   })

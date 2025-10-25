@@ -79,6 +79,7 @@ export class AutomatedPenaltyService {
 
       // Get actual rent amount from blockchain contract first, then fallback to property or default
       const actualRentAmount = await this.getRentAmountFromBlockchain(
+        booking.tenant.id,
         booking.contractId,
         rentAmount || booking.property?.price || 10000000,
       );
@@ -403,7 +404,7 @@ export class AutomatedPenaltyService {
       userId: booking.tenant.id,
       type: NotificationTypeEnum.PAYMENT,
       title: 'Phí phạt thanh toán lần đầu',
-      content: `Do thanh toán lần đầu muộn ${daysPastDue} ngày cho căn hộ ${booking.property.title}, bạn đã bị áp dụng phí phạt ${penaltyInfo.amount.toLocaleString('vi-VN')} VND. Lưu ý: Nếu trễ quá 3 ngày, hợp đồng sẽ bị hủy!`,
+      content: `Do thanh toán lần đầu muộn ${daysPastDue} ngày cho căn hộ ${booking.property?.title || 'N/A'}, bạn đã bị áp dụng phí phạt ${penaltyInfo.amount.toLocaleString('vi-VN')} VND. Lưu ý: Nếu trễ quá 3 ngày, hợp đồng sẽ bị hủy!`,
     });
 
     // Notify landlord (if property has landlord relation)
@@ -603,7 +604,7 @@ export class AutomatedPenaltyService {
         where: {
           status: BookingStatus.DUAL_ESCROW_FUNDED, // Should have paid first rent by now
         },
-        relations: ['tenant', 'contract'],
+        relations: ['tenant', 'contract', 'property', 'property.landlord'],
       });
 
       let penaltiesApplied = 0;
@@ -1193,6 +1194,7 @@ export class AutomatedPenaltyService {
    * Get rent amount from blockchain contract, fallback to provided default
    */
   private async getRentAmountFromBlockchain(
+    tenantId: string,
     contractId: string,
     fallbackAmount: number,
   ): Promise<number> {
@@ -1211,8 +1213,8 @@ export class AutomatedPenaltyService {
 
       // Create system user for blockchain operations
       const systemUser = {
-        userId: 'system',
-        orgName: 'OrgProp',
+        userId: tenantId,
+        orgName: 'OrgTenant',
         mspId: 'OrgPropMSP',
       };
 
@@ -1632,6 +1634,7 @@ export class AutomatedPenaltyService {
 
           // 3. Calculate expected penalty (3% per day for 1 day)
           const rentAmount = await this.getRentAmountFromBlockchain(
+            contract.tenant.id,
             contract.id,
             contract.property?.price || 10000000,
           );

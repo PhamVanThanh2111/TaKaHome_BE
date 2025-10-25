@@ -101,8 +101,8 @@ export class InvoiceService {
       contract: { id: dto.contractId },
       dueDate: zonedTimeToUtc(dueInput, VN_TZ),
       items,
-      totalAmount: total,
       billingPeriod: dto.billingPeriod,
+      totalAmount: total,
     });
     const saved = await this.invoiceRepository.save(invoice);
     return new ResponseCommon(200, 'SUCCESS', saved);
