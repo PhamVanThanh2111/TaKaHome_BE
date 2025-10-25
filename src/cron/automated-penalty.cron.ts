@@ -49,7 +49,7 @@ export class AutomatedPenaltyCron {
   /**
    * Run every day at 8:00 AM to check for overdue handovers (landlord penalties)
    */
-  @Cron('0 /20 * * *', {
+  @Cron('*/20 * * * *', {
     name: 'process-overdue-handovers',
     timeZone: 'Asia/Ho_Chi_Minh',
   })
