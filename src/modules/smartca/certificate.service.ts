@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CertificateKey } from './entities/certificate-key.entity';
@@ -15,7 +15,7 @@ export class CertificateService {
     @InjectRepository(CertificateKey)
     private readonly certRepo: Repository<CertificateKey>,
     private readonly rootCA: RootCAService,
-    // SmartCAService used to embed CMS into PDF (embedCmsAtIndex)
+    @Inject(forwardRef(() => SmartCAService))
     private readonly smartCAService: SmartCAService,
   ) {}
 

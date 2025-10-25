@@ -4,7 +4,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, forwardRef } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ConfigType } from '@nestjs/config';
@@ -21,6 +21,8 @@ import {
   SmartCASignResponse,
   SmartCAUserCertificate,
 } from './types/smartca.types';
+
+import { CertificateService } from './certificate.service';
 
 const OID_SHA256 = forge.pki.oids.sha256 as string;
 const OID_RSA = forge.pki.oids.rsaEncryption as string;
@@ -50,7 +52,9 @@ function utcTimestamp(): string {
 export class SmartCAService {
   constructor(
     @Inject(smartcaConfig.KEY)
-    private readonly smartca: ConfigType<typeof smartcaConfig>,
+  private readonly smartca: ConfigType<typeof smartcaConfig>,
+  @Inject(forwardRef(() => CertificateService))
+  private readonly certificateService?: CertificateService,
   ) {}
 
   preparePlaceholder(pdfBuffer: Buffer, options: PrepareOptions): Buffer {
@@ -213,6 +217,52 @@ export class SmartCAService {
       });
 
       // Step 2: Sign to CMS (default: SELF_CA). signingOption is accepted for future use.
+      const finalOption = (options.signingOption || 'SELF_CA').toUpperCase();
+
+      // If SELF_CA requested, perform local signing via CertificateService
+      if (finalOption === 'SELF_CA') {
+        const actorUserId = (options.userIdOverride || '').trim();
+        if (!actorUserId) {
+          throw new BadRequestException(
+            'SELF_CA signing requires actor user id: pass userIdOverride as internal user id',
+          );
+        }
+
+        if (!this.certificateService) {
+          throw new BadRequestException('CertificateService is not available');
+        }
+
+        // CertificateService will return cmsBase64 (detached). Embed it here.
+        const certResult = await this.certificateService.signPdfWithUserKey(
+          actorUserId,
+          preparedPdf,
+          signatureIndex,
+        );
+        if (!certResult || !certResult.cmsBase64) {
+          throw new Error('SELF_CA signing failed: no cms returned');
+        }
+
+        const signedPdf = this.embedCmsAtIndex(
+          preparedPdf,
+          certResult.cmsBase64,
+          signatureIndex,
+        );
+
+        const processingTime = Date.now() - startTime;
+        return {
+          success: true,
+          signedPdf,
+          transactionId: `SELF_CA_${Date.now()}`,
+          docId: `selfca-${randomUUID()}`,
+          metadata: {
+            originalSize: options.pdfBuffer.length,
+            signedSize: signedPdf.length,
+            signatureIndex,
+            processingTimeMs: processingTime,
+          },
+        };
+      }
+
       const signResult = await this.signToCmsPades({
         pdf: preparedPdf,
         signatureIndex,
