@@ -49,7 +49,7 @@ export class AutomatedPenaltyCron {
   /**
    * Run every day at 8:00 AM to check for overdue handovers (landlord penalties)
    */
-  @Cron('0 8 * * *', {
+  @Cron('0 /20 * * *', {
     name: 'process-overdue-handovers',
     timeZone: 'Asia/Ho_Chi_Minh',
   })
@@ -236,6 +236,45 @@ export class AutomatedPenaltyCron {
         '❌ Manual pending signature processing failed:',
         error,
       );
+      return {
+        processed: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Run twice daily (9:00 AM & 6:00 PM) to check for low escrow balances
+   * Sends warning notifications when tenant balance < 3x daily penalty
+   */
+  @Cron('0 9,18 * * *', {
+    name: 'check-low-escrow-balance',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
+  async checkLowEscrowBalance(): Promise<void> {
+    this.logger.log('🔍 Starting low escrow balance check...');
+
+    try {
+      await this.penaltyService.checkLowEscrowBalance();
+      this.logger.log('✅ Low escrow balance check completed');
+    } catch (error) {
+      this.logger.error('❌ Failed to check low escrow balances:', error);
+    }
+  }
+
+  /**
+   * Manual trigger for low escrow balance check (can be called via API if needed)
+   */
+  async triggerLowBalanceCheck(): Promise<{
+    processed: boolean;
+    error?: string;
+  }> {
+    try {
+      this.logger.log('🔧 Manual low balance check triggered...');
+      await this.penaltyService.checkLowEscrowBalance();
+      return { processed: true };
+    } catch (error) {
+      this.logger.error('❌ Manual low balance check failed:', error);
       return {
         processed: false,
         error: error instanceof Error ? error.message : 'Unknown error',
