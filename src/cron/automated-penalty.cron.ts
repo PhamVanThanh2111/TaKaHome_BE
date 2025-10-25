@@ -92,7 +92,7 @@ export class AutomatedPenaltyCron {
   /**
    * Run every day at 10:00 AM to check for monthly payment overdue
    */
-  @Cron('*/15 * * * *', {
+  @Cron('*/3 * * * *', {
     name: 'process-monthly-overdue-payments',
     timeZone: 'Asia/Ho_Chi_Minh',
   })
