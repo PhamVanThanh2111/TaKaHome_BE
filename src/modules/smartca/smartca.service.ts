@@ -5,6 +5,8 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import { ConfigType } from '@nestjs/config';
 import { plainAddPlaceholder } from '@signpdf/placeholder-plain';
 import { randomUUID } from 'crypto';
@@ -102,14 +104,8 @@ export class SmartCAService {
         // Enhance signature dictionary for NEAC compliance
         out = this.enhanceSignatureDictForNeac(out, p);
       } catch (error) {
-        console.warn(
-          '⚠️ @signpdf failed, using safe fallback approach:',
-          error.message,
-        );
-
-        // Fallback: Return original PDF with minimal safe normalization
+        // plainAddPlaceholder failed: apply safe normalization and return fallback
         out = this.applySafeNeacNormalization(out);
-
         return out;
       }
     }
@@ -147,6 +143,8 @@ export class SmartCAService {
         `Found ${byteRanges.length} /ByteRange but only ${contents.length} /Contents`,
       );
     }
+
+    // debug removed
 
     return out;
   }
