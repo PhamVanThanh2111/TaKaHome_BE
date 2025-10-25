@@ -710,6 +710,54 @@ export class SmartCAService {
     return work;
   }
 
+  /**
+   * Set or replace the /Name entry within the signature dictionary for the given signature index.
+   * This updates the visible "Signed by" name that PDF viewers display.
+   */
+  public setSignerNameInSigDict(
+    pdf: Buffer | Uint8Array,
+    signatureIndex: number,
+    signerName: string,
+  ): Buffer {
+  if (!signerName) return Buffer.from(pdf as any);
+
+    // Escape parentheses and backslashes for PDF string literal
+    const escapePdfString = (s: string) =>
+      s.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+
+    const s = Buffer.isBuffer(pdf) ? pdf.toString('latin1') : Buffer.from(pdf).toString('latin1');
+    const reContents = /\/Contents\s*<([\s\S]*?)>/g;
+    const hits = Array.from(s.matchAll(reContents));
+    if (signatureIndex < 0 || signatureIndex >= hits.length) {
+      throw new BadRequestException(
+        `Cannot find /Contents for signature index ${signatureIndex}`,
+      );
+    }
+
+    const m = hits[signatureIndex];
+    const dictStart = s.lastIndexOf('<<', m.index);
+    const dictEnd = s.indexOf('>>', s.indexOf('>', m.index));
+    if (dictStart < 0 || dictEnd < 0 || dictEnd <= dictStart) {
+      throw new BadRequestException('Cannot locate signature dictionary to set Name');
+    }
+
+    let dictStr = s.slice(dictStart, dictEnd + 2);
+
+    const nameRegex = /\/Name\s*\([^)]*\)/;
+    const escaped = escapePdfString(signerName);
+    if (nameRegex.test(dictStr)) {
+      dictStr = dictStr.replace(nameRegex, `/Name (${escaped})`);
+    } else {
+      // Insert before the closing >>
+      const inner = dictStr.slice(2, -2); // content between << and >>
+      const newInner = inner + `\n/Name (${escaped})`;
+      dictStr = '<<' + newInner + '>>';
+    }
+
+    const newPdf = s.slice(0, dictStart) + dictStr + s.slice(dictEnd + 2);
+    return Buffer.from(newPdf, 'latin1');
+  }
+
   // --- Helpers ---
   public async getCertificates(options?: {
     userId?: string;

@@ -12,6 +12,7 @@ export type JwtUser = {
   id: string;
   email?: string;
   roles?: string[];
+  fullName?: string;
 };
 
 const bearerTokenExtractor = (req: Request): string | null => {

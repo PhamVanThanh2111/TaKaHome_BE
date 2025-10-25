@@ -142,11 +142,6 @@ export class BookingService {
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.PENDING_LANDLORD]);
 
-    // Cache user để tránh multiple queries
-    const landlord = await this.userRepository.findOne({
-      where: { id: userId },
-    });
-
     // Ensure contract exists before landlord signing
     const contract = await this.ensureContractForBooking(booking);
     if (!contract) {
