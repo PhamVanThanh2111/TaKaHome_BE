@@ -533,6 +533,7 @@ export class SmartCAController {
         contactInfo: { type: 'string' },
         signerName: { type: 'string', default: 'Digital Signature' },
         creator: { type: 'string', default: 'SmartCA VNPT 2025' },
+        signingOption: { type: 'string', description: 'SELF_CA or VNPT' },
       },
     },
   })
