@@ -23,6 +23,7 @@ import {
 } from './types/smartca.types';
 
 import { CertificateService } from './certificate.service';
+import { UserService } from '../user/user.service';
 
 const OID_SHA256 = forge.pki.oids.sha256 as string;
 const OID_RSA = forge.pki.oids.rsaEncryption as string;

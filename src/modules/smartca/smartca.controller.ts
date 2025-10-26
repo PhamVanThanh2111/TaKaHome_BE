@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   BadRequestException,
   Body,
@@ -203,8 +206,8 @@ export class SmartCAController {
       : 120000;
 
     try {
-  const finalOption = (signingOption || 'VNPT').toUpperCase();
-  this.logger.debug(`[signToCms] resolved finalOption=${finalOption}`);
+      const finalOption = (signingOption || 'VNPT').toUpperCase();
+      this.logger.debug(`[signToCms] resolved finalOption=${finalOption}`);
 
       if (finalOption === 'SELF_CA') {
         // For SELF_CA we MUST use authenticated user id (from JWT) and ignore userIdOverride/contractId
@@ -214,7 +217,9 @@ export class SmartCAController {
           );
         }
 
-        this.logger.debug(`[signToCms] SELF_CA start for user=${user.id}, signatureIndex=${signatureIndex}`);
+        this.logger.debug(
+          `[signToCms] SELF_CA start for user=${user.id}, signatureIndex=${signatureIndex}`,
+        );
 
         const result = await this.certificateService.signPdfWithUserKey(
           user.id,
@@ -222,14 +227,18 @@ export class SmartCAController {
           signatureIndex,
         );
 
-        this.logger.debug(`[signToCms] SELF_CA finished for user=${user.id}, cmsBase64Present=${!!result.cmsBase64}`);
+        this.logger.debug(
+          `[signToCms] SELF_CA finished for user=${user.id}, cmsBase64Present=${!!result.cmsBase64}`,
+        );
 
         // Always return CMS (base64) for the client to embed via /embed-cms.
         if (!result.cmsBase64) {
           throw new BadRequestException('Failed to generate CMS for SELF_CA');
         }
 
-        this.logger.debug(`[signToCms] returning CMS to client for user=${user.id}`);
+        this.logger.debug(
+          `[signToCms] returning CMS to client for user=${user.id}`,
+        );
         // Also write to stdout directly to ensure visibility in environments where debug logs may be filtered
         // eslint-disable-next-line no-console
         console.log(`[signToCms] returning CMS to client for user=${user.id}`);
@@ -283,7 +292,9 @@ export class SmartCAController {
   }
 
   @Post('create-certificate')
-  @ApiOperation({ summary: 'Generate self-signed certificate for a user (signed by Root CA)' })
+  @ApiOperation({
+    summary: 'Generate self-signed certificate for a user (signed by Root CA)',
+  })
   async createCertificate(@CurrentUser() user: JwtUser) {
     if (!user.id) throw new BadRequestException('userId required');
     // Reverted: allow creating certificate even if JWT lacks fullName.
@@ -296,10 +307,15 @@ export class SmartCAController {
   }
 
   @Post('revoke-certificate')
-  @ApiOperation({ summary: 'Revoke certificate by serial number (mark revoked in DB)' })
+  @ApiOperation({
+    summary: 'Revoke certificate by serial number (mark revoked in DB)',
+  })
   async revokeCertificate(@Body() body: { serialNumber: string }) {
-    if (!body?.serialNumber) throw new BadRequestException('serialNumber required');
-    const res = await this.certificateService.revokeCertificate(body.serialNumber);
+    if (!body?.serialNumber)
+      throw new BadRequestException('serialNumber required');
+    const res = await this.certificateService.revokeCertificate(
+      body.serialNumber,
+    );
     return { message: 'REVOKED', ...res };
   }
 
@@ -318,7 +334,10 @@ export class SmartCAController {
   async crl() {
     const repo = (this.certificateService as any).certRepo;
     const revoked = await repo.find({ where: { revoked: true } });
-    const serials = revoked.map((r: any) => ({ serialNumber: r.serialNumber, revokedAt: r.revokedAt }));
+    const serials = revoked.map((r: any) => ({
+      serialNumber: r.serialNumber,
+      revokedAt: r.revokedAt,
+    }));
     return { message: 'OK', revoked: serials };
   }
 
@@ -365,8 +384,13 @@ export class SmartCAController {
   })
   embedCms(
     @UploadedFile() file: Express.Multer.File,
-  @Body()
-  body: { signatureIndex?: string; cmsBase64?: string; cmsHex?: string; signerName?: string },
+    @Body()
+    body: {
+      signatureIndex?: string;
+      cmsBase64?: string;
+      cmsHex?: string;
+      signerName?: string;
+    },
     @Res() res: Response,
   ) {
     if (!file?.buffer?.length) {
@@ -379,9 +403,9 @@ export class SmartCAController {
       throw new BadRequestException('Invalid signatureIndex');
     }
 
-  const cmsBase64 = (body.cmsBase64 || '').trim();
+    const cmsBase64 = (body.cmsBase64 || '').trim();
     const cmsHex = (body.cmsHex || '').trim();
-  const signerName = ((body as any).signerName || '').trim();
+    const signerName = ((body as any).signerName || '').trim();
 
     if (!cmsBase64 && !cmsHex) {
       throw new BadRequestException('Missing CMS: provide cmsBase64 or cmsHex');

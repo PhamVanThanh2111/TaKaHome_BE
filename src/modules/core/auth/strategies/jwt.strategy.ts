@@ -6,6 +6,7 @@ export type JwtPayload = {
   sub: string;
   email?: string;
   roles?: string[];
+  fullName?: string;
 };
 
 export type JwtUser = {
@@ -47,6 +48,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       id: payload.sub,
       email: payload.email,
       roles: payload.roles,
+      fullName: payload.fullName,
     });
   }
 }

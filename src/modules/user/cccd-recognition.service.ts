@@ -1,9 +1,12 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Injectable, BadRequestException, Inject } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import axios from 'axios';
 import FormData from 'form-data';
-import fptAiConfig from '../../../config/fpt-ai.config';
-import { CccdRecognitionResponseDto } from '../dto/cccd-recognition.dto';
+import fptAiConfig from 'src/config/fpt-ai.config';
+import { CccdRecognitionResponseDto } from './dto/cccd-recognition.dto';
 
 interface FptAiResponse {
   error_code?: number;
