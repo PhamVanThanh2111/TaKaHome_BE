@@ -33,9 +33,10 @@ import { PreparePDFDto } from './dto/prepare-pdf.dto';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 import { Roles } from 'src/common/decorators/roles.decorator';
+import { RolesGuard } from '../core/auth/guards/roles.guard';
 
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('smartca')
 export class SmartCAController {
   private readonly logger = new Logger(SmartCAController.name);
