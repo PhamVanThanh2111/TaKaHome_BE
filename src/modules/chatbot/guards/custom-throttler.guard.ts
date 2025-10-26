@@ -13,9 +13,14 @@ export class CustomThrottlerGuard extends ThrottlerGuard {
       const canActivate = await super.canActivate(context);
       return canActivate;
     } catch (error) {
-      // Log spam attempts
+      // Log chatbot spam attempts với thông tin chi tiết
       const route = request.url || 'unknown';
-      this.logger.warn(`🚨 Rate limit exceeded for ${request.ip} on ${route}`);
+      const ip = request.ip || 'unknown';
+      const userAgent = request.headers['user-agent'] || 'unknown';
+
+      this.logger.warn(
+        `🤖 Chatbot rate limit exceeded - IP: ${ip}, Route: ${route}, UserAgent: ${userAgent.substring(0, 50)}...`,
+      );
 
       // Re-throw the original error
       throw error;

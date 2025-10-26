@@ -1,12 +1,21 @@
-import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
+} from '@nestjs/common';
 import { ChatbotService } from './chatbot.service';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ChatbotMessageDto } from './dto/chatbot-message.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { Throttle } from '@nestjs/throttler';
+import { CustomThrottlerGuard } from './guards/custom-throttler.guard';
 
 @ApiTags('Chatbot')
 @Controller('chatbot')
+@UseGuards(CustomThrottlerGuard)
 export class ChatbotController {
   constructor(private readonly chatbotService: ChatbotService) {}
 
