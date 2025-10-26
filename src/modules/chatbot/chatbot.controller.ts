@@ -3,6 +3,7 @@ import { ChatbotService } from './chatbot.service';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ChatbotMessageDto } from './dto/chatbot-message.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('Chatbot')
 @Controller('chatbot')
@@ -11,6 +12,7 @@ export class ChatbotController {
 
   @Post('message')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } }) // 5 requests per minute for chatbot
   @ApiOperation({
     summary: 'Gửi tin nhắn cho Gemini chatbot',
     description:
@@ -41,6 +43,10 @@ export class ChatbotController {
     status: HttpStatus.BAD_REQUEST,
     description: 'Tin nhắn không hợp lệ',
   })
+  @ApiResponse({
+    status: HttpStatus.TOO_MANY_REQUESTS,
+    description: 'Quá nhiều yêu cầu - vui lòng thử lại sau (5 yêu cầu/phút)',
+  })
   async sendMessage(
     @Body() chatbotMessageDto: ChatbotMessageDto,
   ): Promise<ResponseCommon<{ response: string }>> {
@@ -66,6 +72,7 @@ export class ChatbotController {
 
   @Post('reset')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 resets per minute
   @ApiOperation({
     summary: 'Khởi tạo lại cuộc trò chuyện',
     description: 'Reset lại cuộc trò chuyện với chatbot',
@@ -73,6 +80,11 @@ export class ChatbotController {
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Cuộc trò chuyện đã được khởi tạo lại',
+  })
+  @ApiResponse({
+    status: HttpStatus.TOO_MANY_REQUESTS,
+    description:
+      'Quá nhiều yêu cầu reset - vui lòng thử lại sau (10 yêu cầu/phút)',
   })
   resetChat(): ResponseCommon<{ response: string }> {
     const response = this.chatbotService.resetChat();

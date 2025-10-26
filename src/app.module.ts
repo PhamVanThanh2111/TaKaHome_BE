@@ -23,6 +23,8 @@ import AppDataSourcePromise from './modules/core/database/data-source';
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import * as Joi from 'joi';
 import vnpayConfig from './config/vnpay.config';
 import smartcaConfig from './config/smartca.config';
@@ -72,6 +74,23 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
         GEMINI_API_KEY: Joi.string().optional(),
       }),
     }),
+    ThrottlerModule.forRoot([
+      {
+        name: 'short',
+        ttl: 1000, // 1 giây
+        limit: 3, // 3 requests mỗi giây
+      },
+      {
+        name: 'medium',
+        ttl: 60000, // 1 phút
+        limit: 20, // 20 requests mỗi phút
+      },
+      {
+        name: 'long',
+        ttl: 3600000, // 1 giờ
+        limit: 100, // 100 requests mỗi giờ
+      },
+    ]),
     AuthModule,
     UserModule,
     PropertyModule,
@@ -94,6 +113,12 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
     InvoiceModule,
     CronModule,
     StatisticsModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule implements NestModule {

@@ -1,3 +1,8 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable } from '@nestjs/common';
 import {
   GoogleGenerativeAI,
@@ -116,14 +121,11 @@ export class ChatbotService {
             parts: [
               {
                 text: `Bạn là trợ lý tư vấn bất động sản. Khi người dùng nhắc đến TÌM KIẾM/THUÊ/MUA bất động sản, bạn PHẢI gọi function search_properties.
-
-Các từ khóa cần chú ý: tìm, thuê, mua, nhà trọ, chung cư, nhà riêng, apartment, boarding, housing.
-
-VÍ DỤ:
-- "tìm nhà trọ 3-5 triệu" → gọi search_properties với propertyType="BOARDING", minPrice=3000000, maxPrice=5000000
-- "thuê chung cư 2 phòng ngủ" → gọi search_properties với propertyType="APARTMENT", bedrooms=2
-
-Hãy trả lời bằng tiếng Việt và thân thiện.`,
+                Các từ khóa cần chú ý: tìm, thuê, mua, nhà trọ, chung cư, nhà riêng, apartment, boarding, housing.
+                VÍ DỤ:
+                - "tìm nhà trọ 3-5 triệu" → gọi search_properties với propertyType="BOARDING", minPrice=3000000, maxPrice=5000000
+                - "thuê chung cư 2 phòng ngủ" → gọi search_properties với propertyType="APARTMENT", bedrooms=2
+                Hãy trả lời bằng tiếng Việt và thân thiện.`,
               },
             ],
           },
