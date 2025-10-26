@@ -222,13 +222,27 @@ export class ContractController {
   @ApiOperation({ summary: 'Chủ nhà ký hợp đồng gia hạn' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Ký thành công' })
   @Roles(RoleEnum.LANDLORD)
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        signingOption: {
+          type: 'string',
+          description: 'Lựa chọn phương thức ký số (VNPT hoặc SELF_CA)',
+          example: 'SELF_CA',
+        },
+      },
+    },
+  })
   landlordSignExtension(
     @Param('id') extensionId: string,
+    @Body('signingOption') signingOption: string | undefined,
     @CurrentUser() user: JwtUser,
   ) {
     return this.contractExtensionService.landlordSignExtension(
       extensionId,
       user.id,
+      signingOption,
     );
   }
 
@@ -236,13 +250,27 @@ export class ContractController {
   @ApiOperation({ summary: 'Người thuê ký hợp đồng gia hạn' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Ký thành công' })
   @Roles(RoleEnum.TENANT)
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        signingOption: {
+          type: 'string',
+          description: 'Lựa chọn phương thức ký số (VNPT hoặc SELF_CA)',
+          example: 'SELF_CA',
+        },
+      },
+    },
+  })
   tenantSignExtension(
     @Param('id') extensionId: string,
+    @Body('signingOption') signingOption: string | undefined,
     @CurrentUser() user: JwtUser,
   ) {
     return this.contractExtensionService.tenantSignExtension(
       extensionId,
       user.id,
+      signingOption,
     );
   }
 

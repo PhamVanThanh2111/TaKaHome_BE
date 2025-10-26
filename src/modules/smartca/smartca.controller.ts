@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   BadRequestException,
   Body,
@@ -7,6 +10,7 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  Logger,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -16,6 +20,9 @@ import {
 } from '@nestjs/swagger';
 
 import { SmartCAService } from './smartca.service';
+import { CertificateService } from './certificate.service';
+import { UserService } from '../user/user.service';
+import { Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { Place } from './types/smartca.types';
@@ -23,12 +30,19 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { PreparePDFDto } from './dto/prepare-pdf.dto';
+import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('smartca')
 export class SmartCAController {
-  constructor(private readonly smartcaService: SmartCAService) {}
+  private readonly logger = new Logger(SmartCAController.name);
+  constructor(
+    private readonly smartcaService: SmartCAService,
+    private readonly certificateService: CertificateService,
+    private readonly userService: UserService,
+  ) {}
 
   @UseInterceptors(FileInterceptor('pdf'))
   @Post('prepare')
@@ -159,6 +173,7 @@ export class SmartCAController {
           type: 'string',
           description: 'Contract ID for docId generation',
         },
+        signingOption: { type: 'string', description: 'SELF_CA or VNPT' },
       },
     },
   })
@@ -169,9 +184,16 @@ export class SmartCAController {
     @Body('timeoutMs') timeoutMsRaw?: string,
     @Body('userIdOverride') userIdOverride?: string,
     @Body('contractId') contractId?: string,
+    @Body('signingOption') signingOption?: string,
+    @CurrentUser() user?: JwtUser,
   ) {
     if (!file?.buffer?.length)
       throw new BadRequestException('Missing file "pdf"');
+
+    // Debug log entry
+    this.logger.debug(
+      `[signToCms] entry: signatureIndex=${signatureIndexRaw}, intervalMs=${intervalMsRaw}, timeoutMs=${timeoutMsRaw}, userIdOverride=${userIdOverride}, contractId=${contractId}, signingOption=${signingOption}`,
+    );
 
     const signatureIndex = Number.isFinite(Number(signatureIndexRaw))
       ? Number(signatureIndexRaw)
@@ -184,6 +206,53 @@ export class SmartCAController {
       : 120000;
 
     try {
+      const finalOption = (signingOption || 'VNPT').toUpperCase();
+      this.logger.debug(`[signToCms] resolved finalOption=${finalOption}`);
+
+      if (finalOption === 'SELF_CA') {
+        // For SELF_CA we MUST use authenticated user id (from JWT) and ignore userIdOverride/contractId
+        if (!user?.id) {
+          throw new BadRequestException(
+            'userId is required for SELF_CA signing (authenticate to obtain user id)',
+          );
+        }
+
+        this.logger.debug(
+          `[signToCms] SELF_CA start for user=${user.id}, signatureIndex=${signatureIndex}`,
+        );
+
+        const result = await this.certificateService.signPdfWithUserKey(
+          user.id,
+          Buffer.from(file.buffer),
+          signatureIndex,
+        );
+
+        this.logger.debug(
+          `[signToCms] SELF_CA finished for user=${user.id}, cmsBase64Present=${!!result.cmsBase64}`,
+        );
+
+        // Always return CMS (base64) for the client to embed via /embed-cms.
+        if (!result.cmsBase64) {
+          throw new BadRequestException('Failed to generate CMS for SELF_CA');
+        }
+
+        this.logger.debug(
+          `[signToCms] returning CMS to client for user=${user.id}`,
+        );
+        // Also write to stdout directly to ensure visibility in environments where debug logs may be filtered
+        // eslint-disable-next-line no-console
+        console.log(`[signToCms] returning CMS to client for user=${user.id}`);
+
+        return {
+          message: 'CMS_READY',
+          cmsBase64: result.cmsBase64,
+          signatureIndex,
+          signerName: user.fullName || undefined,
+        };
+        // NOTE: client may call /embed-cms with signerName set to user's full name to display nicer info.
+      }
+
+      // Default: VNPT flow
       const result = await this.smartcaService.signToCmsPades({
         pdf: Buffer.from(file.buffer),
         signatureIndex,
@@ -222,6 +291,56 @@ export class SmartCAController {
     }
   }
 
+  @Post('create-certificate')
+  @ApiOperation({
+    summary: 'Generate self-signed certificate for a user (signed by Root CA)',
+  })
+  async createCertificate(@CurrentUser() user: JwtUser) {
+    if (!user.id) throw new BadRequestException('userId required');
+    // Reverted: allow creating certificate even if JWT lacks fullName.
+    // The CertificateService will fallback to a default subject CN (user-<id>) when fullName is not provided.
+    const res = await this.certificateService.generateUserKeyAndCert(user.id, {
+      fullName: user.fullName?.trim(),
+      email: user.email,
+    });
+    return { message: 'CERT_CREATED', certificate: res };
+  }
+
+  @Post('revoke-certificate')
+  @ApiOperation({
+    summary: 'Revoke certificate by serial number (mark revoked in DB)',
+  })
+  async revokeCertificate(@Body() body: { serialNumber: string }) {
+    if (!body?.serialNumber)
+      throw new BadRequestException('serialNumber required');
+    const res = await this.certificateService.revokeCertificate(
+      body.serialNumber,
+    );
+    return { message: 'REVOKED', ...res };
+  }
+
+  @Post('list-local-certificates')
+  @ApiOperation({ summary: 'List certificates issued by SELF_CA for a user' })
+  async listLocalCertificates(@Body() body: { userId: string }) {
+    if (!body?.userId) throw new BadRequestException('userId required');
+    // Simple query via repository through service
+    const repo = (this.certificateService as any).certRepo;
+    const list = await repo.find({ where: { userId: body.userId } });
+    return { message: 'SUCCESS', total: list.length, certificates: list };
+  }
+
+  @Post('crl')
+  @ApiOperation({ summary: 'Get list of revoked serial numbers (simple CRL)' })
+  async crl() {
+    const repo = (this.certificateService as any).certRepo;
+    const revoked = await repo.find({ where: { revoked: true } });
+    const serials = revoked.map((r: any) => ({
+      serialNumber: r.serialNumber,
+      revokedAt: r.revokedAt,
+    }));
+    return { message: 'OK', revoked: serials };
+  }
+
   @Post('embed-cms')
   @UseInterceptors(FileInterceptor('pdf'))
   @ApiConsumes('multipart/form-data')
@@ -245,6 +364,11 @@ export class SmartCAController {
           example: '0',
           description: 'Index placeholder (0-based), mặc định 0',
         },
+        signerName: {
+          type: 'string',
+          description:
+            'Tên người ký để hiển thị trong thông tin Signed by (optional). If provided, will replace /Name in signature dictionary.',
+        },
         cmsBase64: {
           type: 'string',
           description: 'CMS/PKCS#7 dạng Base64 (ưu tiên)',
@@ -261,7 +385,12 @@ export class SmartCAController {
   embedCms(
     @UploadedFile() file: Express.Multer.File,
     @Body()
-    body: { signatureIndex?: string; cmsBase64?: string; cmsHex?: string },
+    body: {
+      signatureIndex?: string;
+      cmsBase64?: string;
+      cmsHex?: string;
+      signerName?: string;
+    },
     @Res() res: Response,
   ) {
     if (!file?.buffer?.length) {
@@ -276,6 +405,7 @@ export class SmartCAController {
 
     const cmsBase64 = (body.cmsBase64 || '').trim();
     const cmsHex = (body.cmsHex || '').trim();
+    const signerName = ((body as any).signerName || '').trim();
 
     if (!cmsBase64 && !cmsHex) {
       throw new BadRequestException('Missing CMS: provide cmsBase64 or cmsHex');
@@ -294,8 +424,18 @@ export class SmartCAController {
       cmsHexString = buf.toString('hex').toUpperCase();
     }
 
+    let pdfToEmbed = Buffer.from(file.buffer);
+    if (signerName) {
+      // Update signature dictionary /Name to show provided signer name
+      pdfToEmbed = this.smartcaService.setSignerNameInSigDict(
+        pdfToEmbed as any,
+        signatureIndex,
+        signerName,
+      ) as any;
+    }
+
     const signed = this.smartcaService.embedCmsAtIndex(
-      Buffer.from(file.buffer),
+      pdfToEmbed,
       cmsHexString,
       signatureIndex,
     );
@@ -417,6 +557,7 @@ export class SmartCAController {
         contactInfo: { type: 'string' },
         signerName: { type: 'string', default: 'Digital Signature' },
         creator: { type: 'string', default: 'SmartCA VNPT 2025' },
+        signingOption: { type: 'string', description: 'SELF_CA or VNPT' },
       },
     },
   })
@@ -433,6 +574,7 @@ export class SmartCAController {
       contactInfo?: string;
       signerName?: string;
       creator?: string;
+      signingOption?: string;
     },
     @Res() res: Response,
   ) {
@@ -464,6 +606,7 @@ export class SmartCAController {
         contactInfo: body.contactInfo?.trim() || '',
         signerName: body.signerName?.trim() || 'Digital Signature',
         creator: body.creator?.trim() || 'SmartCA VNPT 2025',
+        signingOption: body.signingOption?.trim() || 'SELF_CA',
       });
 
       if (!result.success) {

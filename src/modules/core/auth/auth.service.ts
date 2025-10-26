@@ -127,6 +127,7 @@ export class AuthService {
       sub: acc.user.id,
       email: acc.email,
       roles: acc.roles,
+      fullName: acc.user.fullName,
     };
 
     acc.lastLoginAt = vnNow();
@@ -189,6 +190,7 @@ export class AuthService {
         sub: result.user.id,
         email: result.account.email,
         roles: result.account.roles,
+        fullName: result.user.fullName,
       };
 
       // Cập nhật last login

@@ -5,7 +5,7 @@ import { User } from './entities/user.entity';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { S3StorageService } from '../s3-storage/s3-storage.service';
-import { CccdRecognitionService } from './services/cccd-recognition.service';
+import { CccdRecognitionService } from './cccd-recognition.service';
 import { CccdRecognitionResponseDto } from './dto/cccd-recognition.dto';
 
 @Injectable()
