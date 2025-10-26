@@ -120,12 +120,25 @@ export class ChatbotService {
             role: 'user',
             parts: [
               {
-                text: `Bạn là trợ lý tư vấn bất động sản. Khi người dùng nhắc đến TÌM KIẾM/THUÊ/MUA bất động sản, bạn PHẢI gọi function search_properties.
-                Các từ khóa cần chú ý: tìm, thuê, mua, nhà trọ, chung cư, nhà riêng, apartment, boarding, housing.
-                VÍ DỤ:
-                - "tìm nhà trọ 3-5 triệu" → gọi search_properties với propertyType="BOARDING", minPrice=3000000, maxPrice=5000000
-                - "thuê chung cư 2 phòng ngủ" → gọi search_properties với propertyType="APARTMENT", bedrooms=2
-                Hãy trả lời bằng tiếng Việt và thân thiện.`,
+                text: `Bạn là trợ lý tư vấn bất động sản. 
+                
+Nhiệm vụ chính:
+1. Khi người dùng nhắc đến TÌM KIẾM/THUÊ/MUA bất động sản, bạn PHẢI gọi function search_properties
+2. Sau khi nhận kết quả, hãy trình bày theo format markdown đơn giản với dấu **
+
+Format trả về kết quả (bắt buộc):
+Tìm thấy **[số lượng]** kết quả:
+
+**1. [Tên bất động sản]**
+**Địa chỉ:** [địa chỉ]
+**Giá:** [giá] 
+**Diện tích:** [diện tích]m²
+**Phòng ngủ:** [số phòng]
+**Phòng tắm:** [số phòng]
+**Link:** [url]
+
+Các từ khóa cần chú ý: tìm, thuê, mua, nhà trọ, chung cư, nhà riêng, apartment, boarding, housing.
+Hãy trả lời bằng tiếng Việt và thân thiện.`,
               },
             ],
           },
@@ -133,7 +146,7 @@ export class ChatbotService {
             role: 'model',
             parts: [
               {
-                text: 'Tôi hiểu! Tôi sẽ giúp bạn tìm kiếm bất động sản bằng cách sử dụng function search_properties mỗi khi bạn có yêu cầu tìm kiếm.',
+                text: 'Tôi hiểu! Tôi sẽ giúp bạn tìm kiếm bất động sản và trình bày kết quả theo format markdown đơn giản với dấu **.',
               },
             ],
           },
@@ -189,7 +202,7 @@ export class ChatbotService {
           JSON.stringify(searchResults, null, 2),
         );
 
-        // Gửi kết quả lại cho model để tạo phản hồi
+        // Gửi kết quả cho Gemini để AI tự format
         const functionResponse = {
           functionResponse: {
             name: 'search_properties',
@@ -201,11 +214,16 @@ export class ChatbotService {
 
         const finalResult = await chat.sendMessage([functionResponse]);
         const finalResponse = finalResult.response.text();
-        console.log('🔍 Final response:', finalResponse);
+        console.log('🔍 Final AI response:', finalResponse);
         return finalResponse;
       }
 
-      return response.text();
+      // Trả về thông điệp cố định để tránh chatbot trả lời ngoài luồng
+      const scopeOnlyMessage =
+        'Mình chỉ hỗ trợ tìm kiếm bất động sản theo tiêu chí. Vui lòng hỏi các yêu cầu tìm nhà (ví dụ: "tìm nhà trọ 3-5 triệu ở quận 1", "thuê chung cư 2 phòng ngủ"). Nếu bạn cần trợ giúp khác, vui lòng liên hệ bộ phận hỗ trợ.';
+
+      console.log('- Outside scope detected, returning scope-only message');
+      return scopeOnlyMessage;
     } catch (error) {
       console.error('Error processing message:', error);
       return 'Xin lỗi, tôi gặp sự cố khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.';
@@ -249,8 +267,8 @@ export class ChatbotService {
 
       // Loại bỏ các tham số undefined/null
       const cleanParams = Object.fromEntries(
-        Object.entries(mappedParams).filter(
-          ([_, value]) => value !== undefined && value !== null,
+        Object.entries(mappedParams as Record<string, unknown>).filter(
+          ([, value]) => value !== undefined && value !== null,
         ),
       );
 

@@ -1014,7 +1014,7 @@ export class PropertyService {
       } else {
         // For RoomType
         const roomType = item as RoomTypeEntry;
-        const url = `${frontendUrl}/properties/${roomType.property?.id}/rooms/${roomType.id}`;
+        const url = `${frontendUrl}/properties/${roomType.id}?type=boarding`;
         return {
           ...roomType,
           url,
