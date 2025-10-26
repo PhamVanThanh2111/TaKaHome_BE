@@ -12,10 +12,13 @@ import { CreateRoomTypeDto } from './dto/create-room-type.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { FilterPropertyDto } from './dto/filter-property.dto';
+import { FilterPropertyWithUrlDto } from './dto/filter-property-with-url.dto';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
+import { PropertyOrRoomTypeWithUrl } from './interfaces/property-with-url.interface';
 import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { UploadResult } from '../s3-storage/s3-storage.service';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class PropertyService {
@@ -29,6 +32,7 @@ export class PropertyService {
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
     private s3: S3StorageService,
+    private configService: ConfigService,
   ) {}
 
   /**
@@ -770,6 +774,264 @@ export class PropertyService {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Error approving properties: ${message}`);
     }
+  }
+
+  /**
+   * Filter properties with URL for Gemini chatbot
+   */
+  async filterWithUrl(
+    filterDto: Partial<FilterPropertyWithUrlDto>,
+  ): Promise<ResponseCommon<any>> {
+    const all = (await this.findAll()).data || [];
+    const frontendUrl = this.configService.get<string>('frontend.url');
+
+    const filtered = all.filter((item) => {
+      // For Property (HOUSING/APARTMENT) shape
+      if (
+        (item as Property).type &&
+        (item as Property).type !== PropertyTypeEnum.BOARDING
+      ) {
+        const p = item as Property;
+        const price = p.price ?? 0;
+        const area = p.area ?? 0;
+        const bdr = p.bedrooms ?? 0;
+        const bath = p.bathrooms ?? 0;
+        const furn = p.furnishing ?? '';
+
+        if (filterDto.fromPrice && price < filterDto.fromPrice) {
+          return false;
+        }
+        if (filterDto.toPrice && price > filterDto.toPrice) {
+          return false;
+        }
+        if (filterDto.fromArea && area < filterDto.fromArea) {
+          return false;
+        }
+        if (filterDto.toArea && area > filterDto.toArea) {
+          return false;
+        }
+        if (filterDto.bedrooms && bdr !== filterDto.bedrooms) {
+          return false;
+        }
+        if (filterDto.bathrooms && bath !== filterDto.bathrooms) {
+          return false;
+        }
+        if (filterDto.furnishing && furn !== filterDto.furnishing) {
+          return false;
+        }
+
+        // Only show approved properties for public API
+        if (p.isApproved !== true) {
+          return false;
+        }
+
+        if (filterDto.province && p.province !== filterDto.province) {
+          return false;
+        }
+
+        if (filterDto.ward && p.ward !== filterDto.ward) {
+          return false;
+        }
+
+        if (filterDto.type && p.type !== filterDto.type) {
+          return false;
+        }
+
+        if (filterDto.q) {
+          const searchTerm = filterDto.q.toLowerCase();
+          const title = (p.title || '').toLowerCase();
+          const description = (p.description || '').toLowerCase();
+          if (
+            !title.includes(searchTerm) &&
+            !description.includes(searchTerm)
+          ) {
+            return false;
+          }
+        }
+
+        return true;
+      }
+
+      // For RoomTypeEntry shape
+      const rt = item as RoomTypeEntry;
+      const price = rt.price ?? 0;
+      const area = rt.area ?? 0;
+      const bdr = rt.bedrooms ?? 0;
+      const bath = rt.bathrooms ?? 0;
+      const furn = rt.furnishing ?? '';
+
+      if (filterDto.fromPrice && price < filterDto.fromPrice) {
+        return false;
+      }
+      if (filterDto.toPrice && price > filterDto.toPrice) {
+        return false;
+      }
+      if (filterDto.fromArea && area < filterDto.fromArea) {
+        return false;
+      }
+      if (filterDto.toArea && area > filterDto.toArea) {
+        return false;
+      }
+      if (filterDto.bedrooms && bdr !== filterDto.bedrooms) {
+        return false;
+      }
+      if (filterDto.bathrooms && bath !== filterDto.bathrooms) {
+        return false;
+      }
+      if (filterDto.furnishing && furn !== filterDto.furnishing) {
+        return false;
+      }
+
+      // Only show approved properties for public API
+      if (rt.property && rt.property.isApproved !== true) {
+        return false;
+      }
+
+      if (filterDto.province && rt.property?.province !== filterDto.province) {
+        return false;
+      }
+
+      if (filterDto.ward && rt.property?.ward !== filterDto.ward) {
+        return false;
+      }
+
+      if (filterDto.type && filterDto.type !== PropertyTypeEnum.BOARDING) {
+        return false;
+      }
+
+      if (filterDto.q) {
+        const searchTerm = filterDto.q.toLowerCase();
+        const name = (rt.name || '').toLowerCase();
+        const description = (rt.description || '').toLowerCase();
+        const propertyTitle = (rt.property?.title || '').toLowerCase();
+        const propertyDescription = (
+          rt.property?.description || ''
+        ).toLowerCase();
+        if (
+          !name.includes(searchTerm) &&
+          !description.includes(searchTerm) &&
+          !propertyTitle.includes(searchTerm) &&
+          !propertyDescription.includes(searchTerm)
+        ) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    // Apply sorting if specified
+    const sortedData = [...filtered];
+    if (filterDto.sortBy) {
+      sortedData.sort((a, b) => {
+        let valueA: number | Date | undefined;
+        let valueB: number | Date | undefined;
+
+        // Get values based on sortBy field
+        if (filterDto.sortBy === 'price') {
+          if (
+            (a as Property).type &&
+            (a as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueA = (a as Property).price ?? 0;
+          } else {
+            valueA = (a as RoomTypeEntry).price ?? 0;
+          }
+
+          if (
+            (b as Property).type &&
+            (b as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueB = (b as Property).price ?? 0;
+          } else {
+            valueB = (b as RoomTypeEntry).price ?? 0;
+          }
+        } else if (filterDto.sortBy === 'area') {
+          if (
+            (a as Property).type &&
+            (a as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueA = (a as Property).area ?? 0;
+          } else {
+            valueA = (a as RoomTypeEntry).area ?? 0;
+          }
+
+          if (
+            (b as Property).type &&
+            (b as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueB = (b as Property).area ?? 0;
+          } else {
+            valueB = (b as RoomTypeEntry).area ?? 0;
+          }
+        } else if (filterDto.sortBy === 'createdAt') {
+          // For Property
+          if (
+            (a as Property).type &&
+            (a as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueA = (a as Property).createdAt;
+          } else {
+            valueA = (a as RoomTypeEntry).property?.createdAt;
+          }
+
+          if (
+            (b as Property).type &&
+            (b as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueB = (b as Property).createdAt;
+          } else {
+            valueB = (b as RoomTypeEntry).property?.createdAt;
+          }
+        }
+
+        if (valueA === undefined && valueB === undefined) return 0;
+        if (valueA === undefined) return 1;
+        if (valueB === undefined) return -1;
+
+        const comparison = valueA < valueB ? -1 : valueA > valueB ? 1 : 0;
+        return filterDto.sortOrder === 'desc' ? -comparison : comparison;
+      });
+    }
+
+    // Apply limit
+    const limit = filterDto.limit || 10;
+    const limitedData = sortedData.slice(0, limit);
+
+    // Add URL to each item
+    const dataWithUrl: PropertyOrRoomTypeWithUrl[] = limitedData.map((item) => {
+      if (
+        (item as Property).type &&
+        (item as Property).type !== PropertyTypeEnum.BOARDING
+      ) {
+        // For Property (HOUSING/APARTMENT)
+        const property = item as Property;
+        const url = `${frontendUrl}/properties/${property.id}`;
+        return {
+          ...property,
+          url,
+        };
+      } else {
+        // For RoomType
+        const roomType = item as RoomTypeEntry;
+        const url = `${frontendUrl}/properties/${roomType.property?.id}/rooms/${roomType.id}`;
+        return {
+          ...roomType,
+          url,
+        };
+      }
+    });
+
+    const result = {
+      data: dataWithUrl,
+      total: dataWithUrl.length,
+      message:
+        dataWithUrl.length > 0
+          ? `Tìm thấy ${dataWithUrl.length} bất động sản phù hợp`
+          : 'Không tìm thấy bất động sản nào phù hợp với tiêu chí tìm kiếm',
+    };
+
+    return new ResponseCommon(200, 'SUCCESS', result);
   }
 
   /**

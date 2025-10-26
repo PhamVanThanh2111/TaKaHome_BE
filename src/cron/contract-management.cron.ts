@@ -29,7 +29,7 @@ export class ContractManagementCron {
    */
   //Demo
   // @Cron('0 9 * * *') // 9:00 AM every day
-  @Cron('*/10 * * * *') // every 10 minutes
+  // @Cron('*/10 * * * *') // every 10 minutes
   async checkContractExpiry(): Promise<void> {
     try {
       this.logger.log('📋 Checking contracts for expiry reminders...');

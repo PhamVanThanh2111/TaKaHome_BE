@@ -16,6 +16,7 @@ import { VerificationModule } from './modules/verification/verification.module';
 import { ChatRoomModule } from './modules/chatroom/chatroom.module';
 import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
 import { ChatModule } from './modules/chat/chat.module';
+import { ChatbotModule } from './modules/chatbot/chatbot.module';
 import { AuthModule } from './modules/core/auth/auth.module';
 import AppDataSourcePromise from './modules/core/database/data-source';
 
@@ -66,6 +67,9 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
         OID_MESSAGE_DIGEST: Joi.string().optional(),
         OID_SIGNING_TIME: Joi.string().optional(),
         OID_SIGNING_CERT_V2: Joi.string().optional(),
+
+        // Gemini API validation
+        GEMINI_API_KEY: Joi.string().optional(),
       }),
     }),
     AuthModule,
@@ -84,6 +88,7 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
     ChatRoomModule,
     ChatMessageModule,
     ChatModule,
+    ChatbotModule,
     WalletModule,
     EscrowModule,
     InvoiceModule,
