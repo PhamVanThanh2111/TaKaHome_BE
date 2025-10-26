@@ -139,12 +139,53 @@ export class CertificateService {
       throw new BadRequestException('userId is required');
     }
 
-    const rec = await this.certRepo.findOne({ where: { userId } });
+    let rec = await this.certRepo.findOne({ where: { userId } });
     if (!rec) {
       this.logger.warn(
-        `[signPdfWithUserKey] no certificate record for user=${userId}`,
+        `[signPdfWithUserKey] no certificate record for user=${userId}, generating new certificate...`,
       );
-      throw new BadRequestException('No certificate found for user');
+      
+      // Tự động tạo chứng thư số cho người dùng
+      try {
+        const userResponse = await this.userService.findOne(userId);
+        const user = userResponse.data as {
+          id: string;
+          email: string;
+          fullName?: string;
+        };
+        
+        if (!user) {
+          throw new BadRequestException(`User with id ${userId} not found`);
+        }
+
+        this.logger.debug(
+          `[signPdfWithUserKey] generating certificate for user: ${user.fullName || user.email}`,
+        );
+
+        // Tạo chứng thư số mới
+        await this.generateUserKeyAndCert(userId, {
+          fullName: user.fullName,
+          email: user.email,
+        });
+
+        // Lấy lại certificate vừa tạo
+        rec = await this.certRepo.findOne({ where: { userId } });
+        
+        if (!rec) {
+          throw new BadRequestException('Failed to generate certificate for user');
+        }
+
+        this.logger.debug(
+          `[signPdfWithUserKey] certificate generated successfully for user=${userId}`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `[signPdfWithUserKey] failed to generate certificate: ${String((error as Error).message || error)}`,
+        );
+        throw new BadRequestException(
+          `Failed to generate certificate: ${String((error as Error).message || error)}`,
+        );
+      }
     }
     if (rec.revoked) throw new BadRequestException('Certificate revoked');
     const systemKey = process.env.SYSTEM_ENC_KEY;

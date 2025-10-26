@@ -32,6 +32,7 @@ import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { PreparePDFDto } from './dto/prepare-pdf.dto';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { JwtUser } from '../core/auth/strategies/jwt.strategy';
+import { Roles } from 'src/common/decorators/roles.decorator';
 
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
@@ -307,6 +308,16 @@ export class SmartCAController {
   }
 
   @Post('revoke-certificate')
+  @Roles('ADMIN')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['serialNumber'],
+      properties: {
+        serialNumber: { type: 'string', example: '1234567890ABCDEF' },
+      },
+    },
+  })
   @ApiOperation({
     summary: 'Revoke certificate by serial number (mark revoked in DB)',
   })
