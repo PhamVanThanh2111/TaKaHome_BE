@@ -5,7 +5,7 @@ import { User } from './entities/user.entity';
 import { UserService } from './user.service';
 import { UserController } from './user.controller';
 import { S3StorageModule } from '../s3-storage/s3-storage.module';
-import { CccdRecognitionService } from './services/cccd-recognition.service';
+import { CccdRecognitionService } from './cccd-recognition.service';
 import fptAiConfig from '../../config/fpt-ai.config';
 
 @Module({

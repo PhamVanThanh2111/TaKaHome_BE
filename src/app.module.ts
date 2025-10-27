@@ -27,6 +27,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import * as Joi from 'joi';
 import vnpayConfig from './config/vnpay.config';
 import smartcaConfig from './config/smartca.config';
+import rootcaConfig from './config/rootca.config';
 import frontendConfig from './config/frontend.config';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { EscrowModule } from './modules/escrow/escrow.module';
@@ -43,7 +44,7 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
     ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
-      load: [vnpayConfig, smartcaConfig, frontendConfig], // <— nạp file config/vnpay.config.ts, smartca.config.ts và frontend.config.ts
+      load: [vnpayConfig, smartcaConfig, frontendConfig, rootcaConfig], // <— nạp file config/vnpay.config.ts, smartca.config.ts, frontend.config.ts và rootca.config.ts
       validationSchema: Joi.object({
         // Frontend validation
         FRONTEND_URL: Joi.string().required().uri(),
