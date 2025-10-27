@@ -492,6 +492,7 @@ export class ContractExtensionService {
   async landlordSignExtension(
     extensionId: string,
     userId: string,
+    signingOption?: string,
   ): Promise<ResponseCommon<ContractExtension>> {
     const extension = await this.extensionRepository.findOne({
       where: { id: extensionId },
@@ -583,6 +584,7 @@ export class ContractExtensionService {
         contactInfo: '',
         signerName: 'Landlord Extension Signature',
         creator: 'SmartCA VNPT 2025',
+        signingOption: signingOption ?? 'SELF_CA',
       });
 
       if (!signResult.success) {
@@ -646,6 +648,7 @@ export class ContractExtensionService {
   async tenantSignExtension(
     extensionId: string,
     userId: string,
+    signingOption?: string,
   ): Promise<ResponseCommon<ContractExtension>> {
     const extension = await this.extensionRepository.findOne({
       where: { id: extensionId },
@@ -705,6 +708,7 @@ export class ContractExtensionService {
         contactInfo: '',
         signerName: 'Tenant Extension Signature',
         creator: 'SmartCA VNPT 2025',
+        signingOption: signingOption ?? 'SELF_CA',
       });
 
       if (!signResult.success) {

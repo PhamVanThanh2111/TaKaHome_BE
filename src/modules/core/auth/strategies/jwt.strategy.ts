@@ -6,12 +6,14 @@ export type JwtPayload = {
   sub: string;
   email?: string;
   roles?: string[];
+  fullName?: string;
 };
 
 export type JwtUser = {
   id: string;
   email?: string;
   roles?: string[];
+  fullName?: string;
 };
 
 const bearerTokenExtractor = (req: Request): string | null => {
@@ -46,6 +48,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       id: payload.sub,
       email: payload.email,
       roles: payload.roles,
+      fullName: payload.fullName,
     });
   }
 }

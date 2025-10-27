@@ -18,6 +18,9 @@ lerna-debug.log*
 # Tests
 /coverage
 /.nyc_output
+src/certs/root_ca_cert.pem
+src/certs/root_ca_key.pem.enc
+src/certs/root_ca_key.pem
 
 # IDEs and editors
 /.idea
