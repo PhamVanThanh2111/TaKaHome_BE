@@ -369,15 +369,25 @@ export class ContractService {
   /**
    * Lấy URL truy cập file hợp đồng từ S3
    * Chỉ cho phép tenant hoặc landlord của hợp đồng truy cập
+   * Trả về cả URL hợp đồng ban đầu và các URL hợp đồng gia hạn
    */
   async getContractFileUrl(
     contractId: string,
     userId: string,
-  ): Promise<ResponseCommon<{ fileUrl: string }>> {
-    // Tìm hợp đồng với thông tin tenant và landlord
+  ): Promise<
+    ResponseCommon<{
+      fileUrl: string;
+      extensionFileUrls: Array<{
+        extensionId: string;
+        fileUrl: string;
+        createdAt: Date;
+      }>;
+    }>
+  > {
+    // Tìm hợp đồng với thông tin tenant, landlord và extensions
     const contract = await this.contractRepository.findOne({
       where: { id: contractId },
-      relations: ['tenant', 'landlord'],
+      relations: ['tenant', 'landlord', 'extensions'],
     });
 
     if (!contract) {
@@ -398,18 +408,41 @@ export class ContractService {
     }
 
     try {
-      // Trích xuất key từ URL S3
-      // URL format: https://hopdong-takahome.s3.ap-southeast-1.amazonaws.com/contracts/2d3f0e80-1796-4829-b8e4-0520c470aef1/tenant-signed-2025-10-08T15-38-56-848Z.pdf
-      const url = new URL(contract.contractFileUrl);
-      const key = url.pathname.substring(1); // Bỏ dấu "/" đầu tiên
+      // Helper function để tạo presigned URL từ S3 URL
+      const generatePresignedUrl = async (s3Url: string): Promise<string> => {
+        const url = new URL(s3Url);
+        const key = url.pathname.substring(1); // Bỏ dấu "/" đầu tiên
+        return await this.s3StorageService.getPresignedGetUrl(key, 900);
+      };
 
-      // Tạo presigned URL (có hiệu lực trong 15 phút = 900 giây)
-      const presignedUrl = await this.s3StorageService.getPresignedGetUrl(
-        key,
-        900,
+      // Tạo presigned URL cho hợp đồng ban đầu
+      const mainContractPresignedUrl = await generatePresignedUrl(
+        contract.contractFileUrl,
       );
 
-      return new ResponseCommon(200, 'SUCCESS', { fileUrl: presignedUrl });
+      // Lấy và sắp xếp các extension theo createdAt (mới nhất đầu tiên)
+      const sortedExtensions = (contract.extensions || [])
+        .filter((ext) => ext.extensionContractFileUrl) // Chỉ lấy extension có file
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()); // Mới nhất trước
+
+      // Tạo presigned URL cho các extension
+      const extensionFileUrls = await Promise.all(
+        sortedExtensions.map(async (extension) => {
+          const presignedUrl = await generatePresignedUrl(
+            extension.extensionContractFileUrl!,
+          );
+          return {
+            extensionId: extension.id,
+            fileUrl: presignedUrl,
+            createdAt: extension.createdAt,
+          };
+        }),
+      );
+
+      return new ResponseCommon(200, 'SUCCESS', {
+        fileUrl: mainContractPresignedUrl,
+        extensionFileUrls,
+      });
     } catch (error) {
       this.logger.error(
         `Failed to generate presigned URL for contract ${contractId}:`,
