@@ -23,8 +23,6 @@ export interface InvoiceExtractionResultDto {
 }
 
 export interface ProcessInvoiceResponseDto {
-  status: string;
-  message: string;
   extractedData: InvoiceExtractionResultDto[];
   rawData?: any;
 }
@@ -44,9 +42,11 @@ export class InvoiceService {
     private configService: ConfigService,
   ) {
     // Khởi tạo Google Document AI client với cấu hình an toàn
-    const keyFileContent = this.configService.get<string>('GOOGLE_CLOUD_KEY_FILE');
+    const keyFileContent = this.configService.get<string>(
+      'GOOGLE_CLOUD_KEY_FILE',
+    );
     const projectId = this.configService.get<string>('GOOGLE_CLOUD_PROJECT_ID');
-    
+
     if (keyFileContent && projectId) {
       try {
         // Parse JSON credentials từ biến môi trường
@@ -54,9 +54,14 @@ export class InvoiceService {
         try {
           credentials = JSON.parse(keyFileContent);
         } catch (parseError) {
-          console.warn('Không thể parse Google Cloud credentials JSON:', (parseError as Error).message);
+          console.warn(
+            'Không thể parse Google Cloud credentials JSON:',
+            (parseError as Error).message,
+          );
           this.documentAIClient = null;
-          this.processorId = this.configService.get<string>('GOOGLE_DOCUMENT_AI_PROCESSOR_ID');
+          this.processorId = this.configService.get<string>(
+            'GOOGLE_DOCUMENT_AI_PROCESSOR_ID',
+          );
           return;
         }
 
@@ -67,15 +72,22 @@ export class InvoiceService {
           timeout: 30000, // 30 seconds
         });
       } catch (error) {
-        console.warn('Không thể khởi tạo Google Document AI client:', (error as Error).message);
+        console.warn(
+          'Không thể khởi tạo Google Document AI client:',
+          (error as Error).message,
+        );
         this.documentAIClient = null;
       }
     } else {
-      console.warn('Google Cloud cấu hình chưa đầy đủ. Document AI sẽ không khả dụng.');
+      console.warn(
+        'Google Cloud cấu hình chưa đầy đủ. Document AI sẽ không khả dụng.',
+      );
       this.documentAIClient = null;
     }
-    
-    this.processorId = this.configService.get<string>('GOOGLE_DOCUMENT_AI_PROCESSOR_ID');
+
+    this.processorId = this.configService.get<string>(
+      'GOOGLE_DOCUMENT_AI_PROCESSOR_ID',
+    );
   }
 
   async create(dto: CreateInvoiceDto): Promise<ResponseCommon<Invoice>> {
@@ -89,13 +101,16 @@ export class InvoiceService {
       contract: { id: dto.contractId },
       dueDate: zonedTimeToUtc(dueInput, VN_TZ),
       items,
+      billingPeriod: dto.billingPeriod,
       totalAmount: total,
     });
     const saved = await this.invoiceRepository.save(invoice);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async createUtilityBill(dto: CreateUtilityBillDto): Promise<ResponseCommon<Invoice>> {
+  async createUtilityBill(
+    dto: CreateUtilityBillDto,
+  ): Promise<ResponseCommon<Invoice>> {
     // Backward compatibility: nếu sử dụng old format, convert sang new format
     // Validate services array
     if (!dto.services || dto.services.length === 0) {
@@ -103,22 +118,35 @@ export class InvoiceService {
     }
 
     // Kiểm tra duplicate serviceType trong cùng một invoice
-    const serviceTypes = dto.services.map(s => s.serviceType);
+    const serviceTypes = dto.services.map((s) => s.serviceType);
     const uniqueServiceTypes = new Set(serviceTypes);
     if (serviceTypes.length !== uniqueServiceTypes.size) {
-      throw new BadRequestException('Không được có dịch vụ trùng lặp trong cùng một hóa đơn');
+      throw new BadRequestException(
+        'Không được có dịch vụ trùng lặp trong cùng một hóa đơn',
+      );
     }
 
     // Validate từng service item
     for (const service of dto.services) {
-      if (service.serviceType === ServiceTypeEnum.ELECTRICITY && !service.KwhNo) {
-        throw new BadRequestException('KwhNo là bắt buộc cho dịch vụ ELECTRICITY');
+      if (
+        service.serviceType === ServiceTypeEnum.ELECTRICITY &&
+        !service.KwhNo
+      ) {
+        throw new BadRequestException(
+          'KwhNo là bắt buộc cho dịch vụ ELECTRICITY',
+        );
       }
       if (service.serviceType === ServiceTypeEnum.WATER && !service.M3No) {
         throw new BadRequestException('M3No là bắt buộc cho dịch vụ WATER');
       }
-      if (service.serviceType !== ServiceTypeEnum.ELECTRICITY && service.serviceType !== ServiceTypeEnum.WATER && !service.amount) {
-        throw new BadRequestException(`Amount là bắt buộc cho dịch vụ ${service.serviceType}`);
+      if (
+        service.serviceType !== ServiceTypeEnum.ELECTRICITY &&
+        service.serviceType !== ServiceTypeEnum.WATER &&
+        !service.amount
+      ) {
+        throw new BadRequestException(
+          `Amount là bắt buộc cho dịch vụ ${service.serviceType}`,
+        );
       }
     }
 
@@ -148,13 +176,13 @@ export class InvoiceService {
       });
 
       // Kiểm tra xem có item nào với serviceType trùng lặp không
-      const hasExistingServiceType = existingInvoices.some(invoice => 
-        invoice.items.some(item => item.serviceType === service.serviceType)
+      const hasExistingServiceType = existingInvoices.some((invoice) =>
+        invoice.items.some((item) => item.serviceType === service.serviceType),
       );
 
       if (hasExistingServiceType) {
         throw new BadRequestException(
-          `Đã tồn tại hóa đơn có dịch vụ ${service.serviceType} cho kỳ ${dto.billingPeriod}. Không thể tạo hóa đơn trùng lặp.`
+          `Đã tồn tại hóa đơn có dịch vụ ${service.serviceType} cho kỳ ${dto.billingPeriod}. Không thể tạo hóa đơn trùng lặp.`,
         );
       }
     }
@@ -167,29 +195,47 @@ export class InvoiceService {
       let itemAmount = 0;
       let itemDescription = '';
 
-      if (service.serviceType === ServiceTypeEnum.ELECTRICITY && service.KwhNo) {
+      if (
+        service.serviceType === ServiceTypeEnum.ELECTRICITY &&
+        service.KwhNo
+      ) {
         // Hóa đơn tiền điện
         const electricityPrice = contract.property.electricityPricePerKwh;
         if (!electricityPrice) {
-          throw new BadRequestException('Giá điện chưa được thiết lập cho bất động sản này');
+          throw new BadRequestException(
+            'Giá điện chưa được thiết lập cho bất động sản này',
+          );
         }
         itemAmount = service.KwhNo * Number(electricityPrice);
-        itemDescription = service.description || `Tiền điện tháng ${dto.billingPeriod}: ${service.KwhNo} kWh × ${Number(electricityPrice).toLocaleString('vi-VN')} VND/kWh`;
-      } else if (service.serviceType === ServiceTypeEnum.WATER && service.M3No) {
+        itemDescription =
+          service.description ||
+          `Tiền điện tháng ${dto.billingPeriod}: ${service.KwhNo} kWh × ${Number(electricityPrice).toLocaleString('vi-VN')} VND/kWh`;
+      } else if (
+        service.serviceType === ServiceTypeEnum.WATER &&
+        service.M3No
+      ) {
         // Hóa đơn tiền nước
         const waterPrice = contract.property.waterPricePerM3;
         if (!waterPrice) {
-          throw new BadRequestException('Giá nước chưa được thiết lập cho bất động sản này');
+          throw new BadRequestException(
+            'Giá nước chưa được thiết lập cho bất động sản này',
+          );
         }
         itemAmount = service.M3No * Number(waterPrice);
-        itemDescription = service.description || `Tiền nước tháng ${dto.billingPeriod}: ${service.M3No} m³ × ${Number(waterPrice).toLocaleString('vi-VN')} VND/m³`;
+        itemDescription =
+          service.description ||
+          `Tiền nước tháng ${dto.billingPeriod}: ${service.M3No} m³ × ${Number(waterPrice).toLocaleString('vi-VN')} VND/m³`;
       } else {
         // Các dịch vụ khác
         if (!service.amount) {
-          throw new BadRequestException(`Amount là bắt buộc cho dịch vụ ${service.serviceType}`);
+          throw new BadRequestException(
+            `Amount là bắt buộc cho dịch vụ ${service.serviceType}`,
+          );
         }
         itemAmount = service.amount;
-        itemDescription = service.description || `Tiền dịch vụ ${service.serviceType}${dto.billingPeriod ? ' tháng ' + dto.billingPeriod : ''}`;
+        itemDescription =
+          service.description ||
+          `Tiền dịch vụ ${service.serviceType}${dto.billingPeriod ? ' tháng ' + dto.billingPeriod : ''}`;
       }
 
       const invoiceItem = this.itemRepository.create({
@@ -204,8 +250,9 @@ export class InvoiceService {
 
     // Tạo invoice
     const code = this.generateCode();
-    const dueInput = dto.dueDate.length === 10 ? `${dto.dueDate}T00:00:00` : dto.dueDate;
-    
+    const dueInput =
+      dto.dueDate.length === 10 ? `${dto.dueDate}T00:00:00` : dto.dueDate;
+
     const invoice = this.invoiceRepository.create({
       invoiceCode: code,
       contract: { id: dto.contractId },
@@ -298,8 +345,7 @@ export class InvoiceService {
   async processInvoiceImage(
     _imageBuffer: Buffer,
     _mimeType: string,
-  ): Promise<ProcessInvoiceResponseDto> {
-    
+  ): Promise<ResponseCommon<ProcessInvoiceResponseDto>> {
     try {
       // Mark parameters as used to satisfy linter in mock mode
       void _imageBuffer;
@@ -366,37 +412,60 @@ export class InvoiceService {
       // ----- Mock response (used instead of live Document AI) -----
       // Keep function async-compatible by returning a resolved Promise
       return Promise.resolve(this.mockProcessInvoiceResponse());
-
     } catch (error) {
       console.error('Lỗi khi xử lý hóa đơn với Google Document AI:', error);
       // Trả về response lỗi để đảm bảo hàm luôn có return theo kiểu ProcessInvoiceResponseDto
-      return {
-        status: 'error',
-        message: 'Lỗi khi xử lý hóa đơn với Google Document AI',
-        extractedData: [],
-        rawData: {
-          error: (error as Error)?.message ?? String(error),
-          stack: (error as Error)?.stack ?? null,
-          processedAt: new Date().toISOString(),
+      return new ResponseCommon(
+        500,
+        'Lỗi khi xử lý hóa đơn với Google Document AI',
+        {
+          extractedData: [],
+          rawData: {
+            error: (error as Error)?.message ?? String(error),
+            stack: (error as Error)?.stack ?? null,
+            processedAt: new Date().toISOString(),
+          },
         },
-      };
+      );
     }
   }
 
   /**
    * Trả về dữ liệu mock giống như response từ Document AI để tiết kiệm chi phí
    */
-  private mockProcessInvoiceResponse(): ProcessInvoiceResponseDto {
-    return {
-      status: 'success',
-      message: 'Xử lý hóa đơn thành công',
+  private mockProcessInvoiceResponse(): ResponseCommon<ProcessInvoiceResponseDto> {
+    return new ResponseCommon(200, 'SUCCESS', {
       extractedData: [
-        { name: 'net_amount', value: '116.000', confidence: 0.5832309126853943 },
-        { name: 'invoice_type', value: 'restaurant_statement', confidence: 0.4611542522907257 },
-        { name: 'receiver_name', value: 'Quách', confidence: 0.3313143849372864 },
-        { name: 'total_amount', value: '133.400', confidence: 0.3292408883571625 },
-        { name: 'supplier_phone', value: '024 7300 9866', confidence: 0.24820193648338318 },
-        { name: 'supplier_name', value: 'CÔNG TY TNHH MỘT THÀNH VIÊN NƯỚC S', confidence: 0.13891878724098206 },
+        {
+          name: 'net_amount',
+          value: '116.000',
+          confidence: 0.5832309126853943,
+        },
+        {
+          name: 'invoice_type',
+          value: 'restaurant_statement',
+          confidence: 0.4611542522907257,
+        },
+        {
+          name: 'receiver_name',
+          value: 'Quách',
+          confidence: 0.3313143849372864,
+        },
+        {
+          name: 'total_amount',
+          value: '133.400',
+          confidence: 0.3292408883571625,
+        },
+        {
+          name: 'supplier_phone',
+          value: '024 7300 9866',
+          confidence: 0.24820193648338318,
+        },
+        {
+          name: 'supplier_name',
+          value: 'CÔNG TY TNHH MỘT THÀNH VIÊN NƯỚC S',
+          confidence: 0.13891878724098206,
+        },
         { name: 'line_item', value: '4 DV 29.000 116.000', confidence: 1 },
       ],
       rawData: {
@@ -405,6 +474,6 @@ export class InvoiceService {
           'NU\nTY\nOC SACH\nKý hiệu: 1K25TAE\nSố: 00065565\nCÔNG TY TNHH MỘT THÀNH VIÊN NƯỚC SẠCH HÀ NỘI\nĐịa chi: 44- đường Yên Phụ, Phường Trúc Bạch, Quận Ba Đình, Thành phố Hà Nội\nMã số thuế: 0100106225\nXí nghiệp Kinh doanh Nước sạch Cầu Giấy\nHA NOI\nHÓA ĐƠN GIÁ TRỊ GIA TĂNG (TIỀN NƯỚC)\n(Bản thể hiện của hóa đơn điện tử)\nTháng 01 năm 2025\nTên khách hàng: Quách Kim Cúc\nĐịa chi: N181/9/B11 Xuân Thuỷ\nMã hóa đơn:525010655653\nMã số khách hàng: 512002769\nSố hộ sử dụng: 1\nKhối Số đọc:E045-9076\nTài khoản:\nMã số thuế:\n...',
         processedAt: '2025-10-23T09:45:51.344Z',
       },
-    };
+    });
   }
 }

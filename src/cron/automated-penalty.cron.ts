@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { AutomatedPenaltyService } from '../modules/penalty/automated-penalty.service';
 import { BlockchainService } from '../modules/blockchain/blockchain.service';
@@ -24,10 +25,14 @@ export class AutomatedPenaltyCron {
    * to avoid duplicate penalty applications.
    */
   //Demo
-  @Cron('0 9 * * *', {
-    name: 'process-overdue-payments',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
+  // @Cron('0 9 * * *', {
+  //   name: 'process-overdue-payments',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
+  // @Cron('*/7 * * * *', {
+  //   name: 'process-overdue-payments',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
   async processOverduePayments(): Promise<void> {
     this.logger.log(
       '🔍 Starting daily overdue payment processing (SINGLE SOURCE OF TRUTH)...',
@@ -44,10 +49,10 @@ export class AutomatedPenaltyCron {
   /**
    * Run every day at 8:00 AM to check for overdue handovers (landlord penalties)
    */
-  @Cron('0 8 * * *', {
-    name: 'process-overdue-handovers',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
+  // @Cron('*/20 * * * *', {
+  //   name: 'process-overdue-handovers',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
   async processOverdueHandovers(): Promise<void> {
     this.logger.log(
       '🏠 Starting daily handover deadline check (landlord penalties)...',
@@ -64,10 +69,10 @@ export class AutomatedPenaltyCron {
   /**
    * Run every 5 minutes to check for pending signature timeouts (30 minute limit)
    */
-  @Cron('*/5 * * * *', {
-    name: 'process-pending-signature-timeouts',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
+  // @Cron('*/5 * * * *', {
+  //   name: 'process-pending-signature-timeouts',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
   async processPendingSignatureTimeouts(): Promise<void> {
     this.logger.log(
       '📝 Checking for pending signature timeouts (30 minute limit)...',
@@ -87,10 +92,10 @@ export class AutomatedPenaltyCron {
   /**
    * Run every day at 10:00 AM to check for monthly payment overdue
    */
-  @Cron('0 10 * * *', {
-    name: 'process-monthly-overdue-payments',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
+  // @Cron('*/3 * * * *', {
+  //   name: 'process-monthly-overdue-payments',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
   async processMonthlyOverduePayments(): Promise<void> {
     this.logger.log(
       '🔍 Starting monthly overdue payment processing every day at 10:00 AM',
@@ -115,43 +120,43 @@ export class AutomatedPenaltyCron {
   /**
    * Run every hour to mark payments as overdue on blockchain
    */
-  @Cron(CronExpression.EVERY_HOUR, {
-    name: 'mark-blockchain-overdue',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
-  markBlockchainOverduePayments(): void {
-    this.logger.log('🔍 Checking for blockchain overdue payments...');
+  // @Cron(CronExpression.EVERY_HOUR, {
+  //   name: 'mark-blockchain-overdue',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
+  // markBlockchainOverduePayments(): void {
+  //   this.logger.log('🔍 Checking for blockchain overdue payments...');
 
-    try {
-      // This would need to query contracts and check overdue payments
-      // For now, we'll just log that it's running
-      this.logger.log('✅ Blockchain overdue payment check completed');
-    } catch (error) {
-      this.logger.error(
-        '❌ Failed to mark blockchain overdue payments:',
-        error,
-      );
-    }
-  }
+  //   try {
+  //     // This would need to query contracts and check overdue payments
+  //     // For now, we'll just log that it's running
+  //     this.logger.log('✅ Blockchain overdue payment check completed');
+  //   } catch (error) {
+  //     this.logger.error(
+  //       '❌ Failed to mark blockchain overdue payments:',
+  //       error,
+  //     );
+  //   }
+  // }
 
-  /**
-   * Run every 6 hours to sync penalty data with blockchain
-   */
-  @Cron('0 */6 * * *', {
-    name: 'sync-penalty-blockchain',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
-  syncPenaltyData(): void {
-    this.logger.log('🔄 Syncing penalty data with blockchain...');
+  // /**
+  //  * Run every 6 hours to sync penalty data with blockchain
+  //  */
+  // @Cron('0 */6 * * *', {
+  //   name: 'sync-penalty-blockchain',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
+  // syncPenaltyData(): void {
+  //   this.logger.log('🔄 Syncing penalty data with blockchain...');
 
-    try {
-      // Query blockchain for penalty events and sync with database
-      // This is a placeholder for now
-      this.logger.log('✅ Penalty data sync completed');
-    } catch (error) {
-      this.logger.error('❌ Failed to sync penalty data:', error);
-    }
-  }
+  //   try {
+  //     // Query blockchain for penalty events and sync with database
+  //     // This is a placeholder for now
+  //     this.logger.log('✅ Penalty data sync completed');
+  //   } catch (error) {
+  //     this.logger.error('❌ Failed to sync penalty data:', error);
+  //   }
+  // }
 
   /**
    * Manual trigger for overdue payment processing (can be called via API if needed)
@@ -231,6 +236,45 @@ export class AutomatedPenaltyCron {
         '❌ Manual pending signature processing failed:',
         error,
       );
+      return {
+        processed: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Run twice daily (9:00 AM & 6:00 PM) to check for low escrow balances
+   * Sends warning notifications when tenant balance < 3x daily penalty
+   */
+  // @Cron('0 9,18 * * *', {
+  //   name: 'check-low-escrow-balance',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // })
+  async checkLowEscrowBalance(): Promise<void> {
+    this.logger.log('🔍 Starting low escrow balance check...');
+
+    try {
+      await this.penaltyService.checkLowEscrowBalance();
+      this.logger.log('✅ Low escrow balance check completed');
+    } catch (error) {
+      this.logger.error('❌ Failed to check low escrow balances:', error);
+    }
+  }
+
+  /**
+   * Manual trigger for low escrow balance check (can be called via API if needed)
+   */
+  async triggerLowBalanceCheck(): Promise<{
+    processed: boolean;
+    error?: string;
+  }> {
+    try {
+      this.logger.log('🔧 Manual low balance check triggered...');
+      await this.penaltyService.checkLowEscrowBalance();
+      return { processed: true };
+    } catch (error) {
+      this.logger.error('❌ Manual low balance check failed:', error);
       return {
         processed: false,
         error: error instanceof Error ? error.message : 'Unknown error',

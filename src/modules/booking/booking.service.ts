@@ -275,7 +275,7 @@ export class BookingService {
   ): Promise<ResponseCommon<Booking>> {
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.PENDING_SIGNATURE]);
-    
+
     const contract = await this.ensureContractForBooking(booking);
     if (!contract) {
       throw new BadRequestException(
@@ -738,7 +738,7 @@ export class BookingService {
         contract.id,
       );
       const monthlyRent = pricing.monthlyRent;
-      
+
       if (!monthlyRent) {
         console.warn(
           `Cannot create invoice: missing price for contract ${contract.id}`,
@@ -759,6 +759,7 @@ export class BookingService {
             amount: monthlyRent,
           },
         ],
+        billingPeriod: formatVN(dueDate, 'yyyy-MM'),
       });
 
       console.log(
@@ -821,15 +822,6 @@ export class BookingService {
       if (this.isReusableContract(linked)) {
         return linked;
       }
-    }
-
-    const latest = await this.contractService.findLatestByTenantAndProperty(
-      tenantId,
-      propertyId,
-    );
-    if (this.isReusableContract(latest)) {
-      booking.contractId = latest.id;
-      return latest;
     }
 
     const draft = await this.contractService.createDraftForBooking({
@@ -1066,7 +1058,9 @@ export class BookingService {
 
       // Log all fields in the PDF for debugging
       const fields = form.getFields();
-      console.log(`📋 Found ${fields.length} fields in PDF template: ${templateType}`);
+      console.log(
+        `📋 Found ${fields.length} fields in PDF template: ${templateType}`,
+      );
       fields.forEach((field) => {
         const fieldName = field.getName();
         console.log(`📝 Field: ${fieldName} (Type: ${field.constructor.name})`);
@@ -1082,7 +1076,9 @@ export class BookingService {
             // Process Vietnamese text
             const processedValue = this.processVietnameseText(value);
             field.setText(processedValue);
-            console.log(`✅ Filled field "${fieldName}" with: ${processedValue}`);
+            console.log(
+              `✅ Filled field "${fieldName}" with: ${processedValue}`,
+            );
           }
         } catch {
           // Field not found - this is expected for some fields
@@ -1097,11 +1093,16 @@ export class BookingService {
 
       // Save PDF with flattened form fields
       const pdfBytes = await pdfDoc.save();
-      console.log(`✅ PDF prepared with data filled and flattened. Size: ${pdfBytes.length} bytes`);
-      
+      console.log(
+        `✅ PDF prepared with data filled and flattened. Size: ${pdfBytes.length} bytes`,
+      );
+
       return Buffer.from(pdfBytes);
     } catch (error) {
-      console.error('❌ Error filling PDF template while preserving signatures:', error);
+      console.error(
+        '❌ Error filling PDF template while preserving signatures:',
+        error,
+      );
       throw error;
     }
   }
@@ -1112,31 +1113,140 @@ export class BookingService {
   private processVietnameseText(text: string): string {
     try {
       const vietnameseMap: Record<string, string> = {
-        'à': 'a', 'á': 'a', 'ạ': 'a', 'ả': 'a', 'ã': 'a',
-        'â': 'a', 'ầ': 'a', 'ấ': 'a', 'ậ': 'a', 'ẩ': 'a', 'ẫ': 'a',
-        'ă': 'a', 'ằ': 'a', 'ắ': 'a', 'ặ': 'a', 'ẳ': 'a', 'ẵ': 'a',
-        'À': 'A', 'Á': 'A', 'Ạ': 'A', 'Ả': 'A', 'Ã': 'A',
-        'Â': 'A', 'Ầ': 'A', 'Ấ': 'A', 'Ậ': 'A', 'Ẩ': 'A', 'Ẫ': 'A',
-        'Ă': 'A', 'Ằ': 'A', 'Ắ': 'A', 'Ặ': 'A', 'Ẳ': 'A', 'Ẵ': 'A',
-        'è': 'e', 'é': 'e', 'ẹ': 'e', 'ẻ': 'e', 'ẽ': 'e',
-        'ê': 'e', 'ề': 'e', 'ế': 'e', 'ệ': 'e', 'ể': 'e', 'ễ': 'e',
-        'È': 'E', 'É': 'E', 'Ẹ': 'E', 'Ẻ': 'E', 'Ẽ': 'E',
-        'Ê': 'E', 'Ề': 'E', 'Ế': 'E', 'Ệ': 'E', 'Ể': 'E', 'Ễ': 'E',
-        'ì': 'i', 'í': 'i', 'ị': 'i', 'ỉ': 'i', 'ĩ': 'i',
-        'Ì': 'I', 'Í': 'I', 'Ị': 'I', 'Ỉ': 'I', 'Ĩ': 'I',
-        'ò': 'o', 'ó': 'o', 'ọ': 'o', 'ỏ': 'o', 'õ': 'o',
-        'ô': 'o', 'ồ': 'o', 'ố': 'o', 'ộ': 'o', 'ổ': 'o', 'ỗ': 'o',
-        'ơ': 'o', 'ờ': 'o', 'ớ': 'o', 'ợ': 'o', 'ở': 'o', 'ỡ': 'o',
-        'Ò': 'O', 'Ó': 'O', 'Ọ': 'O', 'Ỏ': 'O', 'Õ': 'O',
-        'Ô': 'O', 'Ồ': 'O', 'Ố': 'O', 'Ộ': 'O', 'Ổ': 'O', 'Ỗ': 'O',
-        'Ơ': 'O', 'Ờ': 'O', 'Ớ': 'O', 'Ợ': 'O', 'Ở': 'O', 'Ỡ': 'O',
-        'ù': 'u', 'ú': 'u', 'ụ': 'u', 'ủ': 'u', 'ũ': 'u',
-        'ư': 'u', 'ừ': 'u', 'ứ': 'u', 'ự': 'u', 'ử': 'u', 'ữ': 'u',
-        'Ù': 'U', 'Ú': 'U', 'Ụ': 'U', 'Ủ': 'U', 'Ũ': 'U',
-        'Ư': 'U', 'Ừ': 'U', 'Ứ': 'U', 'Ự': 'U', 'Ử': 'U', 'Ữ': 'U',
-        'ỳ': 'y', 'ý': 'y', 'ỵ': 'y', 'ỷ': 'y', 'ỹ': 'y',
-        'Ỳ': 'Y', 'Ý': 'Y', 'Ỵ': 'Y', 'Ỷ': 'Y', 'Ỹ': 'Y',
-        'đ': 'd', 'Đ': 'D'
+        à: 'a',
+        á: 'a',
+        ạ: 'a',
+        ả: 'a',
+        ã: 'a',
+        â: 'a',
+        ầ: 'a',
+        ấ: 'a',
+        ậ: 'a',
+        ẩ: 'a',
+        ẫ: 'a',
+        ă: 'a',
+        ằ: 'a',
+        ắ: 'a',
+        ặ: 'a',
+        ẳ: 'a',
+        ẵ: 'a',
+        À: 'A',
+        Á: 'A',
+        Ạ: 'A',
+        Ả: 'A',
+        Ã: 'A',
+        Â: 'A',
+        Ầ: 'A',
+        Ấ: 'A',
+        Ậ: 'A',
+        Ẩ: 'A',
+        Ẫ: 'A',
+        Ă: 'A',
+        Ằ: 'A',
+        Ắ: 'A',
+        Ặ: 'A',
+        Ẳ: 'A',
+        Ẵ: 'A',
+        è: 'e',
+        é: 'e',
+        ẹ: 'e',
+        ẻ: 'e',
+        ẽ: 'e',
+        ê: 'e',
+        ề: 'e',
+        ế: 'e',
+        ệ: 'e',
+        ể: 'e',
+        ễ: 'e',
+        È: 'E',
+        É: 'E',
+        Ẹ: 'E',
+        Ẻ: 'E',
+        Ẽ: 'E',
+        Ê: 'E',
+        Ề: 'E',
+        Ế: 'E',
+        Ệ: 'E',
+        Ể: 'E',
+        Ễ: 'E',
+        ì: 'i',
+        í: 'i',
+        ị: 'i',
+        ỉ: 'i',
+        ĩ: 'i',
+        Ì: 'I',
+        Í: 'I',
+        Ị: 'I',
+        Ỉ: 'I',
+        Ĩ: 'I',
+        ò: 'o',
+        ó: 'o',
+        ọ: 'o',
+        ỏ: 'o',
+        õ: 'o',
+        ô: 'o',
+        ồ: 'o',
+        ố: 'o',
+        ộ: 'o',
+        ổ: 'o',
+        ỗ: 'o',
+        ơ: 'o',
+        ờ: 'o',
+        ớ: 'o',
+        ợ: 'o',
+        ở: 'o',
+        ỡ: 'o',
+        Ò: 'O',
+        Ó: 'O',
+        Ọ: 'O',
+        Ỏ: 'O',
+        Õ: 'O',
+        Ô: 'O',
+        Ồ: 'O',
+        Ố: 'O',
+        Ộ: 'O',
+        Ổ: 'O',
+        Ỗ: 'O',
+        Ơ: 'O',
+        Ờ: 'O',
+        Ớ: 'O',
+        Ợ: 'O',
+        Ở: 'O',
+        Ỡ: 'O',
+        ù: 'u',
+        ú: 'u',
+        ụ: 'u',
+        ủ: 'u',
+        ũ: 'u',
+        ư: 'u',
+        ừ: 'u',
+        ứ: 'u',
+        ự: 'u',
+        ử: 'u',
+        ữ: 'u',
+        Ù: 'U',
+        Ú: 'U',
+        Ụ: 'U',
+        Ủ: 'U',
+        Ũ: 'U',
+        Ư: 'U',
+        Ừ: 'U',
+        Ứ: 'U',
+        Ự: 'U',
+        Ử: 'U',
+        Ữ: 'U',
+        ỳ: 'y',
+        ý: 'y',
+        ỵ: 'y',
+        ỷ: 'y',
+        ỹ: 'y',
+        Ỳ: 'Y',
+        Ý: 'Y',
+        Ỵ: 'Y',
+        Ỷ: 'Y',
+        Ỹ: 'Y',
+        đ: 'd',
+        Đ: 'D',
       };
 
       let result = text;

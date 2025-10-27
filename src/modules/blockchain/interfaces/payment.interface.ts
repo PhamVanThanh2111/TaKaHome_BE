@@ -29,32 +29,31 @@ export interface Payment {
   paymentId: string;
   contractId: string;
   period: number;
-  amount: number;            // Integer (cents/đồng)
+  amount: number; // Integer (cents/đồng)
   status: 'SCHEDULED' | 'PAID' | 'OVERDUE';
-  dueDate?: string;          // ISO 8601
+  dueDate?: string; // ISO 8601
   orderRef?: string;
-  paidAmount?: number;       // Integer (cents/đồng)
+  paidAmount?: number; // Integer (cents/đồng)
   paidBy?: string;
-  paidAt?: string;           // ISO 8601
-  overdueAt?: string;        // ISO 8601
+  paidAt?: string; // ISO 8601
+  overdueAt?: string; // ISO 8601
   penalties?: PenaltyRecord[];
-  createdAt: string;         // ISO 8601
-  updatedAt: string;         // ISO 8601
+  extensionNumber?: number; // Extension number (null if original period)
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
 }
-
-
 
 export interface Penalty {
   objectType: 'penalty';
   penaltyId?: string;
   contractId: string;
-  party?: "landlord" | "tenant";
-  amount: number;            // Integer (cents/đồng)
+  party?: 'landlord' | 'tenant';
+  amount: number; // Integer (cents/đồng)
   reason: string;
   policyRef?: string;
   appliedBy?: string;
-  appliedAt?: string;        // ISO 8601
-  timestamp?: string;        // ISO 8601
+  appliedAt?: string; // ISO 8601
+  timestamp?: string; // ISO 8601
   status?: 'PENDING' | 'PAID' | 'WAIVED';
 }
 

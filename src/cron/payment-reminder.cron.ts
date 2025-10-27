@@ -37,8 +37,9 @@ export class PaymentReminderCron {
    * Chạy mỗi giờ để gửi payment reminders
    * Sends payment reminders 7, 3, 1 days before due date
    */
+  // @Cron(CronExpression.EVERY_HOUR)
   //Demo
-  @Cron(CronExpression.EVERY_HOUR)
+  // @Cron('*/25 * * * *')
   async sendPaymentRemindersFirstMonth(): Promise<void> {
     try {
       this.logger.log('🔔 Checking for payment reminders to send...');
@@ -65,17 +66,27 @@ export class PaymentReminderCron {
       for (const booking of upcomingPayments) {
         if (!booking.firstRentDueAt) continue;
 
-        const daysToDue = Math.ceil(
-          (booking.firstRentDueAt.getTime() - now.getTime()) /
-            (1000 * 60 * 60 * 24),
+        // const daysToDue = Math.ceil(
+        //   (booking.firstRentDueAt.getTime() - now.getTime()) /
+        //     (1000 * 60 * 60 * 24),
+        // );
+
+        // // Send reminders at specific intervals
+        // if ([7, 3, 1].includes(daysToDue)) {
+        //   await this.sendPaymentReminderFirstMonth(booking, daysToDue);
+        // }
+        // Demo
+        const reminderIntervals = [3 * 60, 1 * 60, 30];
+
+        const minutesToDue = Math.ceil(
+          (booking.firstRentDueAt.getTime() - now.getTime()) / (1000 * 60),
         );
 
-        // Send reminders at specific intervals
-        if ([7, 3, 1].includes(daysToDue)) {
-          await this.sendPaymentReminderFirstMonth(booking, daysToDue);
+        if (reminderIntervals.includes(minutesToDue)) {
+          await this.sendPaymentReminderFirstMonth(booking, minutesToDue);
         }
-        // Demo
       }
+
       // Check deposit reminders and cancel overdue deposits
       await this.sendDepositReminders();
       await this.cancelOverdueDeposits();
@@ -219,7 +230,8 @@ export class PaymentReminderCron {
             BookingStatus.ESCROW_FUNDED_L,
             BookingStatus.ESCROW_FUNDED_T,
           ]),
-          escrowDepositDueAt: LessThanOrEqual(addDays(now, -1)), // 24+ hours overdue
+          //escrowDepositDueAt: LessThanOrEqual(addDays(now, -1)), // 24+ hours overdue
+          escrowDepositDueAt: LessThanOrEqual(addDays(now, -1 / 24)), //Demo: 1 hour overdue
         },
         relations: ['tenant', 'property', 'property.landlord'],
       });

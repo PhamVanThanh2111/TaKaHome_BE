@@ -25,6 +25,7 @@ import {
 import { PropertyResponseDto } from './dto/property-response.dto';
 import { Query } from '@nestjs/common';
 import { FilterPropertyDto } from './dto/filter-property.dto';
+import { FilterPropertyWithUrlDto } from './dto/filter-property-with-url.dto';
 import { UploadPropertyImagesDto } from './dto/upload-property-images.dto';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
@@ -115,6 +116,58 @@ export class PropertyController {
   })
   filter(@Query() query: FilterPropertyDto): Promise<ResponseCommon<any>> {
     return this.propertyService.filter(query);
+  }
+
+  @Get('filter-with-url')
+  @ApiOperation({
+    summary: 'Filter properties with URL for chatbot',
+    description:
+      'Filter properties và trả về kèm URL để truy cập, dành cho Gemini chatbot',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Trả về danh sách bất động sản với URL',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 200 },
+        message: { type: 'string', example: 'SUCCESS' },
+        data: {
+          type: 'object',
+          properties: {
+            data: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  title: { type: 'string' },
+                  description: { type: 'string' },
+                  price: { type: 'number' },
+                  area: { type: 'number' },
+                  bedrooms: { type: 'number' },
+                  bathrooms: { type: 'number' },
+                  province: { type: 'string' },
+                  ward: { type: 'string' },
+                  address: { type: 'string' },
+                  url: {
+                    type: 'string',
+                    description: 'URL để truy cập bất động sản',
+                  },
+                },
+              },
+            },
+            total: { type: 'number' },
+            message: { type: 'string' },
+          },
+        },
+      },
+    },
+  })
+  filterWithUrl(
+    @Query() query: FilterPropertyWithUrlDto,
+  ): Promise<ResponseCommon<any>> {
+    return this.propertyService.filterWithUrl(query);
   }
 
   @Post(':id/images')

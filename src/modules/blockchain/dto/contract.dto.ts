@@ -1,4 +1,10 @@
-import { IsNotEmpty, IsString, IsOptional, IsDateString, IsEnum } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  IsOptional,
+  IsDateString,
+  IsEnum,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum ContractStatus {
@@ -6,12 +12,12 @@ export enum ContractStatus {
   WAIT_DEPOSIT = 'WAIT_DEPOSIT',
   WAIT_FIRST_PAYMENT = 'WAIT_FIRST_PAYMENT',
   ACTIVE = 'ACTIVE',
-  TERMINATED = 'TERMINATED'
+  TERMINATED = 'TERMINATED',
 }
 
 export enum SignatureParty {
   LANDLORD = 'landlord',
-  TENANT = 'tenant'
+  TENANT = 'tenant',
 }
 
 export class CreateBlockchainContractDto {
@@ -60,17 +66,24 @@ export class CreateBlockchainContractDto {
   @IsString()
   landlordSignatureMeta: string;
 
-  @ApiProperty({ description: 'Monthly rent amount (will be converted to cents/đồng)' })
+  @ApiProperty({
+    description: 'Monthly rent amount (will be converted to cents/đồng)',
+  })
   @IsNotEmpty()
   @IsString()
   rentAmount: string;
 
-  @ApiProperty({ description: 'Security deposit amount (will be converted to cents/đồng)' })
+  @ApiProperty({
+    description: 'Security deposit amount (will be converted to cents/đồng)',
+  })
   @IsNotEmpty()
   @IsString()
   depositAmount: string;
 
-  @ApiProperty({ description: 'Currency code', enum: ['VND', 'USD', 'EUR', 'SGD'] })
+  @ApiProperty({
+    description: 'Currency code',
+    enum: ['VND', 'USD', 'EUR', 'SGD'],
+  })
   @IsNotEmpty()
   @IsString()
   currency: string;
@@ -109,12 +122,17 @@ export class RecordDepositDto {
   @IsString()
   contractId: string;
 
-  @ApiProperty({ description: 'Party making deposit', enum: ['landlord', 'tenant'] })
+  @ApiProperty({
+    description: 'Party making deposit',
+    enum: ['landlord', 'tenant'],
+  })
   @IsNotEmpty()
   @IsString()
   party: string;
 
-  @ApiProperty({ description: 'Deposit amount (will be converted to cents/đồng)' })
+  @ApiProperty({
+    description: 'Deposit amount (will be converted to cents/đồng)',
+  })
   @IsNotEmpty()
   @IsString()
   amount: string;
@@ -197,7 +215,10 @@ export class RecordPenaltyDto {
   @IsString()
   contractId: string;
 
-  @ApiProperty({ description: 'Party being penalized', enum: ['landlord', 'tenant'] })
+  @ApiProperty({
+    description: 'Party being penalized',
+    enum: ['landlord', 'tenant'],
+  })
   @IsNotEmpty()
   @IsString()
   party: string;
@@ -226,22 +247,31 @@ export class StorePrivateDetailsDto {
 }
 
 export class QueryContractsDto {
-  @ApiPropertyOptional({ enum: ContractStatus, description: 'Filter by contract status' })
+  @ApiPropertyOptional({
+    enum: ContractStatus,
+    description: 'Filter by contract status',
+  })
   @IsOptional()
   @IsEnum(ContractStatus)
   status?: ContractStatus;
 
-  @ApiPropertyOptional({ description: 'Filter by party ID (landlord or tenant)' })
+  @ApiPropertyOptional({
+    description: 'Filter by party ID (landlord or tenant)',
+  })
   @IsOptional()
   @IsString()
   party?: string;
 
-  @ApiPropertyOptional({ description: 'Start date for date range query (ISO 8601)' })
+  @ApiPropertyOptional({
+    description: 'Start date for date range query (ISO 8601)',
+  })
   @IsOptional()
   @IsDateString()
   startDate?: string;
 
-  @ApiPropertyOptional({ description: 'End date for date range query (ISO 8601)' })
+  @ApiPropertyOptional({
+    description: 'End date for date range query (ISO 8601)',
+  })
   @IsOptional()
   @IsDateString()
   endDate?: string;
@@ -252,4 +282,47 @@ export class TerminateContractDto {
   @IsNotEmpty()
   @IsString()
   reason: string;
+}
+
+export class RecordContractExtensionDto {
+  @ApiProperty({ description: 'Unique contract identifier' })
+  @IsNotEmpty()
+  @IsString()
+  contractId: string;
+
+  @ApiProperty({ description: 'New contract end date (ISO 8601 format)' })
+  @IsNotEmpty()
+  @IsDateString()
+  newEndDate: string;
+
+  @ApiProperty({
+    description: 'New monthly rent amount (will be converted to cents/đồng)',
+  })
+  @IsNotEmpty()
+  @IsString()
+  newRentAmount: string;
+
+  @ApiPropertyOptional({ description: 'Hash of extension agreement document' })
+  @IsOptional()
+  @IsString()
+  extensionAgreementHash?: string;
+
+  @ApiPropertyOptional({ description: 'Notes about the extension' })
+  @IsOptional()
+  @IsString()
+  extensionNotes?: string;
+}
+
+export class CreateExtensionPaymentScheduleDto {
+  @ApiProperty({ description: 'Unique contract identifier' })
+  @IsNotEmpty()
+  @IsString()
+  contractId: string;
+
+  @ApiProperty({
+    description: 'Extension number to create payment schedule for',
+  })
+  @IsNotEmpty()
+  @IsString()
+  extensionNumber: string;
 }

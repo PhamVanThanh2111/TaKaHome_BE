@@ -7,6 +7,7 @@ import { BlockchainService } from '../blockchain/blockchain.service';
 import { Booking } from '../booking/entities/booking.entity';
 import { BookingStatus } from '../common/enums/booking-status.enum';
 import { Contract } from '../contract/entities/contract.entity';
+import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 import { NotificationService } from '../notification/notification.service';
 import { NotificationTypeEnum } from '../common/enums/notification-type.enum';
 import { EscrowService } from '../escrow/escrow.service';
@@ -78,6 +79,7 @@ export class AutomatedPenaltyService {
 
       // Get actual rent amount from blockchain contract first, then fallback to property or default
       const actualRentAmount = await this.getRentAmountFromBlockchain(
+        booking.tenant.id,
         booking.contractId,
         rentAmount || booking.property?.price || 10000000,
       );
@@ -127,55 +129,95 @@ export class AutomatedPenaltyService {
       // Check escrow balance before applying penalty
       const escrowBalance = await this.checkEscrowBalance(booking.contractId);
 
-      // If penalty would exceed escrow balance or contract should be terminated
-      if (
-        !penaltyInfo.canContinue ||
-        (escrowBalance && penaltyInfo.amount > escrowBalance.tenantBalance)
-      ) {
+      // Determine actual penalty amount to deduct and whether to terminate
+      let actualPenaltyAmount = penaltyInfo.amount;
+      let shouldTerminate = false;
+      let terminationReason = '';
+
+      // Check if contract should be terminated due to excessive penalties (30% rule)
+      if (!penaltyInfo.canContinue) {
+        shouldTerminate = true;
+        terminationReason = `Tổng phạt vượt quá 30% giá trị hợp đồng. Penalty: ${penaltyInfo.amount.toLocaleString('vi-VN')} VND`;
         this.logger.warn(
-          `⚠️ Penalty exceeds limits for booking ${booking.id}. Initiating contract termination.`,
+          `⚠️ Penalty exceeds 30% rule for booking ${booking.id}. Will deduct available balance and terminate.`,
+        );
+      }
+
+      // Check if penalty exceeds escrow balance
+      if (escrowBalance && penaltyInfo.amount > escrowBalance.tenantBalance) {
+        // Deduct all available balance instead of full penalty
+        actualPenaltyAmount = escrowBalance.tenantBalance;
+        shouldTerminate = true;
+        terminationReason = `Không đủ tiền cọc để trả phạt. Penalty yêu cầu: ${penaltyInfo.amount.toLocaleString('vi-VN')} VND, Số dư khả dụng: ${escrowBalance.tenantBalance.toLocaleString('vi-VN')} VND. Đã trừ hết số dư.`;
+
+        this.logger.warn(
+          `⚠️ Penalty (${penaltyInfo.amount.toLocaleString('vi-VN')} VND) exceeds escrow balance (${escrowBalance.tenantBalance.toLocaleString('vi-VN')} VND) for booking ${booking.id}. Will deduct available balance and terminate.`,
+        );
+      }
+
+      // Record penalty on blockchain with actual amount
+      if (actualPenaltyAmount > 0) {
+        await this.recordPenaltyOnBlockchain(
+          booking.contract?.contractCode || booking.contractId,
+          'tenant',
+          actualPenaltyAmount,
+          `Payment overdue by ${daysPastDue} days - Deducted: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND`,
         );
 
-        // Initiate contract termination process
+        // Deduct penalty from tenant's escrow balance
+        await this.deductFromEscrow(
+          booking.contractId,
+          actualPenaltyAmount,
+          `Payment overdue by ${daysPastDue} days - Deducted: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND`,
+        );
+      }
+
+      // Terminate contract if needed (after deducting available funds)
+      if (shouldTerminate) {
+        this.logger.warn(
+          `⚠️ Terminating contract for booking ${booking.id} after deducting available funds.`,
+        );
+
         await this.terminateContractForInsufficientFunds(
           booking.contractId,
           booking.id,
-          `Insufficient escrow funds to cover penalties. Total penalty: ${penaltyInfo.amount.toLocaleString('vi-VN')} VND`,
+          terminationReason,
         );
 
-        return null;
+        // Still return penalty application to record what was deducted
+        const penaltyApplication: PenaltyApplication = {
+          contractId: booking.contractId,
+          bookingId: booking.id,
+          tenantId: booking.tenant.id,
+          daysPastDue,
+          originalAmount: actualRentAmount,
+          penaltyAmount: actualPenaltyAmount,
+          reason: `${terminationReason}. Contract terminated after deducting available funds.`,
+          appliedAt: vnNow(),
+        };
+
+        return penaltyApplication;
       }
 
-      // Record penalty on blockchain
-      await this.recordPenaltyOnBlockchain(
-        booking.contractId,
-        'tenant',
-        penaltyInfo.amount,
-        `Payment overdue by ${daysPastDue} days`,
+      // Send notifications with actual penalty amount
+      await this.sendPenaltyNotifications(
+        booking,
+        { amount: actualPenaltyAmount, reason: penaltyInfo.reason },
+        daysPastDue,
       );
 
-      // Deduct penalty from tenant's escrow balance
-      await this.deductFromEscrow(
-        booking.contractId,
-        penaltyInfo.amount,
-        `Payment overdue by ${daysPastDue} days`,
-      );
-
-      // Send notifications
-      await this.sendPenaltyNotifications(booking, penaltyInfo, daysPastDue);
-
-      // Record penalty in database
+      // Record penalty in database with actual amount
       await this.recordPenaltyInDatabase({
-        contractId: booking.contractId,
+        contractId: booking.contract?.contractCode || booking.contractId,
         bookingId: booking.id,
         tenantId: booking.tenant.id,
         penaltyType: 'OVERDUE_PAYMENT',
         overdueDate: booking.firstRentDueAt,
         daysPastDue,
         originalAmount: actualRentAmount,
-        penaltyAmount: penaltyInfo.amount,
+        penaltyAmount: actualPenaltyAmount, // Use actual deducted amount
         penaltyRate: penaltyInfo.rate,
-        reason: `First payment overdue by ${daysPastDue} days - Daily penalty`,
+        reason: `First payment overdue by ${daysPastDue} days - Deducted: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND${actualPenaltyAmount < penaltyInfo.amount ? ' (Insufficient balance)' : ''}`,
         appliedBy: 'system',
       });
 
@@ -185,13 +227,13 @@ export class AutomatedPenaltyService {
         tenantId: booking.tenant.id,
         daysPastDue,
         originalAmount: actualRentAmount,
-        penaltyAmount: penaltyInfo.amount,
-        reason: penaltyInfo.reason,
+        penaltyAmount: actualPenaltyAmount, // Use actual deducted amount
+        reason: `${penaltyInfo.reason} - Deducted: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND${actualPenaltyAmount < penaltyInfo.amount ? ' (Insufficient balance)' : ''}`,
         appliedAt: vnNow(),
       };
 
       this.logger.log(
-        `✅ Successfully applied penalty for booking ${booking.id}`,
+        `✅ Successfully applied penalty for booking ${booking.id} - Amount: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND`,
       );
       return penaltyApplication;
     } catch (error) {
@@ -214,10 +256,14 @@ export class AutomatedPenaltyService {
         return null;
       }
 
+      // const hoursLate = Math.floor(
+      //   (vnNow().getTime() - booking.escrowDepositDueAt.getTime()) /
+      //     (1000 * 60 * 60),
+      // );
       const hoursLate = Math.floor(
         (vnNow().getTime() - booking.escrowDepositDueAt.getTime()) /
-          (1000 * 60 * 60),
-      );
+          (1000 * 60),
+      ); //Demo: minutes
 
       // Cancel if more than 24 hours late
       if (hoursLate > 24) {
@@ -324,8 +370,8 @@ export class AutomatedPenaltyService {
     const baseAmount = rentAmount || 10000000; // 10M VND as fallback
     const penaltyAmount = Math.floor((baseAmount * rate * daysPastDue) / 100);
 
-    // Maximum penalty cap: 20% of contract value (Vietnamese consumer protection)
-    const maxPenalty = Math.floor(baseAmount * 0.2);
+    // Maximum penalty cap: 30% of contract value (Vietnamese consumer protection)
+    const maxPenalty = Math.floor(baseAmount * 0.3);
     const finalPenalty = Math.min(penaltyAmount, maxPenalty);
 
     // Contract termination logic: If penalties exceed 30% of rent, recommend termination
@@ -358,7 +404,7 @@ export class AutomatedPenaltyService {
       userId: booking.tenant.id,
       type: NotificationTypeEnum.PAYMENT,
       title: 'Phí phạt thanh toán lần đầu',
-      content: `Do thanh toán lần đầu muộn ${daysPastDue} ngày cho căn hộ ${booking.property.title}, bạn đã bị áp dụng phí phạt ${penaltyInfo.amount.toLocaleString('vi-VN')} VND. Lưu ý: Nếu trễ quá 3 ngày, hợp đồng sẽ bị hủy!`,
+      content: `Do thanh toán lần đầu muộn ${daysPastDue} ngày cho căn hộ ${booking.property?.title || 'N/A'}, bạn đã bị áp dụng phí phạt ${penaltyInfo.amount.toLocaleString('vi-VN')} VND. Lưu ý: Nếu trễ quá 3 ngày, hợp đồng sẽ bị hủy!`,
     });
 
     // Notify landlord (if property has landlord relation)
@@ -558,7 +604,7 @@ export class AutomatedPenaltyService {
         where: {
           status: BookingStatus.DUAL_ESCROW_FUNDED, // Should have paid first rent by now
         },
-        relations: ['tenant', 'contract'],
+        relations: ['tenant', 'contract', 'property', 'property.landlord'],
       });
 
       let penaltiesApplied = 0;
@@ -569,13 +615,13 @@ export class AutomatedPenaltyService {
           const dueDate = booking.firstRentDueAt || now;
 
           if (now > dueDate) {
-            const daysPastDue = Math.floor(
-              (now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24),
-            );
-            //Demo
             // const daysPastDue = Math.floor(
-            //   (now.getTime() - dueDate.getTime()) / (1000 * 60),
+            //   (now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24),
             // );
+            //Demo
+            const daysPastDue = Math.floor(
+              (now.getTime() - dueDate.getTime()) / (1000 * 60),
+            );
 
             if (daysPastDue > 0) {
               this.logger.log(
@@ -793,30 +839,67 @@ export class AutomatedPenaltyService {
       // Check escrow balance before applying penalty
       const escrowBalance = await this.checkEscrowBalance(contract.id);
 
-      // If penalty would exceed escrow balance or contract should be terminated
-      if (
-        !penaltyInfo.canContinue ||
-        (escrowBalance && penaltyInfo.amount > escrowBalance.tenantBalance)
-      ) {
+      // Determine actual penalty amount to deduct and whether to terminate
+      let actualPenaltyAmount = penaltyInfo.amount;
+      let shouldTerminate = false;
+      let terminationReason = '';
+
+      // Check if contract should be terminated due to excessive penalties (30% rule)
+      if (!penaltyInfo.canContinue) {
+        shouldTerminate = true;
+        terminationReason = `Tổng phạt vượt quá 30% giá trị hợp đồng. Penalty: ${penaltyInfo.amount.toLocaleString('vi-VN')} VND`;
         this.logger.warn(
-          `⚠️ Penalty exceeds limits for contract ${contract.contractCode} period ${period}. Initiating contract termination.`,
+          `⚠️ Penalty exceeds 30% rule for contract ${contract.contractCode} period ${period}. Will deduct available balance and terminate.`,
+        );
+      }
+
+      // Check if penalty exceeds escrow balance
+      if (escrowBalance && penaltyInfo.amount > escrowBalance.tenantBalance) {
+        // Deduct all available balance instead of full penalty
+        actualPenaltyAmount = escrowBalance.tenantBalance;
+        shouldTerminate = true;
+        terminationReason = `Không đủ tiền cọc để trả phạt. Penalty yêu cầu: ${penaltyInfo.amount.toLocaleString('vi-VN')} VND, Số dư khả dụng: ${escrowBalance.tenantBalance.toLocaleString('vi-VN')} VND. Đã trừ hết số dư.`;
+
+        this.logger.warn(
+          `⚠️ Penalty (${penaltyInfo.amount.toLocaleString('vi-VN')} VND) exceeds escrow balance (${escrowBalance.tenantBalance.toLocaleString('vi-VN')} VND) for contract ${contract.contractCode} period ${period}. Will deduct available balance and terminate.`,
+        );
+      }
+
+      // Deduct the actual penalty amount (either full penalty or available balance)
+      if (actualPenaltyAmount > 0) {
+        await this.deductFromEscrow(
+          contract.id,
+          actualPenaltyAmount,
+          `Monthly payment period ${period} overdue by ${daysPastDue} days - Deducted: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND`,
+        );
+      }
+
+      // Terminate contract if needed (after deducting available funds)
+      if (shouldTerminate) {
+        this.logger.warn(
+          `⚠️ Terminating contract ${contract.contractCode} period ${period} after deducting available funds.`,
         );
 
-        // Initiate contract termination process
         await this.terminateContractForInsufficientFunds(
           contract.id,
           '', // No bookingId for monthly payments
-          `Insufficient escrow funds to cover penalties. Total penalty: ${penaltyInfo.amount.toLocaleString('vi-VN')} VND`,
+          terminationReason,
         );
 
-        return null;
-      }
+        // Still return penalty application to record what was deducted
+        const penaltyApplication: PenaltyApplication = {
+          contractId: contract.id,
+          bookingId: '',
+          tenantId: contract.tenant.id,
+          daysPastDue,
+          originalAmount: originalAmount,
+          penaltyAmount: actualPenaltyAmount,
+          reason: `${terminationReason}. Contract terminated after deducting available funds.`,
+          appliedAt: vnNow(),
+        };
 
-      await this.deductFromEscrow(
-        contract.id,
-        penaltyInfo.amount,
-        `Monthly payment period ${period} overdue by ${daysPastDue} days`,
-      );
+        return penaltyApplication;
+      }
 
       // Create system user for blockchain operations
       const systemUser = {
@@ -828,26 +911,26 @@ export class AutomatedPenaltyService {
       if (isFirstPenalty) {
         // First penalty: Use applyPenalty to mark the payment period as penalized
         this.logger.log(
-          `🥇 First penalty for contract ${contract.contractCode} period ${period} - using applyPenalty`,
+          `🥇 First penalty for contract ${contract.contractCode} period ${period} - using applyPenalty - Amount: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND`,
         );
         await this.blockchainService.applyPenalty(
           contract.contractCode,
           period,
-          penaltyInfo.amount.toString(),
+          actualPenaltyAmount.toString(),
           'MONTHLY_PAYMENT_OVERDUE',
-          `Monthly payment period ${period} overdue by ${daysPastDue} days - First penalty`,
+          `Monthly payment period ${period} overdue by ${daysPastDue} days - First penalty - Deducted: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND`,
           systemUser,
         );
       } else {
         // Subsequent penalties: Use recordPenalty for daily tracking
         this.logger.log(
-          `📅 Daily penalty for contract ${contract.contractCode} period ${period} - using recordPenalty`,
+          `📅 Daily penalty for contract ${contract.contractCode} period ${period} - using recordPenalty - Amount: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND`,
         );
         await this.recordPenaltyOnBlockchain(
-          contract.id,
+          contract.contractCode,
           'tenant',
-          penaltyInfo.amount,
-          `Monthly payment period ${period} overdue by ${daysPastDue} days - Daily penalty`,
+          actualPenaltyAmount,
+          `Monthly payment period ${period} overdue by ${daysPastDue} days - Daily penalty - Deducted: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND`,
         );
       }
 
@@ -860,9 +943,9 @@ export class AutomatedPenaltyService {
         overdueDate: new Date(), // Current date as overdue date for tracking
         daysPastDue: daysPastDue,
         originalAmount: originalAmount,
-        penaltyAmount: penaltyInfo.amount,
+        penaltyAmount: actualPenaltyAmount, // Use actual deducted amount
         penaltyRate: 3, // 3% per day
-        reason: `Monthly payment period ${period} overdue by ${daysPastDue} days - Daily penalty`,
+        reason: `Monthly payment period ${period} overdue by ${daysPastDue} days - Deducted: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND${actualPenaltyAmount < penaltyInfo.amount ? ' (Insufficient balance)' : ''}`,
         appliedBy: 'system',
       });
 
@@ -873,22 +956,23 @@ export class AutomatedPenaltyService {
       await this.sendMonthlyPaymentPenaltyNotifications(
         contract,
         period,
-        penaltyInfo.amount,
+        actualPenaltyAmount, // Use actual deducted amount for notifications
         daysPastDue,
       );
+
       const penaltyApplication: PenaltyApplication = {
         contractId: contract.id,
         bookingId: '', // Monthly payments don't have booking reference
         tenantId: contract.tenant.id,
         daysPastDue,
         originalAmount: originalAmount,
-        penaltyAmount: penaltyInfo.amount,
-        reason: `Monthly payment period ${period} overdue by ${daysPastDue} days`,
+        penaltyAmount: actualPenaltyAmount, // Use actual deducted amount
+        reason: `Monthly payment period ${period} overdue by ${daysPastDue} days - Deducted: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND${actualPenaltyAmount < penaltyInfo.amount ? ' (Insufficient balance)' : ''}`,
         appliedAt: vnNow(),
       };
 
       this.logger.log(
-        `✅ Successfully applied monthly penalty for contract ${contract.contractCode} period ${period}`,
+        `✅ Successfully applied monthly penalty for contract ${contract.contractCode} period ${period} - Amount: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND`,
       );
       return penaltyApplication;
     } catch (error) {
@@ -1110,6 +1194,7 @@ export class AutomatedPenaltyService {
    * Get rent amount from blockchain contract, fallback to provided default
    */
   private async getRentAmountFromBlockchain(
+    tenantId: string,
     contractId: string,
     fallbackAmount: number,
   ): Promise<number> {
@@ -1128,8 +1213,8 @@ export class AutomatedPenaltyService {
 
       // Create system user for blockchain operations
       const systemUser = {
-        userId: 'system',
-        orgName: 'OrgProp',
+        userId: tenantId,
+        orgName: 'OrgTenant',
         mspId: 'OrgPropMSP',
       };
 
@@ -1175,8 +1260,8 @@ export class AutomatedPenaltyService {
       this.logger.log('🏠 Checking for overdue handovers...');
 
       const now = vnNow();
-      const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
+      //const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 1000); //Demo: 24 minutes ago
       // Find bookings that are READY_FOR_HANDOVER and first rent was paid more than 24 hours ago
       const overdueHandovers = await this.bookingRepository.find({
         where: {
@@ -1192,10 +1277,13 @@ export class AutomatedPenaltyService {
           booking.firstRentPaidAt &&
           booking.firstRentPaidAt <= twentyFourHoursAgo
         ) {
+          // const hoursOverdue = Math.floor(
+          //   (now.getTime() - booking.firstRentPaidAt.getTime()) /
+          //     (1000 * 60 * 60),
+          // );
           const hoursOverdue = Math.floor(
-            (now.getTime() - booking.firstRentPaidAt.getTime()) /
-              (1000 * 60 * 60),
-          );
+            (now.getTime() - booking.firstRentPaidAt.getTime()) / (1000 * 60),
+          ); //Demo: minutes
 
           if (hoursOverdue >= 24) {
             this.logger.log(
@@ -1411,7 +1499,7 @@ export class AutomatedPenaltyService {
 
       // Record penalty on blockchain
       await this.recordPenaltyOnBlockchain(
-        booking.contractId,
+        booking.contract?.contractCode || booking.contractId,
         'landlord',
         penaltyAmount,
         reason,
@@ -1513,6 +1601,176 @@ export class AutomatedPenaltyService {
     } catch (error) {
       this.logger.error(
         '❌ Failed to send handover penalty notifications:',
+        error,
+      );
+    }
+  }
+
+  /**
+   * Check for low escrow balance and send warning notifications
+   * Warns tenant when balance < 3x expected penalty amount
+   */
+  async checkLowEscrowBalance(): Promise<void> {
+    try {
+      this.logger.log('🔍 Checking for low escrow balances...');
+
+      // 1. Find all active contracts
+      const activeContracts = await this.contractRepository.find({
+        where: {
+          status: ContractStatusEnum.ACTIVE,
+        },
+        relations: ['tenant', 'landlord', 'property'],
+      });
+
+      let warningsCount = 0;
+
+      for (const contract of activeContracts) {
+        try {
+          // 2. Check escrow balance
+          const escrowBalance = await this.checkEscrowBalance(contract.id);
+          if (!escrowBalance || escrowBalance.tenantBalance <= 0) {
+            continue; // Skip if no escrow or zero balance
+          }
+
+          // 3. Calculate expected penalty (3% per day for 1 day)
+          const rentAmount = await this.getRentAmountFromBlockchain(
+            contract.tenant.id,
+            contract.id,
+            contract.property?.price || 10000000,
+          );
+
+          // Calculate daily penalty rate (3% per day)
+          const dailyPenalty = Math.floor((rentAmount * 3) / 100);
+
+          // Warning threshold: 3x daily penalty amount
+          const warningThreshold = dailyPenalty * 3;
+
+          // 4. Send warning if balance < threshold
+          if (escrowBalance.tenantBalance < warningThreshold) {
+            const daysRemaining = Math.floor(
+              escrowBalance.tenantBalance / dailyPenalty,
+            );
+
+            // Check if warning already sent today to avoid spam
+            const today = vnNow();
+            const startOfToday = new Date(
+              today.getFullYear(),
+              today.getMonth(),
+              today.getDate(),
+            );
+            const endOfToday = new Date(
+              today.getFullYear(),
+              today.getMonth(),
+              today.getDate() + 1,
+            );
+
+            const existingWarning = await this.penaltyRecordRepository
+              .createQueryBuilder('penalty')
+              .where('penalty.contractId = :contractId', {
+                contractId: contract.id,
+              })
+              .andWhere('penalty.penaltyType = :penaltyType', {
+                penaltyType: 'OTHER',
+              })
+              .andWhere('penalty.reason LIKE :reason', {
+                reason: '%Low balance warning%',
+              })
+              .andWhere('penalty.appliedAt >= :startOfToday', { startOfToday })
+              .andWhere('penalty.appliedAt < :endOfToday', { endOfToday })
+              .getOne();
+
+            if (!existingWarning) {
+              await this.sendLowBalanceWarning(
+                contract,
+                escrowBalance.tenantBalance,
+                warningThreshold,
+                daysRemaining,
+                dailyPenalty,
+              );
+
+              // Record warning to avoid duplicate notifications
+              await this.recordPenaltyInDatabase({
+                contractId: contract.id,
+                tenantId: contract.tenant.id,
+                penaltyType: 'OTHER',
+                overdueDate: today,
+                daysPastDue: 0,
+                originalAmount: rentAmount,
+                penaltyAmount: 0, // No actual penalty, just warning
+                penaltyRate: 0,
+                reason: `Low balance warning: ${escrowBalance.tenantBalance.toLocaleString('vi-VN')} VND < ${warningThreshold.toLocaleString('vi-VN')} VND threshold`,
+                appliedBy: 'system',
+              });
+
+              warningsCount++;
+              this.logger.log(
+                `⚠️ Sent low balance warning for contract ${contract.contractCode}: Balance ${escrowBalance.tenantBalance.toLocaleString('vi-VN')} VND < Threshold ${warningThreshold.toLocaleString('vi-VN')} VND`,
+              );
+            }
+          }
+        } catch (error) {
+          this.logger.error(
+            `❌ Failed to check balance for contract ${contract.id}:`,
+            error,
+          );
+        }
+      }
+
+      this.logger.log(
+        `✅ Completed low escrow balance check: ${warningsCount} warnings sent for ${activeContracts.length} contracts`,
+      );
+    } catch (error) {
+      this.logger.error('❌ Failed to check low escrow balances:', error);
+    }
+  }
+
+  /**
+   * Send low balance warning notifications
+   */
+  private async sendLowBalanceWarning(
+    contract: Contract,
+    currentBalance: number,
+    threshold: number,
+    daysRemaining: number,
+    dailyPenalty: number,
+  ): Promise<void> {
+    try {
+      const tenantId = contract.tenant.id;
+      const landlordId = contract.landlord.id;
+
+      // Calculate recommended top-up amount (to reach 7 days of penalties)
+      const recommendedTopUp = dailyPenalty * 7 - currentBalance;
+
+      // Notify tenant with actionable warning
+      await this.notificationService.create({
+        userId: tenantId,
+        type: NotificationTypeEnum.PAYMENT,
+        title: '⚠️ Cảnh báo số dư escrow thấp',
+        content: `Số dư escrow của bạn (${currentBalance.toLocaleString('vi-VN')} VND) đang thấp hơn ngưỡng an toàn (${threshold.toLocaleString('vi-VN')} VND). 
+        
+Với mức phạt hiện tại ${dailyPenalty.toLocaleString('vi-VN')} VND/ngày, số dư chỉ đủ cho ${daysRemaining} ngày phạt.
+
+⚠️ NGUY CƠ: Nếu thanh toán trễ và số dư không đủ trả phạt, hợp đồng sẽ bị hủy tự động!
+
+💡 ĐỀ XUẤT: Nộp thêm ${recommendedTopUp > 0 ? recommendedTopUp.toLocaleString('vi-VN') : '0'} VND để đảm bảo an toàn cho 7 ngày.`,
+      });
+
+      // Notify landlord for awareness
+      await this.notificationService.create({
+        userId: landlordId,
+        type: NotificationTypeEnum.GENERAL,
+        title: '💰 Số dư escrow tenant thấp',
+        content: `Tenant ${contract.tenant.fullName} có số dư escrow thấp (${currentBalance.toLocaleString('vi-VN')} VND) cho căn hộ ${contract.property.title}. 
+        
+Có nguy cơ hợp đồng bị hủy nếu tenant thanh toán trễ và không đủ tiền trả phạt. Bạn có thể nhắc nhở tenant nộp thêm tiền cọc.`,
+      });
+
+      this.logger.log(
+        `📨 Sent low balance warnings for contract ${contract.contractCode}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        '❌ Failed to send low balance warning notifications:',
         error,
       );
     }
