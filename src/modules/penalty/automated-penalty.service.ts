@@ -115,6 +115,7 @@ export class AutomatedPenaltyService {
       }
 
       // Calculate penalty based on Vietnam legal requirements
+      // Ngày 1-2: Phạt 3% mỗi ngày
       const penaltyInfo = this.calculateOverduePenalty(
         daysPastDue,
         actualRentAmount,

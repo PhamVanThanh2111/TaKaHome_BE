@@ -443,7 +443,7 @@ export class ContractExtensionService {
       const signResult = await this.smartcaService.signPdfOneShot({
         pdfBuffer: filledPdfBuffer,
         signatureIndex: 0,
-        userIdOverride: landlord?.CCCD,
+        userIdOverride: (signingOption ?? 'SELF_CA').toUpperCase() === 'SELF_CA' ? userId : landlord?.CCCD,
         contractId: extension.contract.id,
         intervalMs: 2000,
         timeoutMs: 120000,
@@ -567,7 +567,7 @@ export class ContractExtensionService {
       const signResult = await this.smartcaService.signPdfOneShot({
         pdfBuffer: landlordSignedPdf,
         signatureIndex: 1,
-        userIdOverride: tenant?.CCCD,
+        userIdOverride: (signingOption ?? 'SELF_CA').toUpperCase() === 'SELF_CA' ? userId : tenant?.CCCD,
         contractId: extension.contract.id,
         intervalMs: 2000,
         timeoutMs: 120000,
