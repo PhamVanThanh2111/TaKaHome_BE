@@ -16,7 +16,7 @@ import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
 import { Contract } from './entities/contract.entity';
-import { ExtensionStatus } from './entities/contract-extension.entity';
+import { ContractExtension, ExtensionStatus } from './entities/contract-extension.entity';
 import {
   ContractTerminationService,
   TerminationResult,
@@ -35,6 +35,8 @@ export class ContractService {
   constructor(
     @InjectRepository(Contract)
     private contractRepository: Repository<Contract>,
+    @InjectRepository(ContractExtension)
+    private extensionRepository: Repository<ContractExtension>,
     private blockchainService: BlockchainService,
     private s3StorageService: S3StorageService,
     private terminationService: ContractTerminationService,
@@ -1010,63 +1012,59 @@ export class ContractService {
    * Mark tenant extension escrow as funded
    */
   async markExtensionTenantEscrowFunded(extensionId: string): Promise<void> {
-    const extension = await this.contractRepository
-      .createQueryBuilder('contract')
-      .leftJoinAndSelect('contract.extensions', 'extension')
-      .where('extension.id = :extensionId', { extensionId })
-      .getOne();
+    const extension = await this.extensionRepository.findOne({
+      where: { id: extensionId },
+      relations: ['contract'],
+    });
 
-    const ext = extension?.extensions?.find((e) => e.id === extensionId);
-    if (!ext) {
+    if (!extension) {
       throw new NotFoundException('Extension not found');
     }
 
-    ext.tenantEscrowDepositFundedAt = vnNow();
+    extension.tenantEscrowDepositFundedAt = vnNow();
 
     // Check if both escrows are funded
-    if (ext.landlordEscrowDepositFundedAt) {
-      ext.status = ExtensionStatus.ACTIVE;
-      ext.activatedAt = vnNow();
+    if (extension.landlordEscrowDepositFundedAt) {
+      extension.status = ExtensionStatus.ACTIVE;
+      extension.activatedAt = vnNow();
       // Apply extension to contract
-      await this.contractExtensionService.applyExtension(ext);
+      await this.contractExtensionService.applyExtension(extension);
     } else {
-      ext.status = ExtensionStatus.ESCROW_FUNDED_T;
+      extension.status = ExtensionStatus.ESCROW_FUNDED_T;
     }
 
     await this.contractRepository.manager
       .getRepository('ContractExtension')
-      .save(ext);
+      .save(extension);
   }
 
   /**
    * Mark landlord extension escrow as funded
    */
   async markExtensionLandlordEscrowFunded(extensionId: string): Promise<void> {
-    const extension = await this.contractRepository
-      .createQueryBuilder('contract')
-      .leftJoinAndSelect('contract.extensions', 'extension')
-      .where('extension.id = :extensionId', { extensionId })
-      .getOne();
+    const extension = await this.extensionRepository.findOne({
+      where: { id: extensionId },
+      relations: ['contract'],
+    });
 
-    const ext = extension?.extensions?.find((e) => e.id === extensionId);
-    if (!ext) {
+    if (!extension) {
       throw new NotFoundException('Extension not found');
     }
 
-    ext.landlordEscrowDepositFundedAt = vnNow();
+    extension.landlordEscrowDepositFundedAt = vnNow();
 
     // Check if both escrows are funded
-    if (ext.tenantEscrowDepositFundedAt) {
-      ext.status = ExtensionStatus.ACTIVE;
-      ext.activatedAt = vnNow();
+    if (extension.tenantEscrowDepositFundedAt) {
+      extension.status = ExtensionStatus.ACTIVE;
+      extension.activatedAt = vnNow();
       // Apply extension to contract
-      await this.contractExtensionService.applyExtension(ext);
+      await this.contractExtensionService.applyExtension(extension);
     } else {
-      ext.status = ExtensionStatus.ESCROW_FUNDED_L;
+      extension.status = ExtensionStatus.ESCROW_FUNDED_L;
     }
 
     await this.contractRepository.manager
       .getRepository('ContractExtension')
-      .save(ext);
+      .save(extension);
   }
 }
