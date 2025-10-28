@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -326,6 +327,13 @@ export class InvoiceService {
     return `INV-${yyyymmdd}-${rand}`;
   }
 
+  private isValidProjectId(projectId: string): boolean {
+    // Google Cloud project IDs must be between 6 and 30 characters
+    // and can only contain lowercase letters, numbers, and hyphens
+    const regex = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
+    return regex.test(projectId);
+  }
+
   private ensureStatus(invoice: Invoice, expected: InvoiceStatusEnum[]) {
     if (!expected.includes(invoice.status)) {
       throw new BadRequestException(
@@ -343,75 +351,78 @@ export class InvoiceService {
 
   // ---- Google Document AI methods ----
   async processInvoiceImage(
-    _imageBuffer: Buffer,
-    _mimeType: string,
+    imageBuffer: Buffer,
+    mimeType: string,
   ): Promise<ResponseCommon<ProcessInvoiceResponseDto>> {
     try {
       // Mark parameters as used to satisfy linter in mock mode
-      void _imageBuffer;
-      void _mimeType;
+      // void _imageBuffer;
+      // void _mimeType;
       // NOTE: Temporarily using a mock implementation to avoid incurring
       // Google Document AI calls while testing / on CI/deploy environments.
       // The original live request has been commented out below for reference.
 
       // ----- Live Document AI call (commented) -----
       // Kiểm tra cấu hình Google Cloud
-      // if (!this.documentAIClient) {
-      //   throw new Error('Google Document AI chưa được cấu hình. Sử dụng dữ liệu mẫu.');
-      // }
-      //
-      // if (!this.processorId) {
-      //   throw new Error('Processor ID chưa được cấu hình. Sử dụng dữ liệu mẫu.');
-      // }
-      //
-      // // Kiểm tra project ID format
-      // const projectId = this.configService.get<string>('GOOGLE_CLOUD_PROJECT_ID');
-      // if (!projectId || !this.isValidProjectId(projectId)) {
-      //   throw new Error('Project ID không hợp lệ. Sử dụng dữ liệu mẫu.');
-      // }
-      //
-      // const encodedImage = imageBuffer.toString('base64');
-      //
-      // // Tạo promise với timeout để tránh hang
-      // const processPromise = this.documentAIClient.processDocument({
-      //   name: this.processorId,
-      //   rawDocument: {
-      //     content: encodedImage,
-      //     mimeType: mimeType,
-      //   },
-      // });
-      //
-      // // Thêm timeout wrapper
-      // const timeoutPromise = new Promise((_, reject) =>
-      //   setTimeout(() => reject(new Error('Request timeout after 25 seconds')), 25000)
-      // );
-      //
-      // const result = await Promise.race([processPromise, timeoutPromise]) as any;
-      // const [processResult] = result as any[];
-      //
-      // const entities = processResult?.document?.entities || [];
-      //
-      // const extractedData = Array.isArray(entities) ? entities.map((entity: any) => ({
-      //   name: entity?.type || 'unknown',
-      //   value: entity?.mentionText || entity?.normalizedValue?.text || 'N/A',
-      //   confidence: entity?.confidence || 0,
-      // })) : [];
-      //
-      // // Trả về response với rawData đã được simplified để tránh quá lớn
-      // return {
-      //   status: 'success',
-      //   message: 'Xử lý hóa đơn thành công',
-      //   extractedData,
-      //   rawData: {
-      //     entitiesCount: extractedData.length,
-      //     documentText: processResult?.document?.text?.substring(0, 500) + '...' || 'N/A',
-      //     processedAt: new Date().toISOString(),
-      //   },
-      // };
+      if (!this.documentAIClient) {
+        throw new Error('Google Document AI chưa được cấu hình. Sử dụng dữ liệu mẫu.');
+      }
+      
+      if (!this.processorId) {
+        throw new Error('Processor ID chưa được cấu hình. Sử dụng dữ liệu mẫu.');
+      }
+      
+      // Kiểm tra project ID format
+      const projectId = this.configService.get<string>('GOOGLE_CLOUD_PROJECT_ID');
+      if (!projectId || !this.isValidProjectId(projectId)) {
+        throw new Error('Project ID không hợp lệ. Sử dụng dữ liệu mẫu.');
+      }
+      
+      const encodedImage = imageBuffer.toString('base64');
+      
+      // Tạo promise với timeout để tránh hang
+      const processPromise = this.documentAIClient.processDocument({
+        name: this.processorId,
+        rawDocument: {
+          content: encodedImage,
+          mimeType: mimeType,
+        },
+      });
+      
+      // Thêm timeout wrapper
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Request timeout after 25 seconds')), 25000)
+      );
+      
+      const result = await Promise.race([processPromise, timeoutPromise]) as any;
+      const [processResult] = result as any[];
+      
+      const entities = (processResult?.document?.entities || []) as any[];
+      
+      const extractedData = Array.isArray(entities) ? entities.map((entity: any) => ({
+        name: (entity?.type as string) || 'unknown',
+        value: (entity?.mentionText as string) || (entity?.normalizedValue?.text as string) || 'N/A',
+        confidence: (entity?.confidence as number) || 0,
+      })) : [];
+      
+      // Trả về response với rawData đã được simplified để tránh quá lớn
+      const documentText = processResult?.document?.text as string | undefined;
+      return new ResponseCommon(
+        200,
+        'Xử lý hóa đơn thành công',
+        {
+          extractedData,
+          rawData: {
+            entitiesCount: extractedData.length,
+            documentText: documentText ? documentText.substring(0, 500) + '...' : 'N/A',
+            processedAt: new Date().toISOString(),
+          },
+        },
+      );
 
       // ----- Mock response (used instead of live Document AI) -----
       // Keep function async-compatible by returning a resolved Promise
-      return Promise.resolve(this.mockProcessInvoiceResponse());
+      // return Promise.resolve(this.mockProcessInvoiceResponse());
     } catch (error) {
       console.error('Lỗi khi xử lý hóa đơn với Google Document AI:', error);
       // Trả về response lỗi để đảm bảo hàm luôn có return theo kiểu ProcessInvoiceResponseDto
