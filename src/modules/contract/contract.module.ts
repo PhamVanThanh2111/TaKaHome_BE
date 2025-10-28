@@ -29,7 +29,7 @@ import { SmartCAModule } from '../smartca/smartca.module';
       User,
       Escrow,
       Property,
-      Room,
+      Room, 
     ]),
     BlockchainModule,
     S3StorageModule,
@@ -48,6 +48,7 @@ import { SmartCAModule } from '../smartca/smartca.module';
   ],
   exports: [
     ContractService,
+    ContractExtensionService,
     ContractTerminationService,
     PdfFillService,
     TypeOrmModule,
