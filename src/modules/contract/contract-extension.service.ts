@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -25,9 +26,12 @@ import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { User } from '../user/entities/user.entity';
 import { BlockchainService } from '../blockchain/blockchain.service';
 import { PdfFillService, PdfTemplateType } from './pdf-fill.service';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class ContractExtensionService {
+  private readonly logger = new Logger(ContractExtensionService.name);
+
   constructor(
     @InjectRepository(ContractExtension)
     private extensionRepository: Repository<ContractExtension>,
@@ -237,7 +241,7 @@ export class ContractExtensionService {
         ((d) => (d.setDate(d.getDate() + 1), d))(new Date()).toISOString(),
         // contract.endDate.toISOString(), // newEndDate
         newRentAmount.toString(), // newRentAmount
-        extension.extensionContractFileUrl || '', // extensionAgreementHash (URL của hợp đồng gia hạn)
+        (await this.hashExtensionDocument(extension)) || '', // extensionAgreementHash (URL của hợp đồng gia hạn)
         extension.requestNote || 'Contract extension', // extensionNotes
         blockchainUser,
       );
@@ -319,7 +323,57 @@ export class ContractExtensionService {
       );
     }
   }
+  async hashExtensionDocument(extension: ContractExtension): Promise<string> {
+    // Nếu có contractFileUrl (file PDF đã ký), hash từ file thực tế
+    if (extension.extensionContractFileUrl) {
+      try {
+        // Extract S3 key từ URL và download file
+        const s3Key = this.s3StorageService.extractKeyFromUrl(
+          extension.extensionContractFileUrl,
+        );
+        const pdfBuffer = await this.s3StorageService.downloadFile(s3Key);
 
+        // Hash toàn bộ file PDF đã ký
+        const fileHash = crypto
+          .createHash('sha256')
+          .update(pdfBuffer)
+          .digest('hex');
+
+        this.logger.log(
+          `📄 Generated hash from signed PDF file for contract ${extension.contract.contractCode}: ${fileHash.substring(0, 16)}...`,
+        );
+        return fileHash;
+      } catch (error) {
+        this.logger.warn(
+          `⚠️ Failed to hash PDF file for contract ${extension.contract.contractCode}, falling back to metadata hash:`,
+          error instanceof Error ? error.message : error,
+        );
+        // Fallback về hash metadata nếu không thể download file
+      }
+    }
+
+    // Fallback: Hash từ contract metadata (như cũ)
+    const contractData = {
+      contractCode: extension.contract.contractCode,
+      landlordId: extension.contract.landlord?.id,
+      tenantId: extension.contract.tenant?.id,
+      propertyId: extension.contract.property?.id,
+      startDate: extension.contract.startDate?.toISOString(),
+      endDate: extension.contract.endDate?.toISOString(),
+      status: extension.contract.status,
+    };
+
+    const dataString = JSON.stringify(contractData);
+    const metadataHash = crypto
+      .createHash('sha256')
+      .update(dataString)
+      .digest('hex');
+
+    this.logger.log(
+      `📋 Generated hash from contract metadata for contract ${extension.contract.contractCode}: ${metadataHash.substring(0, 16)}...`,
+    );
+    return metadataHash;
+  }
   async getContractExtensions(
     contractId: string,
     userId: string,
