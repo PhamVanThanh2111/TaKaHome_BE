@@ -16,7 +16,10 @@ import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
 import { Contract } from './entities/contract.entity';
-import { ContractExtension, ExtensionStatus } from './entities/contract-extension.entity';
+import {
+  ContractExtension,
+  ExtensionStatus,
+} from './entities/contract-extension.entity';
 import {
   ContractTerminationService,
   TerminationResult,
@@ -1014,7 +1017,14 @@ export class ContractService {
   async markExtensionTenantEscrowFunded(extensionId: string): Promise<void> {
     const extension = await this.extensionRepository.findOne({
       where: { id: extensionId },
-      relations: ['contract'],
+      relations: [
+        'contract',
+        'contract.tenant',
+        'contract.landlord',
+        'contract.property',
+        'contract.room',
+        'contract.room.roomType',
+      ],
     });
 
     if (!extension) {
@@ -1044,7 +1054,14 @@ export class ContractService {
   async markExtensionLandlordEscrowFunded(extensionId: string): Promise<void> {
     const extension = await this.extensionRepository.findOne({
       where: { id: extensionId },
-      relations: ['contract'],
+      relations: [
+        'contract',
+        'contract.tenant',
+        'contract.landlord',
+        'contract.property',
+        'contract.room',
+        'contract.room.roomType',
+      ],
     });
 
     if (!extension) {
