@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   Injectable,
   NotFoundException,
@@ -26,9 +24,6 @@ import { Escrow } from '../escrow/entities/escrow.entity';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { User } from '../user/entities/user.entity';
 import { BlockchainService } from '../blockchain/blockchain.service';
-import * as path from 'path';
-import * as fs from 'fs';
-// path/fs imports removed - not needed after template filling via PdfFillService
 import { PdfFillService, PdfTemplateType } from './pdf-fill.service';
 
 @Injectable()
