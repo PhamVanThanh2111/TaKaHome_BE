@@ -239,9 +239,7 @@ export class ContractExtensionService {
 
       const recordResult = await this.blockchainService.recordContractExtension(
         contract.contractCode,
-        ((d) => (d.setDate(d.getDate() + 5), d))(
-          new Date(contract.updatedAt),
-        ).toISOString(),
+        ((d) => (d.setDate(d.getDate() + 1), d))(new Date()).toISOString(),
         // contract.endDate.toISOString(), // newEndDate
         newRentAmount.toString(), // newRentAmount
         extension.extensionContractFileUrl || '', // extensionAgreementHash (URL của hợp đồng gia hạn)
@@ -575,7 +573,10 @@ export class ContractExtensionService {
       const signResult = await this.smartcaService.signPdfOneShot({
         pdfBuffer: filledPdfBuffer,
         signatureIndex: 0,
-        userIdOverride: (signingOption ?? 'SELF_CA').toUpperCase() === 'SELF_CA' ? userId : landlord?.CCCD,
+        userIdOverride:
+          (signingOption ?? 'SELF_CA').toUpperCase() === 'SELF_CA'
+            ? userId
+            : landlord?.CCCD,
         contractId: extension.contract.id,
         intervalMs: 2000,
         timeoutMs: 120000,
@@ -699,7 +700,10 @@ export class ContractExtensionService {
       const signResult = await this.smartcaService.signPdfOneShot({
         pdfBuffer: landlordSignedPdf,
         signatureIndex: 1,
-        userIdOverride: (signingOption ?? 'SELF_CA').toUpperCase() === 'SELF_CA' ? userId : tenant?.CCCD,
+        userIdOverride:
+          (signingOption ?? 'SELF_CA').toUpperCase() === 'SELF_CA'
+            ? userId
+            : tenant?.CCCD,
         contractId: extension.contract.id,
         intervalMs: 2000,
         timeoutMs: 120000,
