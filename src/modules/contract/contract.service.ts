@@ -27,6 +27,7 @@ import {
   DisputeDetails,
 } from './dispute-handling.service';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ContractExtensionService } from './contract-extension.service';
 
 @Injectable()
 export class ContractService {
@@ -39,6 +40,7 @@ export class ContractService {
     private s3StorageService: S3StorageService,
     private terminationService: ContractTerminationService,
     private disputeService: DisputeHandlingService,
+    private contractExtensionService: ContractExtensionService,
   ) {}
 
   async create(
@@ -1027,7 +1029,7 @@ export class ContractService {
       ext.status = ExtensionStatus.ACTIVE;
       ext.activatedAt = vnNow();
       // Apply extension to contract
-      await this.applyActiveExtension(extension!.id, ext);
+      await this.contractExtensionService.applyExtension(ext);
     } else {
       ext.status = ExtensionStatus.ESCROW_FUNDED_T;
     }
@@ -1059,7 +1061,7 @@ export class ContractService {
       ext.status = ExtensionStatus.ACTIVE;
       ext.activatedAt = vnNow();
       // Apply extension to contract
-      await this.applyActiveExtension(extension!.id, ext);
+      await this.contractExtensionService.applyExtension(ext);
     } else {
       ext.status = ExtensionStatus.ESCROW_FUNDED_L;
     }
@@ -1067,27 +1069,5 @@ export class ContractService {
     await this.contractRepository.manager
       .getRepository('ContractExtension')
       .save(ext);
-  }
-
-  /**
-   * Apply active extension to contract (update endDate and pricing)
-   */
-  private async applyActiveExtension(
-    contractId: string,
-    extension: any,
-  ): Promise<void> {
-    const contract = await this.contractRepository.findOne({
-      where: { id: contractId },
-    });
-
-    if (!contract) {
-      throw new NotFoundException('Contract not found');
-    }
-
-    // Gia hạn contract
-    const newEndDate = addMonthsFn(contract.endDate, extension.extensionMonths);
-    contract.endDate = newEndDate;
-
-    await this.contractRepository.save(contract);
   }
 }

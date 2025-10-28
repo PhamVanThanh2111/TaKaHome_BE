@@ -187,7 +187,7 @@ export class ContractExtensionService {
     );
   }
 
-  private async applyExtension(extension: ContractExtension): Promise<void> {
+  async applyExtension(extension: ContractExtension): Promise<void> {
     const contract = extension.contract;
 
     // Gia hạn contract
