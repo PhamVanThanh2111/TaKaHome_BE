@@ -761,9 +761,29 @@ export class PropertyService {
         targetRoomType = existingRoomType;
       }
 
+      // Store old RoomType before moving
+      const oldRoomType = room.roomType;
+      const oldRoomTypeId = oldRoomType?.id;
+
       // Perform move
       room.roomType = targetRoomType;
       await this.roomRepository.save(room);
+
+      // Check if old RoomType should be deleted (if no rooms depend on it anymore)
+      if (oldRoomTypeId && oldRoomTypeId !== targetRoomType.id) {
+        // Count remaining rooms using this old RoomType
+        const remainingRooms = await this.roomRepository.count({
+          where: { roomType: { id: oldRoomTypeId } },
+        });
+
+        // If no rooms depend on old RoomType, delete it
+        if (remainingRooms === 0) {
+          await this.roomTypeRepository.delete(oldRoomTypeId);
+          console.log(
+            `Deleted RoomType ${oldRoomTypeId} as no rooms depend on it anymore`,
+          );
+        }
+      }
 
       const result = await this.roomRepository.findOne({
         where: { id: roomId },
