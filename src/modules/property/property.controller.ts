@@ -15,6 +15,7 @@ import {
 import { PropertyService } from './property.service';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
+import { UpdateApartmentDto } from './dto/update-apartment.dto';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -323,6 +324,35 @@ export class PropertyController {
     @Body() updatePropertyDto: UpdatePropertyDto,
   ) {
     return this.propertyService.update(id, updatePropertyDto);
+  }
+
+  @Patch('apartment/:id')
+  @ApiOperation({
+    summary: 'Cập nhật thông tin căn hộ (APARTMENT type)',
+    description:
+      'API riêng cho cập nhật thông tin căn hộ, chỉ cho phép các fields phù hợp với loại APARTMENT',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    type: PropertyResponseDto,
+    description: 'Cập nhật thành công',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Property không phải loại APARTMENT hoặc request không hợp lệ',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Không tìm thấy property với ID này',
+  })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'LANDLORD')
+  updateApartment(
+    @Param('id') id: string,
+    @Body() updateApartmentDto: UpdateApartmentDto,
+  ) {
+    return this.propertyService.updateApartment(id, updateApartmentDto);
   }
 
   @Delete(':id')

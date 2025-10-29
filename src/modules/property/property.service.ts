@@ -10,6 +10,7 @@ import { BookingStatus } from '../common/enums/booking-status.enum';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { CreateRoomTypeDto } from './dto/create-room-type.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
+import { UpdateApartmentDto } from './dto/update-apartment.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { FilterPropertyDto } from './dto/filter-property.dto';
 import { FilterPropertyWithUrlDto } from './dto/filter-property-with-url.dto';
@@ -630,6 +631,89 @@ export class PropertyService {
       throw new Error(`Property with id ${id} not found`);
     }
     return new ResponseCommon(200, 'SUCCESS', updatedProperty);
+  }
+
+  /**
+   * Cập nhật thông tin căn hộ (APARTMENT type)
+   * Chỉ cho phép cập nhật các fields phù hợp cho loại APARTMENT
+   * @param id - ID của căn hộ
+   * @param updateApartmentDto - DTO chứa thông tin cập nhật
+   * @returns Căn hộ sau khi cập nhật
+   */
+  async updateApartment(
+    id: string,
+    updateApartmentDto: UpdateApartmentDto,
+  ): Promise<ResponseCommon<Property>> {
+    try {
+      // Bước 1: Tìm property hiện tại
+      const property = await this.propertyRepository.findOne({
+        where: { id: id },
+        relations: ['landlord'],
+      });
+
+      if (!property) {
+        throw new Error(`Property with id ${id} not found`);
+      }
+
+      // Bước 2: Kiểm tra xem property có phải loại APARTMENT không
+      if (property.type !== PropertyTypeEnum.APARTMENT) {
+        throw new Error(
+          `Property ${id} is not an APARTMENT type. Current type: ${property.type}`,
+        );
+      }
+
+      // Bước 2.5: Kiểm tra xem property đang hiển thị (isVisible = true) không
+      if (property.isVisible === true) {
+        throw new Error(
+          `Cannot update property ${id} because it is currently visible (isVisible = true). Please hide the property first before updating.`,
+        );
+      }
+
+      // Bước 3: Cập nhật các fields được phép cho loại APARTMENT
+      const allowedFields: (keyof UpdateApartmentDto)[] = [
+        'title',
+        'description',
+        'province',
+        'ward',
+        'address',
+        'block',
+        'unit',
+        'area',
+        'bedrooms',
+        'bathrooms',
+        'price',
+        'deposit',
+        'furnishing',
+        'legalDoc',
+        'heroImage',
+        'images',
+      ];
+
+      // Lọc và cập nhật chỉ các fields được phép
+      allowedFields.forEach((field) => {
+        if (updateApartmentDto[field] !== undefined) {
+          (property as Record<string, any>)[field] = updateApartmentDto[field];
+        }
+      });
+
+      // Bước 4: Lưu property đã cập nhật
+      await this.propertyRepository.save(property);
+
+      // Bước 5: Tải lại với relations đầy đủ
+      const result = await this.propertyRepository.findOne({
+        where: { id: id },
+        relations: ['landlord'],
+      });
+
+      if (!result) {
+        throw new Error('Failed to retrieve updated apartment');
+      }
+
+      return new ResponseCommon(200, 'Apartment updated successfully', result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Error updating apartment: ${message}`);
+    }
   }
 
   async remove(id: string): Promise<ResponseCommon<null>> {
