@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import {
   Controller,
   Get,
@@ -14,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { PropertyService } from './property.service';
 import { CreatePropertyDto } from './dto/create-property.dto';
+import { MoveRoomDto } from './dto/move-room.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { UpdateApartmentDto } from './dto/update-apartment.dto';
 import {
@@ -353,6 +355,26 @@ export class PropertyController {
     @Body() updateApartmentDto: UpdateApartmentDto,
   ) {
     return this.propertyService.updateApartment(id, updateApartmentDto);
+  }
+
+  @Patch('rooms/:id/move')
+  @ApiOperation({
+    summary:
+      'Di chuyển một Room sang RoomType khác (chỉ LANDLORD/ADMIN). Yêu cầu room.isVisible = false',
+  })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'LANDLORD')
+  moveRoom(
+    @Param('id') id: string,
+    @Body() moveRoomDto: MoveRoomDto,
+    @CurrentUser() currentUser: JwtUser,
+  ) {
+    return this.propertyService.moveRoomToRoomType(
+      id,
+      moveRoomDto.targetRoomTypeId,
+      currentUser.id,
+    );
   }
 
   @Delete(':id')

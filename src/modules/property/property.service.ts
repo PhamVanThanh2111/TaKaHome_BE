@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, Not } from 'typeorm';
@@ -617,6 +618,89 @@ export class PropertyService {
       relations: ['rooms', 'rooms.property', 'rooms.property.landlord'],
     });
     return new ResponseCommon(200, 'SUCCESS', roomType);
+  }
+
+  /**
+   * Move a Room to another RoomType. Conditions:
+   * - room must exist
+   * - room.isVisible must be false (hidden)
+   * - target RoomType must exist and belong to the same property
+   * - caller must be the property's landlord (ownership)
+   */
+  async moveRoomToRoomType(
+    roomId: string,
+    targetRoomTypeId: string,
+    currentUserId: string,
+  ): Promise<ResponseCommon<Room>> {
+    try {
+      // Load room with its property and landlord
+      const room = await this.roomRepository.findOne({
+        where: { id: roomId },
+        relations: ['roomType', 'property', 'property.landlord'],
+      });
+
+      if (!room) {
+        throw new Error(`Room with id ${roomId} not found`);
+      }
+
+      if (room.isVisible === true) {
+        throw new Error(
+          `Cannot move room ${roomId} because it is currently visible. Please hide the room first.`,
+        );
+      }
+
+      const property = await this.propertyRepository.findOne({
+        where: { id: room.property.id },
+        relations: ['rooms', 'rooms.roomType', 'landlord'],
+      });
+
+      if (!property) {
+        throw new Error('Parent property not found for this room');
+      }
+
+      // Ownership check (landlord must be the caller)
+      if (property.landlord && property.landlord.id !== currentUserId) {
+        throw new Error('Forbidden: you are not the owner of this property');
+      }
+
+      // Load target RoomType and ensure it belongs to the same property
+      const targetRoomType = await this.roomTypeRepository.findOne({
+        where: { id: targetRoomTypeId },
+        relations: ['rooms', 'rooms.property'],
+      });
+
+      if (!targetRoomType) {
+        throw new Error(`Target RoomType ${targetRoomTypeId} not found`);
+      }
+
+      // Determine if targetRoomType is associated with the same property by
+      // checking existing rooms of the property or rooms under the targetRoomType
+      const targetBelongsToProperty =
+        (property.rooms || []).some(
+          (r) => r.roomType && r.roomType.id === targetRoomTypeId,
+        ) ||
+        (targetRoomType.rooms || []).some(
+          (r) => r.property && r.property.id === property.id,
+        );
+
+      if (!targetBelongsToProperty) {
+        throw new Error('Target RoomType does not belong to the same property');
+      }
+
+      // Perform move
+      room.roomType = targetRoomType as any;
+      await this.roomRepository.save(room);
+
+      const result = await this.roomRepository.findOne({
+        where: { id: roomId },
+        relations: ['roomType', 'property'],
+      });
+
+      return new ResponseCommon(200, 'Room moved successfully', result as Room);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Error moving room: ${message}`);
+    }
   }
 
   async update(
