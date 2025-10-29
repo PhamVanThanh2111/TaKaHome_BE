@@ -1,23 +1,19 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 import {
-  Controller,
-  Get,
-  Post,
   Body,
-  Patch,
-  Param,
+  Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
-  UseGuards,
+  Param,
+  Patch,
+  Post,
+  Query,
   UploadedFiles,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { PropertyService } from './property.service';
-import { CreatePropertyDto } from './dto/create-property.dto';
-import { MoveRoomDto } from './dto/move-room.dto';
-import { UpdatePropertyDto } from './dto/update-property.dto';
-import { UpdateApartmentDto } from './dto/update-apartment.dto';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -25,22 +21,24 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
-import { PropertyResponseDto } from './dto/property-response.dto';
-import { Query } from '@nestjs/common';
-import { FilterPropertyDto } from './dto/filter-property.dto';
-import { FilterPropertyWithUrlDto } from './dto/filter-property-with-url.dto';
-import { UploadPropertyImagesDto } from './dto/upload-property-images.dto';
-import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
-import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 import { ResponseCommon } from 'src/common/dto/response.dto';
-import { Property } from './entities/property.entity';
-import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
-import { RoomType } from './entities/room-type.entity';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../core/auth/guards/roles.guard';
+import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 import { ApprovePropertiesDto } from './dto/approve-properties.dto';
+import { CreatePropertyDto } from './dto/create-property.dto';
+import { FilterPropertyWithUrlDto } from './dto/filter-property-with-url.dto';
+import { FilterPropertyDto } from './dto/filter-property.dto';
+import { MoveRoomDto } from './dto/move-room.dto';
+import { PropertyResponseDto } from './dto/property-response.dto';
+import { UpdateApartmentDto } from './dto/update-apartment.dto';
+import { UploadPropertyImagesDto } from './dto/upload-property-images.dto';
+import { Property } from './entities/property.entity';
+import { RoomType } from './entities/room-type.entity';
+import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
+import { PropertyService } from './property.service';
 
 @Controller('properties')
 export class PropertyController {
@@ -315,19 +313,6 @@ export class PropertyController {
     );
   }
 
-  @Patch(':id')
-  @ApiOperation({ summary: 'Cập nhật thông tin bất động sản' })
-  @ApiResponse({ status: HttpStatus.OK, type: PropertyResponseDto })
-  @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'LANDLORD')
-  update(
-    @Param('id') id: string,
-    @Body() updatePropertyDto: UpdatePropertyDto,
-  ) {
-    return this.propertyService.update(id, updatePropertyDto);
-  }
-
   @Patch('apartment/:id')
   @ApiOperation({
     summary: 'Cập nhật thông tin căn hộ (APARTMENT type)',
@@ -360,7 +345,9 @@ export class PropertyController {
   @Patch('rooms/:id/move')
   @ApiOperation({
     summary:
-      'Di chuyển một Room sang RoomType khác (chỉ LANDLORD/ADMIN). Yêu cầu room.isVisible = false',
+      'Di chuyển một Room sang RoomType khác HOẶC tạo RoomType mới (chỉ LANDLORD/ADMIN). Yêu cầu room.isVisible = false',
+    description:
+      'Hỗ trợ 2 chế độ: 1) Chuyển vào RoomType có sẵn (truyền targetRoomTypeId), 2) Tạo RoomType mới và chuyển Room vào đó (set createNewRoomType=true và truyền thông tin RoomType mới)',
   })
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -372,7 +359,7 @@ export class PropertyController {
   ) {
     return this.propertyService.moveRoomToRoomType(
       id,
-      moveRoomDto.targetRoomTypeId,
+      moveRoomDto,
       currentUser.id,
     );
   }
