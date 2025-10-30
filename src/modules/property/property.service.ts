@@ -1073,7 +1073,7 @@ export class PropertyService {
         }
 
         // Only show approved properties for public API
-        if (p.isApproved !== true || p.isVisible == true) {
+        if (p.isApproved !== true || p.isVisible === true) {
           return false;
         }
 
