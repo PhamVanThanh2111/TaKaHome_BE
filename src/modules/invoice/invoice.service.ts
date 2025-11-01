@@ -345,7 +345,7 @@ export class InvoiceService {
   private loadInvoice(id: string): Promise<Invoice | null> {
     return this.invoiceRepository.findOne({
       where: { id },
-      relations: ['items', 'contract', 'payments'],
+      relations: ['items', 'contract', 'payment'],
     });
   }
 
@@ -365,21 +365,27 @@ export class InvoiceService {
       // ----- Live Document AI call (commented) -----
       // Kiểm tra cấu hình Google Cloud
       if (!this.documentAIClient) {
-        throw new Error('Google Document AI chưa được cấu hình. Sử dụng dữ liệu mẫu.');
+        throw new Error(
+          'Google Document AI chưa được cấu hình. Sử dụng dữ liệu mẫu.',
+        );
       }
-      
+
       if (!this.processorId) {
-        throw new Error('Processor ID chưa được cấu hình. Sử dụng dữ liệu mẫu.');
+        throw new Error(
+          'Processor ID chưa được cấu hình. Sử dụng dữ liệu mẫu.',
+        );
       }
-      
+
       // Kiểm tra project ID format
-      const projectId = this.configService.get<string>('GOOGLE_CLOUD_PROJECT_ID');
+      const projectId = this.configService.get<string>(
+        'GOOGLE_CLOUD_PROJECT_ID',
+      );
       if (!projectId || !this.isValidProjectId(projectId)) {
         throw new Error('Project ID không hợp lệ. Sử dụng dữ liệu mẫu.');
       }
-      
+
       const encodedImage = imageBuffer.toString('base64');
-      
+
       // Tạo promise với timeout để tránh hang
       const processPromise = this.documentAIClient.processDocument({
         name: this.processorId,
@@ -388,37 +394,46 @@ export class InvoiceService {
           mimeType: mimeType,
         },
       });
-      
+
       // Thêm timeout wrapper
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Request timeout after 25 seconds')), 25000)
+        setTimeout(
+          () => reject(new Error('Request timeout after 25 seconds')),
+          25000,
+        ),
       );
-      
-      const result = await Promise.race([processPromise, timeoutPromise]) as any;
+
+      const result = (await Promise.race([
+        processPromise,
+        timeoutPromise,
+      ])) as any;
       const [processResult] = result as any[];
-      
+
       const entities = (processResult?.document?.entities || []) as any[];
-      
-      const extractedData = Array.isArray(entities) ? entities.map((entity: any) => ({
-        name: (entity?.type as string) || 'unknown',
-        value: (entity?.mentionText as string) || (entity?.normalizedValue?.text as string) || 'N/A',
-        confidence: (entity?.confidence as number) || 0,
-      })) : [];
-      
+
+      const extractedData = Array.isArray(entities)
+        ? entities.map((entity: any) => ({
+            name: (entity?.type as string) || 'unknown',
+            value:
+              (entity?.mentionText as string) ||
+              (entity?.normalizedValue?.text as string) ||
+              'N/A',
+            confidence: (entity?.confidence as number) || 0,
+          }))
+        : [];
+
       // Trả về response với rawData đã được simplified để tránh quá lớn
       const documentText = processResult?.document?.text as string | undefined;
-      return new ResponseCommon(
-        200,
-        'Xử lý hóa đơn thành công',
-        {
-          extractedData,
-          rawData: {
-            entitiesCount: extractedData.length,
-            documentText: documentText ? documentText.substring(0, 500) + '...' : 'N/A',
-            processedAt: new Date().toISOString(),
-          },
+      return new ResponseCommon(200, 'Xử lý hóa đơn thành công', {
+        extractedData,
+        rawData: {
+          entitiesCount: extractedData.length,
+          documentText: documentText
+            ? documentText.substring(0, 500) + '...'
+            : 'N/A',
+          processedAt: new Date().toISOString(),
         },
-      );
+      });
 
       // ----- Mock response (used instead of live Document AI) -----
       // Keep function async-compatible by returning a resolved Promise

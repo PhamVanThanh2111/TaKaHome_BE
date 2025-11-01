@@ -30,7 +30,7 @@ export class SystemMaintenanceCron {
    * Chạy hàng ngày lúc 2h sáng để cleanup dữ liệu cũ
    * Daily cleanup of old data
    */
-  // @Cron('0 2 * * *') // 2:00 AM daily
+  @Cron('0 2 * * *') // 2:00 AM daily
   async dailyCleanup(): Promise<void> {
     try {
       this.logger.log('🧹 Starting daily system cleanup...');

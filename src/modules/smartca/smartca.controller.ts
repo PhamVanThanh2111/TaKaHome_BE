@@ -242,7 +242,7 @@ export class SmartCAController {
           `[signToCms] returning CMS to client for user=${user.id}`,
         );
         // Also write to stdout directly to ensure visibility in environments where debug logs may be filtered
-        // eslint-disable-next-line no-console
+         
         console.log(`[signToCms] returning CMS to client for user=${user.id}`);
 
         return {

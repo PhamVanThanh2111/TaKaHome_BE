@@ -60,7 +60,7 @@ export class JwtBlockchainAuthGuard extends AuthGuard('jwt') implements CanActiv
     }
 
     // If userId not provided, use default for organization or user ID from JWT
-    let finalUserId = userId || user.id || this.blockchainConfig.getDefaultUserForOrg(orgName);
+    const finalUserId = userId || user.id || this.blockchainConfig.getDefaultUserForOrg(orgName);
     
     if (!finalUserId) {
       throw new UnauthorizedException(`No user identity available for organization: ${orgName}`);

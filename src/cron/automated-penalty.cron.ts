@@ -49,10 +49,10 @@ export class AutomatedPenaltyCron {
   /**
    * Run every day at 8:00 AM to check for overdue handovers (landlord penalties)
    */
-  // @Cron('*/20 * * * *', {
-  //   name: 'process-overdue-handovers',
-  //   timeZone: 'Asia/Ho_Chi_Minh',
-  // })
+  @Cron('*/20 * * * *', {
+    name: 'process-overdue-handovers',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
   async processOverdueHandovers(): Promise<void> {
     this.logger.log(
       '🏠 Starting daily handover deadline check (landlord penalties)...',
@@ -69,10 +69,10 @@ export class AutomatedPenaltyCron {
   /**
    * Run every 5 minutes to check for pending signature timeouts (30 minute limit)
    */
-  // @Cron('*/5 * * * *', {
-  //   name: 'process-pending-signature-timeouts',
-  //   timeZone: 'Asia/Ho_Chi_Minh',
-  // })
+  @Cron('*/5 * * * *', {
+    name: 'process-pending-signature-timeouts',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
   async processPendingSignatureTimeouts(): Promise<void> {
     this.logger.log(
       '📝 Checking for pending signature timeouts (30 minute limit)...',
@@ -92,7 +92,7 @@ export class AutomatedPenaltyCron {
   /**
    * Run every day at 10:00 AM to check for monthly payment overdue
    */
-  // @Cron('*/3 * * * *', {
+  // @Cron('*/50 * * * *', {
   //   name: 'process-monthly-overdue-payments',
   //   timeZone: 'Asia/Ho_Chi_Minh',
   // })
@@ -247,10 +247,10 @@ export class AutomatedPenaltyCron {
    * Run twice daily (9:00 AM & 6:00 PM) to check for low escrow balances
    * Sends warning notifications when tenant balance < 3x daily penalty
    */
-  // @Cron('0 9,18 * * *', {
-  //   name: 'check-low-escrow-balance',
-  //   timeZone: 'Asia/Ho_Chi_Minh',
-  // })
+  @Cron('0 9,18 * * *', {
+    name: 'check-low-escrow-balance',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
   async checkLowEscrowBalance(): Promise<void> {
     this.logger.log('🔍 Starting low escrow balance check...');
 

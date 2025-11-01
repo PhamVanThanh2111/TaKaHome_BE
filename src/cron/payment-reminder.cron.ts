@@ -39,7 +39,7 @@ export class PaymentReminderCron {
    */
   // @Cron(CronExpression.EVERY_HOUR)
   //Demo
-  // @Cron('*/25 * * * *')
+  @Cron('*/25 * * * *')
   async sendPaymentRemindersFirstMonth(): Promise<void> {
     try {
       this.logger.log('🔔 Checking for payment reminders to send...');
