@@ -211,7 +211,7 @@ export class ContractService {
 
     // Tích hợp với blockchain: Tạo contract trên blockchain
     try {
-      // await this.createContractOnBlockchain(saved);
+      await this.createContractOnBlockchain(saved);
       this.logger.log(
         `Contract ${saved.contractCode} created on blockchain successfully after landlord approval`,
       );

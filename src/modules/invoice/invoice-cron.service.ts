@@ -29,10 +29,10 @@ export class InvoiceCronService {
   //   name: 'generate-monthly-invoices-morning',
   // })
 
-  //Demo: Run every 2 minutes to catch 5-hour payment cycles
-  // @Cron('0 */5 * * * *', {
-  //   name: 'generate-monthly-invoices-morning',
-  // })
+  //Demo: Run every 5 minutes to catch 5-hour payment cycles
+  @Cron('0 */5 * * * *', {
+    name: 'generate-monthly-invoices-morning',
+  })
   async handleGenerateMonthlyInvoicesMorning(): Promise<void> {
     try {
       this.logger.log(
@@ -111,14 +111,14 @@ export class InvoiceCronService {
 
           const dueDate = new Date(payment.dueDate);
           const billingPeriod = formatVN(dueDate, 'yyyy-MM');
-          // const daysDiff = Math.ceil(
+          // const daysDiff = Math.ceil( // Demo
           // (dueDate.getTime() - todayUtc.getTime()) / (1000 * 60 * 60 * 24),
           // );
           const hoursDiff = Math.ceil(
             (dueDate.getTime() - todayUtc.getTime()) / (1000 * 60 * 60),
           );
           let shouldCreateInvoice = false;
-          shouldCreateInvoice = hoursDiff <= 3;
+          shouldCreateInvoice = hoursDiff <= 5;
 
           // Create invoice for payments due in 7 days or less (early notification)
           // or payments that are already due/overdue

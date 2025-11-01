@@ -25,10 +25,10 @@ export class AutomatedPenaltyCron {
    * to avoid duplicate penalty applications.
    */
   //Demo
-  // @Cron('0 9 * * *', {
-  //   name: 'process-overdue-payments',
-  //   timeZone: 'Asia/Ho_Chi_Minh',
-  // })
+  @Cron('0 9 * * *', {
+    name: 'process-overdue-payments',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
   // @Cron('*/7 * * * *', {
   //   name: 'process-overdue-payments',
   //   timeZone: 'Asia/Ho_Chi_Minh',
@@ -49,7 +49,7 @@ export class AutomatedPenaltyCron {
   /**
    * Run every day at 8:00 AM to check for overdue handovers (landlord penalties)
    */
-  @Cron('*/20 * * * *', {
+  @Cron('*/20 * * * *', { // Demo
     name: 'process-overdue-handovers',
     timeZone: 'Asia/Ho_Chi_Minh',
   })
@@ -90,15 +90,15 @@ export class AutomatedPenaltyCron {
   }
 
   /**
-   * Run every day at 10:00 AM to check for monthly payment overdue
+   * Run every day at 08:00 AM to check for monthly payment overdue
    */
-  // @Cron('*/50 * * * *', {
-  //   name: 'process-monthly-overdue-payments',
-  //   timeZone: 'Asia/Ho_Chi_Minh',
-  // })
+  @Cron('0 8 * * *', { // 8:00 AM every day
+    name: 'process-monthly-overdue-payments',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
   async processMonthlyOverduePayments(): Promise<void> {
     this.logger.log(
-      '🔍 Starting monthly overdue payment processing every day at 10:00 AM',
+      '🔍 Starting monthly overdue payment processing every day at 08:00 AM',
     );
 
     try {

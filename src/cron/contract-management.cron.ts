@@ -26,12 +26,15 @@ export class ContractManagementCron {
   ) {}
 
   /**
-   * Chạy hàng ngày lúc 9h sáng để kiểm tra contract expiry
+   * Chạy hàng ngày lúc 5h sáng để kiểm tra contract expiry
    * Sends contract expiry reminders at 30, 14, 7, 1 days before expiry
    */
   //Demo
-  // @Cron('0 9 * * *') // 9:00 AM every day
-  @Cron('*/10 * * * *') // every 10 minutes
+  // @Cron('*/10 * * * *') // every 10 minutes
+  @Cron('0 5 * * *', { // 5:00 AM every day
+    name: 'process-overdue-payments',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
   async checkContractExpiry(): Promise<void> {
     try {
       this.logger.log('📋 Checking contracts for expiry reminders...');
@@ -53,7 +56,7 @@ export class ContractManagementCron {
         );
         //Demo
         // Send reminders at specific intervals
-        if ([30, 14, 7, 2, 3, 1].includes(daysToExpiry)) {
+        if ([30, 14, 7, 3, 2, 1].includes(daysToExpiry)) {
           await this.sendContractExpiryReminder(contract, daysToExpiry);
         }
       }
@@ -66,11 +69,14 @@ export class ContractManagementCron {
 
   /**
    * Tự động kết thúc các hợp đồng đã hết hạn
-   * Chạy hàng ngày lúc 10h sáng để kiểm tra và kết thúc hợp đồng
+   * Chạy hàng ngày lúc 4h sáng để kiểm tra và kết thúc hợp đồng
    */
   //Demo
-  // @Cron('0 10 * * *') // 10:00 AM every day
   // @Cron('*/15 * * * *') // every 15 minutes for demo
+  @Cron('0 4 * * *', { // 4:00 AM every day
+    name: 'process-overdue-payments',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
   async autoTerminateExpiredContracts(): Promise<void> {
     try {
       this.logger.log('🔍 Checking for expired contracts to terminate...');

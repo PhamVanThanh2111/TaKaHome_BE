@@ -135,16 +135,7 @@ export class AutomatedPenaltyService {
       let shouldTerminate = false;
       let terminationReason = '';
 
-      // Check if contract should be terminated due to excessive penalties (30% rule)
-      if (!penaltyInfo.canContinue) {
-        shouldTerminate = true;
-        terminationReason = `Tổng phạt vượt quá 30% giá trị hợp đồng. Penalty: ${penaltyInfo.amount.toLocaleString('vi-VN')} VND`;
-        this.logger.warn(
-          `⚠️ Penalty exceeds 30% rule for booking ${booking.id}. Will deduct available balance and terminate.`,
-        );
-      }
-
-      // Check if penalty exceeds escrow balance
+      // Check if penalty exceeds escrow balance - terminate only when insufficient funds
       if (escrowBalance && penaltyInfo.amount > escrowBalance.tenantBalance) {
         // Deduct all available balance instead of full penalty
         actualPenaltyAmount = escrowBalance.tenantBalance;
@@ -265,9 +256,9 @@ export class AutomatedPenaltyService {
         (vnNow().getTime() - booking.escrowDepositDueAt.getTime()) /
           (1000 * 60),
       ); //Demo: minutes
-
+      
       // Cancel if more than 24 hours late
-      if (hoursLate > 24) {
+      if (hoursLate > 1) {
         // Cancel booking
         await this.contractTerminationService.terminateContract(
           booking.contractId,
@@ -354,6 +345,7 @@ export class AutomatedPenaltyService {
 
   /**
    * Calculate penalty for overdue payment based on Vietnam legal requirements
+   * No maximum cap - penalty continues until escrow is depleted
    */
   private calculateOverduePenalty(
     daysPastDue: number,
@@ -371,17 +363,14 @@ export class AutomatedPenaltyService {
     const baseAmount = rentAmount || 10000000; // 10M VND as fallback
     const penaltyAmount = Math.floor((baseAmount * rate * daysPastDue) / 100);
 
-    // Maximum penalty cap: 30% of contract value (Vietnamese consumer protection)
-    const maxPenalty = Math.floor(baseAmount * 0.3);
-    const finalPenalty = Math.min(penaltyAmount, maxPenalty);
-
-    // Contract termination logic: If penalties exceed 30% of rent, recommend termination
-    const canContinue = finalPenalty < baseAmount * 0.3;
+    // No maximum penalty cap - penalty will be deducted until escrow is depleted
+    // Contract termination will be handled by escrow balance check in the calling function
+    const canContinue = true; // Always true since we check escrow balance instead
 
     return {
       rate,
-      amount: finalPenalty,
-      reason: `Phạt chậm thanh toán ${daysPastDue} ngày, số tiền phạt: ${finalPenalty.toLocaleString('vi-VN')} VND`,
+      amount: penaltyAmount,
+      reason: `Phạt chậm thanh toán ${daysPastDue} ngày, số tiền phạt: ${penaltyAmount.toLocaleString('vi-VN')} VND`,
       canContinue,
     };
   }
@@ -616,13 +605,13 @@ export class AutomatedPenaltyService {
           const dueDate = booking.firstRentDueAt || now;
 
           if (now > dueDate) {
-            // const daysPastDue = Math.floor(
-            //   (now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24),
-            // );
-            //Demo
             const daysPastDue = Math.floor(
-              (now.getTime() - dueDate.getTime()) / (1000 * 60),
+              (now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24),
             );
+            //Demo
+            // const daysPastDue = Math.floor(
+            //   (now.getTime() - dueDate.getTime()) / (1000 * 60),
+            // );
 
             if (daysPastDue > 0) {
               this.logger.log(
@@ -845,16 +834,7 @@ export class AutomatedPenaltyService {
       let shouldTerminate = false;
       let terminationReason = '';
 
-      // Check if contract should be terminated due to excessive penalties (30% rule)
-      if (!penaltyInfo.canContinue) {
-        shouldTerminate = true;
-        terminationReason = `Tổng phạt vượt quá 30% giá trị hợp đồng. Penalty: ${penaltyInfo.amount.toLocaleString('vi-VN')} VND`;
-        this.logger.warn(
-          `⚠️ Penalty exceeds 30% rule for contract ${contract.contractCode} period ${period}. Will deduct available balance and terminate.`,
-        );
-      }
-
-      // Check if penalty exceeds escrow balance
+      // Check if penalty exceeds escrow balance - terminate only when insufficient funds
       if (escrowBalance && penaltyInfo.amount > escrowBalance.tenantBalance) {
         // Deduct all available balance instead of full penalty
         actualPenaltyAmount = escrowBalance.tenantBalance;
