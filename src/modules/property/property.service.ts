@@ -660,9 +660,9 @@ export class PropertyService {
         throw new Error(`Room with id ${roomId} not found`);
       }
 
-      if (room.isVisible === true) {
+      if (room.isVisible === false) {
         throw new Error(
-          `Cannot move room ${roomId} because it is currently visible. Please hide the room first.`,
+          `Cannot move room ${roomId} because it is currently hidden. Please make the room visible first.`,
         );
       }
 
@@ -831,9 +831,9 @@ export class PropertyService {
       }
 
       // Bước 2.5: Kiểm tra xem property đang hiển thị (isVisible = true) không
-      if (property.isVisible === true) {
+      if (property.isVisible === false) {
         throw new Error(
-          `Cannot update property ${id} because it is currently visible (isVisible = true). Please hide the property first before updating.`,
+          `Cannot update property ${id} because it is currently hidden (isVisible = false). Please make the property visible first before updating.`,
         );
       }
 
@@ -910,7 +910,7 @@ export class PropertyService {
         property.type === PropertyTypeEnum.HOUSING ||
         property.type === PropertyTypeEnum.APARTMENT
       ) {
-        property.isVisible = false; // When approved, set visible (isVisible=false means visible)
+        property.isVisible = true; // When approved, set visible (isVisible=true means visible)
       }
 
       await this.propertyRepository.save(property);
@@ -918,7 +918,7 @@ export class PropertyService {
       // Step 3: For BOARDING type, update all rooms visibility
       if (property.type === PropertyTypeEnum.BOARDING && property.rooms) {
         const roomUpdatePromises = property.rooms.map((room) => {
-          room.isVisible = false; // When approved, rooms become visible (isVisible=false)
+          room.isVisible = true; // When approved, rooms become visible (isVisible=true)
           return this.roomRepository.save(room);
         });
 
@@ -978,7 +978,7 @@ export class PropertyService {
             property.type === PropertyTypeEnum.HOUSING ||
             property.type === PropertyTypeEnum.APARTMENT
           ) {
-            property.isVisible = false; // When approved, set visible (isVisible=false means visible)
+            property.isVisible = true; // When approved, set visible (isVisible=true means visible)
           }
 
           await this.propertyRepository.save(property);
@@ -986,7 +986,7 @@ export class PropertyService {
           // Step 4: For BOARDING type, update all rooms visibility
           if (property.type === PropertyTypeEnum.BOARDING && property.rooms) {
             const roomUpdatePromises = property.rooms.map((room) => {
-              room.isVisible = false; // When approved, rooms become visible (isVisible=false)
+              room.isVisible = true; // When approved, rooms become visible (isVisible=true)
               return this.roomRepository.save(room);
             });
 
@@ -1073,7 +1073,7 @@ export class PropertyService {
         }
 
         // Only show approved properties for public API
-        if (p.isApproved !== true || p.isVisible === true) {
+        if (p.isApproved !== true || p.isVisible !== true) {
           return false;
         }
 

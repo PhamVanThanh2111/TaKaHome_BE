@@ -82,7 +82,7 @@ export class BookingService {
         throw new NotFoundException(`Property with id ${dto.propertyId} not found`);
       }
 
-      if (foundProperty.isVisible === true) {
+      if (foundProperty.isVisible === false) {
         throw new BadRequestException('Property is not already booked');
       }
 
@@ -102,7 +102,7 @@ export class BookingService {
         throw new NotFoundException(`Room with id ${dto.roomId} not found`);
       }
 
-      if (foundRoom.isVisible === true) {
+      if (foundRoom.isVisible === false) {
         throw new BadRequestException('Room is not already booked');
       }
 
@@ -917,7 +917,7 @@ export class BookingService {
         });
 
         if (room) {
-          room.isVisible = true; // Make room visible
+          room.isVisible = false; // Make room invisible
           await this.roomRepository.save(room);
         }
       } else {
@@ -927,7 +927,7 @@ export class BookingService {
         });
 
         if (property) {
-          property.isVisible = true; // Make property visible
+          property.isVisible = false; // Make property invisible
           await this.propertyRepository.save(property);
         }
       }

@@ -345,7 +345,7 @@ export class PropertyController {
   @Patch('rooms/:id/move')
   @ApiOperation({
     summary:
-      'Di chuyển một Room sang RoomType khác HOẶC tạo RoomType mới (chỉ LANDLORD/ADMIN). Yêu cầu room.isVisible = false',
+      'Di chuyển một Room sang RoomType khác HOẶC tạo RoomType mới (chỉ LANDLORD/ADMIN). Yêu cầu room.isVisible = true',
     description:
       'Hỗ trợ 2 chế độ: 1) Chuyển vào RoomType có sẵn (truyền targetRoomTypeId), 2) Tạo RoomType mới và chuyển Room vào đó (set createNewRoomType=true và truyền thông tin RoomType mới)',
   })
