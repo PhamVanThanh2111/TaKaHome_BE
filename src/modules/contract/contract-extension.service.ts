@@ -238,7 +238,7 @@ export class ContractExtensionService {
 
       const recordResult = await this.blockchainService.recordContractExtension(
         contract.contractCode,
-        addHours(extension.createdAt, 24).toISOString(),
+        addHours(extension.createdAt, 72).toISOString(),
         newRentAmount.toString(), // newRentAmount
         (await this.hashExtensionDocument(extension)) || '', // extensionAgreementHash (URL của hợp đồng gia hạn)
         extension.requestNote || 'Contract extension', // extensionNotes
