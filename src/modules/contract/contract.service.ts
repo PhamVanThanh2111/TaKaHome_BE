@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/require-await */
@@ -17,7 +16,10 @@ import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
 import { Contract } from './entities/contract.entity';
-import { ExtensionStatus } from './entities/contract-extension.entity';
+import {
+  ContractExtension,
+  ExtensionStatus,
+} from './entities/contract-extension.entity';
 import {
   ContractTerminationService,
   TerminationResult,
@@ -27,6 +29,7 @@ import {
   DisputeDetails,
 } from './dispute-handling.service';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ContractExtensionService } from './contract-extension.service';
 
 @Injectable()
 export class ContractService {
@@ -35,10 +38,13 @@ export class ContractService {
   constructor(
     @InjectRepository(Contract)
     private contractRepository: Repository<Contract>,
+    @InjectRepository(ContractExtension)
+    private extensionRepository: Repository<ContractExtension>,
     private blockchainService: BlockchainService,
     private s3StorageService: S3StorageService,
     private terminationService: ContractTerminationService,
     private disputeService: DisputeHandlingService,
+    private contractExtensionService: ContractExtensionService,
   ) {}
 
   async create(
@@ -110,8 +116,10 @@ export class ContractService {
     const start = input.startDate ? this.toDate(input.startDate) : vnNow();
     const proposedEnd = input.endDate
       ? this.toDate(input.endDate)
-      : this.addMonths(start, 12);
-    const end = proposedEnd > start ? proposedEnd : this.addMonths(start, 12);
+      : this.addHours(start, 60); // Demo: default 60 "hours" instead of months
+    // : this.addMonths(start, 12);
+    // const end = proposedEnd > start ? proposedEnd : this.addMonths(start, 12);
+    const end = proposedEnd > start ? proposedEnd : this.addHours(start, 60); // Demo: default 60 "hours" instead of months
     //Demo
     const contract = this.contractRepository.create({
       contractCode:
@@ -166,11 +174,11 @@ export class ContractService {
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
   //Demo
-  // private addHours(base: Date, hours: number): Date {
-  //   const result = new Date(base);
-  //   result.setHours(result.getHours() + hours);
-  //   return result;
-  // }
+  private addHours(base: Date, hours: number): Date {
+    const result = new Date(base);
+    result.setHours(result.getHours() + hours);
+    return result;
+  }
   private ensureStatus(
     contract: Contract,
     expected: ContractStatusEnum[],
@@ -367,15 +375,25 @@ export class ContractService {
   /**
    * Lấy URL truy cập file hợp đồng từ S3
    * Chỉ cho phép tenant hoặc landlord của hợp đồng truy cập
+   * Trả về cả URL hợp đồng ban đầu và các URL hợp đồng gia hạn
    */
   async getContractFileUrl(
     contractId: string,
     userId: string,
-  ): Promise<ResponseCommon<{ fileUrl: string }>> {
-    // Tìm hợp đồng với thông tin tenant và landlord
+  ): Promise<
+    ResponseCommon<{
+      fileUrl: string;
+      extensionFileUrls: Array<{
+        extensionId: string;
+        fileUrl: string;
+        createdAt: Date;
+      }>;
+    }>
+  > {
+    // Tìm hợp đồng với thông tin tenant, landlord và extensions
     const contract = await this.contractRepository.findOne({
       where: { id: contractId },
-      relations: ['tenant', 'landlord'],
+      relations: ['tenant', 'landlord', 'extensions'],
     });
 
     if (!contract) {
@@ -396,18 +414,41 @@ export class ContractService {
     }
 
     try {
-      // Trích xuất key từ URL S3
-      // URL format: https://hopdong-takahome.s3.ap-southeast-1.amazonaws.com/contracts/2d3f0e80-1796-4829-b8e4-0520c470aef1/tenant-signed-2025-10-08T15-38-56-848Z.pdf
-      const url = new URL(contract.contractFileUrl);
-      const key = url.pathname.substring(1); // Bỏ dấu "/" đầu tiên
+      // Helper function để tạo presigned URL từ S3 URL
+      const generatePresignedUrl = async (s3Url: string): Promise<string> => {
+        const url = new URL(s3Url);
+        const key = url.pathname.substring(1); // Bỏ dấu "/" đầu tiên
+        return await this.s3StorageService.getPresignedGetUrl(key, 900);
+      };
 
-      // Tạo presigned URL (có hiệu lực trong 15 phút = 900 giây)
-      const presignedUrl = await this.s3StorageService.getPresignedGetUrl(
-        key,
-        900,
+      // Tạo presigned URL cho hợp đồng ban đầu
+      const mainContractPresignedUrl = await generatePresignedUrl(
+        contract.contractFileUrl,
       );
 
-      return new ResponseCommon(200, 'SUCCESS', { fileUrl: presignedUrl });
+      // Lấy và sắp xếp các extension theo createdAt (mới nhất đầu tiên)
+      const sortedExtensions = (contract.extensions || [])
+        .filter((ext) => ext.extensionContractFileUrl) // Chỉ lấy extension có file
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()); // Mới nhất trước
+
+      // Tạo presigned URL cho các extension
+      const extensionFileUrls = await Promise.all(
+        sortedExtensions.map(async (extension) => {
+          const presignedUrl = await generatePresignedUrl(
+            extension.extensionContractFileUrl!,
+          );
+          return {
+            extensionId: extension.id,
+            fileUrl: presignedUrl,
+            createdAt: extension.createdAt,
+          };
+        }),
+      );
+
+      return new ResponseCommon(200, 'SUCCESS', {
+        fileUrl: mainContractPresignedUrl,
+        extensionFileUrls,
+      });
     } catch (error) {
       this.logger.error(
         `Failed to generate presigned URL for contract ${contractId}:`,
@@ -974,85 +1015,73 @@ export class ContractService {
    * Mark tenant extension escrow as funded
    */
   async markExtensionTenantEscrowFunded(extensionId: string): Promise<void> {
-    const extension = await this.contractRepository
-      .createQueryBuilder('contract')
-      .leftJoinAndSelect('contract.extensions', 'extension')
-      .where('extension.id = :extensionId', { extensionId })
-      .getOne();
+    const extension = await this.extensionRepository.findOne({
+      where: { id: extensionId },
+      relations: [
+        'contract',
+        'contract.tenant',
+        'contract.landlord',
+        'contract.property',
+        'contract.room',
+        'contract.room.roomType',
+      ],
+    });
 
-    const ext = extension?.extensions?.find((e) => e.id === extensionId);
-    if (!ext) {
+    if (!extension) {
       throw new NotFoundException('Extension not found');
     }
 
-    ext.tenantEscrowDepositFundedAt = vnNow();
+    extension.tenantEscrowDepositFundedAt = vnNow();
 
     // Check if both escrows are funded
-    if (ext.landlordEscrowDepositFundedAt) {
-      ext.status = ExtensionStatus.ACTIVE;
-      ext.activatedAt = vnNow();
+    if (extension.landlordEscrowDepositFundedAt) {
+      extension.status = ExtensionStatus.ACTIVE;
+      extension.activatedAt = vnNow();
       // Apply extension to contract
-      await this.applyActiveExtension(extension!.id, ext);
+      await this.contractExtensionService.applyExtension(extension);
     } else {
-      ext.status = ExtensionStatus.ESCROW_FUNDED_T;
+      extension.status = ExtensionStatus.ESCROW_FUNDED_T;
     }
 
     await this.contractRepository.manager
       .getRepository('ContractExtension')
-      .save(ext);
+      .save(extension);
   }
 
   /**
    * Mark landlord extension escrow as funded
    */
   async markExtensionLandlordEscrowFunded(extensionId: string): Promise<void> {
-    const extension = await this.contractRepository
-      .createQueryBuilder('contract')
-      .leftJoinAndSelect('contract.extensions', 'extension')
-      .where('extension.id = :extensionId', { extensionId })
-      .getOne();
+    const extension = await this.extensionRepository.findOne({
+      where: { id: extensionId },
+      relations: [
+        'contract',
+        'contract.tenant',
+        'contract.landlord',
+        'contract.property',
+        'contract.room',
+        'contract.room.roomType',
+      ],
+    });
 
-    const ext = extension?.extensions?.find((e) => e.id === extensionId);
-    if (!ext) {
+    if (!extension) {
       throw new NotFoundException('Extension not found');
     }
 
-    ext.landlordEscrowDepositFundedAt = vnNow();
+    extension.landlordEscrowDepositFundedAt = vnNow();
 
     // Check if both escrows are funded
-    if (ext.tenantEscrowDepositFundedAt) {
-      ext.status = ExtensionStatus.ACTIVE;
-      ext.activatedAt = vnNow();
+    if (extension.tenantEscrowDepositFundedAt) {
+      extension.status = ExtensionStatus.ACTIVE;
+      extension.activatedAt = vnNow();
       // Apply extension to contract
-      await this.applyActiveExtension(extension!.id, ext);
+      await this.contractExtensionService.applyExtension(extension);
     } else {
-      ext.status = ExtensionStatus.ESCROW_FUNDED_L;
+      extension.status = ExtensionStatus.ESCROW_FUNDED_L;
     }
 
     await this.contractRepository.manager
       .getRepository('ContractExtension')
-      .save(ext);
-  }
-
-  /**
-   * Apply active extension to contract (update endDate and pricing)
-   */
-  private async applyActiveExtension(
-    contractId: string,
-    extension: any,
-  ): Promise<void> {
-    const contract = await this.contractRepository.findOne({
-      where: { id: contractId },
-    });
-
-    if (!contract) {
-      throw new NotFoundException('Contract not found');
-    }
-
-    // Gia hạn contract
-    const newEndDate = addMonthsFn(contract.endDate, extension.extensionMonths);
-    contract.endDate = newEndDate;
-
-    await this.contractRepository.save(contract);
+      .save(extension);
   }
 }

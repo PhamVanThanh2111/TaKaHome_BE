@@ -16,15 +16,18 @@ import { VerificationModule } from './modules/verification/verification.module';
 import { ChatRoomModule } from './modules/chatroom/chatroom.module';
 import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
 import { ChatModule } from './modules/chat/chat.module';
+import { ChatbotModule } from './modules/chatbot/chatbot.module';
 import { AuthModule } from './modules/core/auth/auth.module';
 import AppDataSourcePromise from './modules/core/database/data-source';
 
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
 import * as Joi from 'joi';
 import vnpayConfig from './config/vnpay.config';
 import smartcaConfig from './config/smartca.config';
+import rootcaConfig from './config/rootca.config';
 import frontendConfig from './config/frontend.config';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { EscrowModule } from './modules/escrow/escrow.module';
@@ -41,7 +44,7 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
     ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true, // <— để dùng ở mọi nơi mà không cần import lại
-      load: [vnpayConfig, smartcaConfig, frontendConfig], // <— nạp file config/vnpay.config.ts, smartca.config.ts và frontend.config.ts
+      load: [vnpayConfig, smartcaConfig, frontendConfig, rootcaConfig], // <— nạp file config/vnpay.config.ts, smartca.config.ts, frontend.config.ts và rootca.config.ts
       validationSchema: Joi.object({
         // Frontend validation
         FRONTEND_URL: Joi.string().required().uri(),
@@ -66,8 +69,18 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
         OID_MESSAGE_DIGEST: Joi.string().optional(),
         OID_SIGNING_TIME: Joi.string().optional(),
         OID_SIGNING_CERT_V2: Joi.string().optional(),
+
+        // Gemini API validation
+        GEMINI_API_KEY: Joi.string().optional(),
       }),
     }),
+    ThrottlerModule.forRoot([
+      {
+        name: 'chatbot',
+        ttl: 60000, // 1 phút
+        limit: 1000, // High limit - chỉ để module hoạt động, control ở controller level
+      },
+    ]),
     AuthModule,
     UserModule,
     PropertyModule,
@@ -84,12 +97,14 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
     ChatRoomModule,
     ChatMessageModule,
     ChatModule,
+    ChatbotModule,
     WalletModule,
     EscrowModule,
     InvoiceModule,
     CronModule,
     StatisticsModule,
   ],
+  providers: [],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

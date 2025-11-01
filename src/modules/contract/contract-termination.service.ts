@@ -5,12 +5,15 @@ import { vnNow, formatVN } from '../../common/datetime';
 
 import { Contract } from '../contract/entities/contract.entity';
 import { Booking } from '../booking/entities/booking.entity';
+import { Property } from '../property/entities/property.entity';
+import { Room } from '../property/entities/room.entity';
 import { EscrowService } from '../escrow/escrow.service';
 import { BlockchainService } from '../blockchain/blockchain.service';
 import { NotificationService } from '../notification/notification.service';
 import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 import { BookingStatus } from '../common/enums/booking-status.enum';
 import { NotificationTypeEnum } from '../common/enums/notification-type.enum';
+import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 
 export interface TerminationCalculation {
   refundToTenant: number;
@@ -45,6 +48,10 @@ export class ContractTerminationService {
     private contractRepository: Repository<Contract>,
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
+    @InjectRepository(Property)
+    private propertyRepository: Repository<Property>,
+    @InjectRepository(Room)
+    private roomRepository: Repository<Room>,
 
     private escrowService: EscrowService,
     private blockchainService: BlockchainService,
@@ -67,7 +74,7 @@ export class ContractTerminationService {
       // Get contract with full relations
       const contract = await this.contractRepository.findOne({
         where: { id: contractId },
-        relations: ['tenant', 'landlord', 'property'],
+        relations: ['tenant', 'landlord', 'property', 'room'],
       });
 
       if (!contract) {
@@ -202,14 +209,17 @@ export class ContractTerminationService {
       // 3. Process refunds
       await this.processRefunds(contract, calculation);
 
-      // 4. Update blockchain
+      // 5. Hide property/room visibility
+      await this.hidePropertyOrRoom(contract);
+
+      // 6. Update blockchain
       await this.updateBlockchain(
         contract.contractCode || contract.id,
         reason,
         terminatedBy,
       );
 
-      // 5. Send notifications
+      // 7. Send notifications
       await this.sendTerminationNotifications(contract, calculation, reason);
 
       this.logger.log(
@@ -276,6 +286,50 @@ export class ContractTerminationService {
         error,
       );
       throw error;
+    }
+  }
+
+  /**
+   * Hide property or room visibility based on property type
+   */
+  private async hidePropertyOrRoom(contract: Contract): Promise<void> {
+    try {
+      if (!contract.property) {
+        this.logger.warn(`No property found for contract ${contract.id}`);
+        return;
+      }
+
+      // If property type is APARTMENT, hide the property
+      if (contract.property.type === PropertyTypeEnum.APARTMENT) {
+        await this.propertyRepository.update(
+          { id: contract.property.id },
+          { isVisible: false },
+        );
+
+        this.logger.log(
+          `🏠 Hidden apartment property ${contract.property.id} (${contract.property.title})`,
+        );
+      }
+      // If property type is BOARDING, hide the room
+      else if (
+        contract.property.type === PropertyTypeEnum.BOARDING &&
+        contract.room
+      ) {
+        await this.roomRepository.update(
+          { id: contract.room.id },
+          { isVisible: false },
+        );
+
+        this.logger.log(
+          `🏠 Hidden boarding room ${contract.room.id} (${contract.room.name}) in property ${contract.property.title}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to hide property/room for contract ${contract.id}:`,
+        error,
+      );
+      // Don't throw error - continue with termination even if hiding fails
     }
   }
 

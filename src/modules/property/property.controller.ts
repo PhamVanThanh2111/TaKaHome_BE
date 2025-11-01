@@ -1,20 +1,19 @@
 import {
-  Controller,
-  Get,
-  Post,
   Body,
-  Patch,
-  Param,
+  Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
-  UseGuards,
+  Param,
+  Patch,
+  Post,
+  Query,
   UploadedFiles,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { PropertyService } from './property.service';
-import { CreatePropertyDto } from './dto/create-property.dto';
-import { UpdatePropertyDto } from './dto/update-property.dto';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -22,21 +21,24 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
-import { PropertyResponseDto } from './dto/property-response.dto';
-import { Query } from '@nestjs/common';
-import { FilterPropertyDto } from './dto/filter-property.dto';
-import { UploadPropertyImagesDto } from './dto/upload-property-images.dto';
-import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
-import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 import { ResponseCommon } from 'src/common/dto/response.dto';
-import { Property } from './entities/property.entity';
-import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
-import { RoomType } from './entities/room-type.entity';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../core/auth/guards/roles.guard';
+import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 import { ApprovePropertiesDto } from './dto/approve-properties.dto';
+import { CreatePropertyDto } from './dto/create-property.dto';
+import { FilterPropertyWithUrlDto } from './dto/filter-property-with-url.dto';
+import { FilterPropertyDto } from './dto/filter-property.dto';
+import { MoveRoomDto } from './dto/move-room.dto';
+import { PropertyResponseDto } from './dto/property-response.dto';
+import { UpdateApartmentDto } from './dto/update-apartment.dto';
+import { UploadPropertyImagesDto } from './dto/upload-property-images.dto';
+import { Property } from './entities/property.entity';
+import { RoomType } from './entities/room-type.entity';
+import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
+import { PropertyService } from './property.service';
 
 @Controller('properties')
 export class PropertyController {
@@ -115,6 +117,58 @@ export class PropertyController {
   })
   filter(@Query() query: FilterPropertyDto): Promise<ResponseCommon<any>> {
     return this.propertyService.filter(query);
+  }
+
+  @Get('filter-with-url')
+  @ApiOperation({
+    summary: 'Filter properties with URL for chatbot',
+    description:
+      'Filter properties và trả về kèm URL để truy cập, dành cho Gemini chatbot',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Trả về danh sách bất động sản với URL',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 200 },
+        message: { type: 'string', example: 'SUCCESS' },
+        data: {
+          type: 'object',
+          properties: {
+            data: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  title: { type: 'string' },
+                  description: { type: 'string' },
+                  price: { type: 'number' },
+                  area: { type: 'number' },
+                  bedrooms: { type: 'number' },
+                  bathrooms: { type: 'number' },
+                  province: { type: 'string' },
+                  ward: { type: 'string' },
+                  address: { type: 'string' },
+                  url: {
+                    type: 'string',
+                    description: 'URL để truy cập bất động sản',
+                  },
+                },
+              },
+            },
+            total: { type: 'number' },
+            message: { type: 'string' },
+          },
+        },
+      },
+    },
+  })
+  filterWithUrl(
+    @Query() query: FilterPropertyWithUrlDto,
+  ): Promise<ResponseCommon<any>> {
+    return this.propertyService.filterWithUrl(query);
   }
 
   @Post(':id/images')
@@ -259,17 +313,55 @@ export class PropertyController {
     );
   }
 
-  @Patch(':id')
-  @ApiOperation({ summary: 'Cập nhật thông tin bất động sản' })
-  @ApiResponse({ status: HttpStatus.OK, type: PropertyResponseDto })
+  @Patch('apartment/:id')
+  @ApiOperation({
+    summary: 'Cập nhật thông tin căn hộ (APARTMENT type)',
+    description:
+      'API riêng cho cập nhật thông tin căn hộ, chỉ cho phép các fields phù hợp với loại APARTMENT',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    type: PropertyResponseDto,
+    description: 'Cập nhật thành công',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Property không phải loại APARTMENT hoặc request không hợp lệ',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Không tìm thấy property với ID này',
+  })
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'LANDLORD')
-  update(
+  updateApartment(
     @Param('id') id: string,
-    @Body() updatePropertyDto: UpdatePropertyDto,
+    @Body() updateApartmentDto: UpdateApartmentDto,
   ) {
-    return this.propertyService.update(id, updatePropertyDto);
+    return this.propertyService.updateApartment(id, updateApartmentDto);
+  }
+
+  @Patch('rooms/:id/move')
+  @ApiOperation({
+    summary:
+      'Di chuyển một Room sang RoomType khác HOẶC tạo RoomType mới (chỉ LANDLORD/ADMIN). Yêu cầu room.isVisible = true',
+    description:
+      'Hỗ trợ 2 chế độ: 1) Chuyển vào RoomType có sẵn (truyền targetRoomTypeId), 2) Tạo RoomType mới và chuyển Room vào đó (set createNewRoomType=true và truyền thông tin RoomType mới)',
+  })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'LANDLORD')
+  moveRoom(
+    @Param('id') id: string,
+    @Body() moveRoomDto: MoveRoomDto,
+    @CurrentUser() currentUser: JwtUser,
+  ) {
+    return this.propertyService.moveRoomToRoomType(
+      id,
+      moveRoomDto,
+      currentUser.id,
+    );
   }
 
   @Delete(':id')

@@ -14,7 +14,7 @@ import { BookingService } from './booking.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
 import { FilterBookingDto } from './dto/filter-booking.dto';
-import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { BookingResponseDto } from './dto/booking-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
@@ -80,13 +80,30 @@ export class BookingController {
   @Post(':id/approve')
   @ApiOperation({ summary: 'Chủ nhà duyệt booking và ký số hợp đồng' })
   @Roles(RoleEnum.LANDLORD, RoleEnum.ADMIN)
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
+  @ApiResponse({
+    status: HttpStatus.OK,
     type: BookingResponseDto,
-    description: 'Trả về booking với signedPdfUrl sau khi chủ nhà ký số thành công'
+    description:
+      'Trả về booking với signedPdfUrl sau khi chủ nhà ký số thành công',
   })
-  approve(@Param('id') id: string, @CurrentUser() user: JwtUser) {
-    return this.bookingService.landlordApprove(id, user.id);
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        signingOption: {
+          type: 'string',
+          description: 'Lựa chọn phương thức ký số (VNPT hoặc SELF_CA)',
+          example: 'SELF_CA',
+        },
+      },
+    },
+  })
+  approve(
+    @Param('id') id: string,
+    @Body('signingOption') signingOption: string | undefined,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.bookingService.landlordApprove(id, user.id, signingOption);
   }
 
   @Post(':id/reject')
@@ -101,8 +118,24 @@ export class BookingController {
   @ApiOperation({ summary: 'Người thuê ký hợp đồng (digital signature)' })
   @Roles(RoleEnum.TENANT, RoleEnum.ADMIN)
   @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
-  tenantSign(@Param('id') id: string, @CurrentUser() user: JwtUser) {
-    return this.bookingService.tenantSign(id, user.id);
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        signingOption: {
+          type: 'string',
+          description: 'Lựa chọn phương thức ký số (VNPT hoặc SELF_CA)',
+          example: 'SELF_CA',
+        },
+      },
+    },
+  })
+  tenantSign(
+    @Param('id') id: string,
+    @Body('signingOption') signingOption: string | undefined,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.bookingService.tenantSign(id, user.id, signingOption);
   }
 
   @Post(':id/handover')

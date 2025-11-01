@@ -1,10 +1,9 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   Injectable,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -25,11 +24,14 @@ import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { Escrow } from '../escrow/entities/escrow.entity';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { User } from '../user/entities/user.entity';
-// path/fs imports removed - not needed after template filling via PdfFillService
+import { BlockchainService } from '../blockchain/blockchain.service';
 import { PdfFillService, PdfTemplateType } from './pdf-fill.service';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class ContractExtensionService {
+  private readonly logger = new Logger(ContractExtensionService.name);
+
   constructor(
     @InjectRepository(ContractExtension)
     private extensionRepository: Repository<ContractExtension>,
@@ -41,6 +43,7 @@ export class ContractExtensionService {
     private escrowRepository: Repository<Escrow>,
     private smartcaService: SmartCAService,
     private s3StorageService: S3StorageService,
+    private blockchainService: BlockchainService,
     private pdfFillService: PdfFillService,
   ) {}
 
@@ -183,7 +186,7 @@ export class ContractExtensionService {
     );
   }
 
-  private async applyExtension(extension: ContractExtension): Promise<void> {
+  async applyExtension(extension: ContractExtension): Promise<void> {
     const contract = extension.contract;
 
     // Gia hạn contract
@@ -193,8 +196,184 @@ export class ContractExtensionService {
     // Chỉ gia hạn contract, giá sẽ được lưu trong ContractExtension
     // Không thay đổi giá trong Property/RoomType để tránh ảnh hưởng đến các contract khác
     await this.contractRepository.save(contract);
+
+    // Ghi nhận extension lên blockchain
+    await this.recordExtensionToBlockchain(extension, contract);
   }
 
+  /**
+   * Ghi nhận extension lên blockchain và tạo payment schedule
+   */
+  private async recordExtensionToBlockchain(
+    extension: ContractExtension,
+    contract: Contract,
+  ): Promise<void> {
+    try {
+      // Lấy giá thuê hiện tại
+      let currentRentAmount = 0;
+      if (
+        contract.property.type === PropertyTypeEnum.BOARDING &&
+        contract.room?.roomType
+      ) {
+        currentRentAmount = contract.room.roomType.price;
+      } else if (contract.property.price) {
+        currentRentAmount = contract.property.price;
+      }
+
+      // Lấy giá thuê mới (nếu có thay đổi)
+      const newRentAmount = extension.newMonthlyRent || currentRentAmount;
+
+      // Xác định user để thực hiện giao dịch blockchain
+      // Sử dụng landlord làm người thực hiện giao dịch
+      const blockchainUser = {
+        userId: contract.landlord.id,
+        orgName: 'OrgLandlord',
+        mspId: 'OrgLandlordMSP',
+      };
+
+      // Bước 1: Ghi nhận extension lên blockchain
+      console.log(
+        '[BlockchainExtension] 📝 Recording extension to blockchain...',
+      );
+
+      const recordResult = await this.blockchainService.recordContractExtension(
+        contract.contractCode,
+        ((d) => (d.setDate(d.getDate() + 1), d))(new Date()).toISOString(),
+        // contract.endDate.toISOString(), // newEndDate
+        newRentAmount.toString(), // newRentAmount
+        (await this.hashExtensionDocument(extension)) || '', // extensionAgreementHash (URL của hợp đồng gia hạn)
+        extension.requestNote || 'Contract extension', // extensionNotes
+        blockchainUser,
+      );
+
+      if (!recordResult.success) {
+        throw new Error(
+          `Failed to record extension to blockchain: ${recordResult.error}`,
+        );
+      }
+
+      console.log(
+        '[BlockchainExtension] ✅ Extension recorded successfully:',
+        recordResult.data,
+      );
+
+      // Lấy extension number từ kết quả
+      const extensionNumber = recordResult.data?.currentExtensionNumber;
+
+      if (!extensionNumber) {
+        throw new Error('Extension number not returned from blockchain');
+      }
+
+      // Bước 2: Tạo payment schedule cho extension
+      console.log(
+        `[BlockchainExtension] 📅 Creating payment schedule for extension ${extensionNumber}...`,
+      );
+      const scheduleResult =
+        await this.blockchainService.createExtensionPaymentSchedule(
+          contract.contractCode,
+          extensionNumber.toString(),
+          blockchainUser,
+        );
+
+      if (!scheduleResult.success) {
+        throw new Error(
+          `Failed to create extension payment schedule: ${scheduleResult.error}`,
+        );
+      }
+
+      const schedulesCreated = scheduleResult.data?.length || 0;
+
+      console.log(
+        `[BlockchainExtension] ✅ Payment schedule created successfully: ${schedulesCreated} periods`,
+      );
+
+      // Log thông tin blockchain để audit
+      console.log(
+        '[BlockchainExtension] 🎉 Blockchain integration completed:',
+        {
+          contractId: contract.id,
+          extensionId: extension.id,
+          extensionNumber: extensionNumber,
+          newEndDate: contract.endDate.toISOString(),
+          newRentAmount: newRentAmount,
+          paymentPeriodsCreated: schedulesCreated,
+        },
+      );
+    } catch (error) {
+      // Log error nhưng không fail transaction
+      // Extension vẫn được apply trong database
+      console.error(
+        '[BlockchainExtension] ❌ Failed to record to blockchain:',
+        {
+          error: error instanceof Error ? error.message : 'Unknown error',
+          contractId: contract.id,
+          extensionId: extension.id,
+          stack: error instanceof Error ? error.stack : undefined,
+        },
+      );
+
+      // Có thể throw error nếu muốn fail cả transaction
+      // throw new BadRequestException(
+      //   `Failed to record extension to blockchain: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      // );
+
+      // Hoặc chỉ log warning và tiếp tục
+      console.warn(
+        '[BlockchainExtension] ⚠️ Extension applied to database but blockchain record failed',
+      );
+    }
+  }
+  async hashExtensionDocument(extension: ContractExtension): Promise<string> {
+    // Nếu có contractFileUrl (file PDF đã ký), hash từ file thực tế
+    if (extension.extensionContractFileUrl) {
+      try {
+        // Extract S3 key từ URL và download file
+        const s3Key = this.s3StorageService.extractKeyFromUrl(
+          extension.extensionContractFileUrl,
+        );
+        const pdfBuffer = await this.s3StorageService.downloadFile(s3Key);
+
+        // Hash toàn bộ file PDF đã ký
+        const fileHash = crypto
+          .createHash('sha256')
+          .update(pdfBuffer)
+          .digest('hex');
+
+        this.logger.log(
+          `📄 Generated hash from signed PDF file for contract ${extension.contract.contractCode}: ${fileHash.substring(0, 16)}...`,
+        );
+        return fileHash;
+      } catch (error) {
+        this.logger.warn(
+          `⚠️ Failed to hash PDF file for contract ${extension.contract.contractCode}, falling back to metadata hash:`,
+          error instanceof Error ? error.message : error,
+        );
+        // Fallback về hash metadata nếu không thể download file
+      }
+    }
+
+    // Fallback: Hash từ contract metadata (như cũ)
+    const contractData = {
+      contractCode: extension.contract.contractCode,
+      landlordId: extension.contract.landlord?.id,
+      tenantId: extension.contract.tenant?.id,
+      propertyId: extension.contract.property?.id,
+      startDate: extension.contract.startDate?.toISOString(),
+      endDate: extension.contract.endDate?.toISOString(),
+      status: extension.contract.status,
+    };
+
+    const dataString = JSON.stringify(contractData);
+    const metadataHash = crypto
+      .createHash('sha256')
+      .update(dataString)
+      .digest('hex');
+
+    this.logger.log(
+      `📋 Generated hash from contract metadata for contract ${extension.contract.contractCode}: ${metadataHash.substring(0, 16)}...`,
+    );
+    return metadataHash;
+  }
   async getContractExtensions(
     contractId: string,
     userId: string,
@@ -360,6 +539,7 @@ export class ContractExtensionService {
   async landlordSignExtension(
     extensionId: string,
     userId: string,
+    signingOption?: string,
   ): Promise<ResponseCommon<ContractExtension>> {
     const extension = await this.extensionRepository.findOne({
       where: { id: extensionId },
@@ -442,7 +622,10 @@ export class ContractExtensionService {
       const signResult = await this.smartcaService.signPdfOneShot({
         pdfBuffer: filledPdfBuffer,
         signatureIndex: 0,
-        userIdOverride: landlord?.CCCD,
+        userIdOverride:
+          (signingOption ?? 'SELF_CA').toUpperCase() === 'SELF_CA'
+            ? userId
+            : landlord?.CCCD,
         contractId: extension.contract.id,
         intervalMs: 2000,
         timeoutMs: 120000,
@@ -451,6 +634,7 @@ export class ContractExtensionService {
         contactInfo: '',
         signerName: 'Landlord Extension Signature',
         creator: 'SmartCA VNPT 2025',
+        signingOption: signingOption ?? 'SELF_CA',
       });
 
       if (!signResult.success) {
@@ -514,6 +698,7 @@ export class ContractExtensionService {
   async tenantSignExtension(
     extensionId: string,
     userId: string,
+    signingOption?: string,
   ): Promise<ResponseCommon<ContractExtension>> {
     const extension = await this.extensionRepository.findOne({
       where: { id: extensionId },
@@ -564,7 +749,10 @@ export class ContractExtensionService {
       const signResult = await this.smartcaService.signPdfOneShot({
         pdfBuffer: landlordSignedPdf,
         signatureIndex: 1,
-        userIdOverride: tenant?.CCCD,
+        userIdOverride:
+          (signingOption ?? 'SELF_CA').toUpperCase() === 'SELF_CA'
+            ? userId
+            : tenant?.CCCD,
         contractId: extension.contract.id,
         intervalMs: 2000,
         timeoutMs: 120000,
@@ -573,6 +761,7 @@ export class ContractExtensionService {
         contactInfo: '',
         signerName: 'Tenant Extension Signature',
         creator: 'SmartCA VNPT 2025',
+        signingOption: signingOption ?? 'SELF_CA',
       });
 
       if (!signResult.success) {

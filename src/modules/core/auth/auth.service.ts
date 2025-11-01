@@ -55,7 +55,7 @@ export class AuthService {
     await this.userRepo.save(user);
 
     // role mặc định cho account mới (TENANT)
-    const defaultRoles = RoleEnum.TENANT;
+    const defaultRoles = dto.roles ? dto.roles : RoleEnum.TENANT;
 
     const account = this.accountRepo.create({
       email: dto.email,
@@ -127,6 +127,7 @@ export class AuthService {
       sub: acc.user.id,
       email: acc.email,
       roles: acc.roles,
+      fullName: acc.user.fullName,
     };
 
     acc.lastLoginAt = vnNow();
@@ -160,20 +161,26 @@ export class AuthService {
   }> {
     try {
       // Đổi code lấy token
-      const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
-        code,
-        client_id: this.configService.get<string>('GOOGLE_CLIENT_ID'),
-        client_secret: this.configService.get<string>('GOOGLE_CLIENT_SECRET'),
-        redirect_uri: this.configService.get<string>('GOOGLE_REDIRECT_URI'),
-        grant_type: 'authorization_code',
-      });
+      const tokenResponse = await axios.post(
+        'https://oauth2.googleapis.com/token',
+        {
+          code,
+          client_id: this.configService.get<string>('GOOGLE_CLIENT_ID'),
+          client_secret: this.configService.get<string>('GOOGLE_CLIENT_SECRET'),
+          redirect_uri: this.configService.get<string>('GOOGLE_REDIRECT_URI'),
+          grant_type: 'authorization_code',
+        },
+      );
 
       const { access_token } = tokenResponse.data as { access_token: string };
 
       // Lấy thông tin người dùng từ Google
-      const userInfoResponse = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { Authorization: `Bearer ${access_token}` },
-      });
+      const userInfoResponse = await axios.get(
+        'https://www.googleapis.com/oauth2/v3/userinfo',
+        {
+          headers: { Authorization: `Bearer ${access_token}` },
+        },
+      );
 
       const { email, name, picture } = userInfoResponse.data as {
         email: string;
@@ -189,6 +196,7 @@ export class AuthService {
         sub: result.user.id,
         email: result.account.email,
         roles: result.account.roles,
+        fullName: result.user.fullName,
       };
 
       // Cập nhật last login
@@ -249,7 +257,7 @@ export class AuthService {
     const defaultRole = RoleEnum.TENANT;
     // Tạo password random cho Google OAuth user (họ sẽ không dùng password này)
     const randomPassword = await bcrypt.hash(`google_oauth_${Date.now()}`, 10);
-    
+
     account = this.accountRepo.create({
       email,
       password: randomPassword,

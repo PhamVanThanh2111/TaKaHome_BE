@@ -8,6 +8,7 @@ import { Booking } from '../booking/entities/booking.entity';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { BookingStatus } from '../common/enums/booking-status.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
+import { RoleEnum } from '../common/enums/role.enum';
 
 export interface StatisticsOverview {
   totalProperties: number;
@@ -130,8 +131,13 @@ export class StatisticsService {
     // Kiểm tra landlord có tồn tại
     const landlord = await this.userRepository.findOne({
       where: { id: landlordId },
+      relations: ['account'],
     });
+
     if (!landlord) {
+      throw new NotFoundException('Landlord not found');
+    }
+    if (!landlord.account || !landlord.account.roles.includes(RoleEnum.LANDLORD)) {
       throw new NotFoundException('Landlord not found');
     }
 
@@ -170,23 +176,19 @@ export class StatisticsService {
     const now = new Date();
     const createdAt = new Date(landlord.createdAt);
 
-    // Tính số tháng tổng cộng
+    // Tính số năm tham gia
     const diffYears = now.getFullYear() - createdAt.getFullYear();
     const diffMonths = now.getMonth() - createdAt.getMonth();
     const totalMonths = Math.max(0, diffYears * 12 + diffMonths);
 
     let yearsOfParticipation: string;
-    if (totalMonths < 1) {
-      // Nếu dưới 1 tháng thì hiển thị "Dưới 1 tháng"
-      yearsOfParticipation = 'Under 1 month';
-    } else if (totalMonths < 12) {
-      // Nếu dưới 1 năm thì hiển thị theo tháng
-      yearsOfParticipation =
-        totalMonths === 1 ? '1 month' : `${totalMonths} months`;
+    if (totalMonths < 12) {
+      // Dưới 1 năm
+      yearsOfParticipation = '<1';
     } else {
-      // Nếu từ 1 năm trở lên thì hiển thị theo năm
+      // Từ 1 năm trở lên
       const years = Math.floor(totalMonths / 12);
-      yearsOfParticipation = years === 1 ? '1 year' : `${years} years`;
+      yearsOfParticipation = years === 1 ? '1' : `>${years}`;
     }
 
     const statistics: LandlordStatistics = {

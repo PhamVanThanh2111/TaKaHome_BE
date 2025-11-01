@@ -13,6 +13,8 @@ import { PdfFillService } from './pdf-fill.service';
 import { Booking } from '../booking/entities/booking.entity';
 import { User } from '../user/entities/user.entity';
 import { Escrow } from '../escrow/entities/escrow.entity';
+import { Property } from '../property/entities/property.entity';
+import { Room } from '../property/entities/room.entity';
 import { EscrowModule } from '../escrow/escrow.module';
 import { NotificationModule } from '../notification/notification.module';
 import { WalletModule } from '../wallet/wallet.module';
@@ -26,6 +28,8 @@ import { SmartCAModule } from '../smartca/smartca.module';
       Booking,
       User,
       Escrow,
+      Property,
+      Room, 
     ]),
     BlockchainModule,
     S3StorageModule,
@@ -42,6 +46,12 @@ import { SmartCAModule } from '../smartca/smartca.module';
     DisputeHandlingService,
     PdfFillService,
   ],
-  exports: [ContractService, ContractTerminationService, PdfFillService, TypeOrmModule],
+  exports: [
+    ContractService,
+    ContractExtensionService,
+    ContractTerminationService,
+    PdfFillService,
+    TypeOrmModule,
+  ],
 })
 export class ContractModule {}

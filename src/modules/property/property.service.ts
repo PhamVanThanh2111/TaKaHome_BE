@@ -1,21 +1,26 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, Not } from 'typeorm';
-import { Property } from './entities/property.entity';
-import { Room } from './entities/room.entity';
-import { RoomType } from './entities/room-type.entity';
-import { User } from '../user/entities/user.entity';
+import { ResponseCommon } from 'src/common/dto/response.dto';
+import { In, Not, Repository } from 'typeorm';
 import { Booking } from '../booking/entities/booking.entity';
 import { BookingStatus } from '../common/enums/booking-status.enum';
+import { PropertyTypeEnum } from '../common/enums/property-type.enum';
+import {
+  S3StorageService,
+  UploadResult,
+} from '../s3-storage/s3-storage.service';
+import { User } from '../user/entities/user.entity';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { CreateRoomTypeDto } from './dto/create-room-type.dto';
-import { UpdatePropertyDto } from './dto/update-property.dto';
-import { ResponseCommon } from 'src/common/dto/response.dto';
+import { FilterPropertyWithUrlDto } from './dto/filter-property-with-url.dto';
 import { FilterPropertyDto } from './dto/filter-property.dto';
-import { PropertyTypeEnum } from '../common/enums/property-type.enum';
+import { UpdateApartmentDto } from './dto/update-apartment.dto';
+import { Property } from './entities/property.entity';
+import { RoomType } from './entities/room-type.entity';
+import { Room } from './entities/room.entity';
+import { PropertyOrRoomTypeWithUrl } from './interfaces/property-with-url.interface';
 import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
-import { S3StorageService } from '../s3-storage/s3-storage.service';
-import { UploadResult } from '../s3-storage/s3-storage.service';
 
 @Injectable()
 export class PropertyService {
@@ -29,6 +34,7 @@ export class PropertyService {
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
     private s3: S3StorageService,
+    private configService: ConfigService,
   ) {}
 
   /**
@@ -614,18 +620,268 @@ export class PropertyService {
     return new ResponseCommon(200, 'SUCCESS', roomType);
   }
 
-  async update(
-    id: string,
-    updatePropertyDto: UpdatePropertyDto,
-  ): Promise<ResponseCommon<Property>> {
-    await this.propertyRepository.update(id, updatePropertyDto);
-    const updatedProperty = await this.propertyRepository.findOne({
-      where: { id: id },
-    });
-    if (!updatedProperty) {
-      throw new Error(`Property with id ${id} not found`);
+  /**
+   * Move a Room to another RoomType OR create a new RoomType and move the room into it.
+   * Supports two modes:
+   * 1. Move to existing RoomType: provide targetRoomTypeId
+   * 2. Create new RoomType and move: set createNewRoomType=true and provide new RoomType data
+   *
+   * Conditions:
+   * - room must exist
+   * - room.isVisible must be false (hidden)
+   * - room must belong to a BOARDING property
+   * - caller must be the property's landlord (ownership)
+   * - if moving to existing RoomType: target RoomType must belong to the same property
+   */
+  async moveRoomToRoomType(
+    roomId: string,
+    moveRoomDto: {
+      targetRoomTypeId?: string;
+      createNewRoomType?: boolean;
+      newRoomTypeName?: string;
+      newRoomTypeDescription?: string;
+      newRoomTypeBedrooms?: number;
+      newRoomTypeBathrooms?: number;
+      newRoomTypeArea?: number;
+      newRoomTypePrice?: number;
+      newRoomTypeDeposit?: number;
+      newRoomTypeFurnishing?: string;
+    },
+    currentUserId: string,
+  ): Promise<ResponseCommon<Room>> {
+    try {
+      // Load room with its property and landlord
+      const room = await this.roomRepository.findOne({
+        where: { id: roomId },
+        relations: ['roomType', 'property', 'property.landlord'],
+      });
+
+      if (!room) {
+        throw new Error(`Room with id ${roomId} not found`);
+      }
+
+      if (room.isVisible === false) {
+        throw new Error(
+          `Cannot move room ${roomId} because it is currently hidden. Please make the room visible first.`,
+        );
+      }
+
+      const property = await this.propertyRepository.findOne({
+        where: { id: room.property.id },
+        relations: ['rooms', 'rooms.roomType', 'landlord'],
+      });
+
+      if (!property) {
+        throw new Error('Parent property not found for this room');
+      }
+
+      // Check if property is BOARDING type
+      if (property.type !== PropertyTypeEnum.BOARDING) {
+        throw new Error(
+          `Cannot move room because property is not BOARDING type. Current type: ${property.type}`,
+        );
+      }
+
+      // Ownership check (landlord must be the caller)
+      if (property.landlord && property.landlord.id !== currentUserId) {
+        throw new Error('Forbidden: you are not the owner of this property');
+      }
+
+      let targetRoomType: RoomType;
+
+      // Mode 1: Create new RoomType
+      if (moveRoomDto.createNewRoomType === true) {
+        // Validate required fields for new RoomType
+        if (
+          !moveRoomDto.newRoomTypeName ||
+          moveRoomDto.newRoomTypeBedrooms === undefined ||
+          moveRoomDto.newRoomTypeBathrooms === undefined ||
+          moveRoomDto.newRoomTypeArea === undefined ||
+          moveRoomDto.newRoomTypePrice === undefined ||
+          moveRoomDto.newRoomTypeDeposit === undefined ||
+          !moveRoomDto.newRoomTypeFurnishing
+        ) {
+          throw new Error(
+            'Missing required fields for new RoomType: name, bedrooms, bathrooms, area, price, deposit, furnishing are required',
+          );
+        }
+
+        // Create new RoomType
+        const newRoomType = this.roomTypeRepository.create({
+          name: moveRoomDto.newRoomTypeName,
+          description: moveRoomDto.newRoomTypeDescription,
+          bedrooms: moveRoomDto.newRoomTypeBedrooms,
+          bathrooms: moveRoomDto.newRoomTypeBathrooms,
+          area: moveRoomDto.newRoomTypeArea,
+          price: moveRoomDto.newRoomTypePrice,
+          deposit: moveRoomDto.newRoomTypeDeposit,
+          furnishing: moveRoomDto.newRoomTypeFurnishing,
+          images: [],
+          heroImage: '',
+        });
+
+        targetRoomType = await this.roomTypeRepository.save(newRoomType);
+      }
+      // Mode 2: Move to existing RoomType
+      else {
+        if (!moveRoomDto.targetRoomTypeId) {
+          throw new Error(
+            'targetRoomTypeId is required when createNewRoomType is false or undefined',
+          );
+        }
+
+        // Load target RoomType and ensure it belongs to the same property
+        const existingRoomType = await this.roomTypeRepository.findOne({
+          where: { id: moveRoomDto.targetRoomTypeId },
+          relations: ['rooms', 'rooms.property'],
+        });
+
+        if (!existingRoomType) {
+          throw new Error(
+            `Target RoomType ${moveRoomDto.targetRoomTypeId} not found`,
+          );
+        }
+
+        // Determine if targetRoomType is associated with the same property by
+        // checking existing rooms of the property or rooms under the targetRoomType
+        const targetBelongsToProperty =
+          (property.rooms || []).some(
+            (r) => r.roomType && r.roomType.id === moveRoomDto.targetRoomTypeId,
+          ) ||
+          (existingRoomType.rooms || []).some(
+            (r) => r.property && r.property.id === property.id,
+          );
+
+        if (!targetBelongsToProperty) {
+          throw new Error(
+            'Target RoomType does not belong to the same property',
+          );
+        }
+
+        targetRoomType = existingRoomType;
+      }
+
+      // Store old RoomType before moving
+      const oldRoomType = room.roomType;
+      const oldRoomTypeId = oldRoomType?.id;
+
+      // Perform move
+      room.roomType = targetRoomType;
+      await this.roomRepository.save(room);
+
+      // Check if old RoomType should be deleted (if no rooms depend on it anymore)
+      if (oldRoomTypeId && oldRoomTypeId !== targetRoomType.id) {
+        // Count remaining rooms using this old RoomType
+        const remainingRooms = await this.roomRepository.count({
+          where: { roomType: { id: oldRoomTypeId } },
+        });
+
+        // If no rooms depend on old RoomType, delete it
+        if (remainingRooms === 0) {
+          await this.roomTypeRepository.delete(oldRoomTypeId);
+          console.log(
+            `Deleted RoomType ${oldRoomTypeId} as no rooms depend on it anymore`,
+          );
+        }
+      }
+
+      const result = await this.roomRepository.findOne({
+        where: { id: roomId },
+        relations: ['roomType', 'property'],
+      });
+
+      const message = moveRoomDto.createNewRoomType
+        ? 'Room moved to new RoomType successfully'
+        : 'Room moved successfully';
+
+      return new ResponseCommon(200, message, result as Room);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Error moving room: ${message}`);
     }
-    return new ResponseCommon(200, 'SUCCESS', updatedProperty);
+  }
+
+  /**
+   * Cập nhật thông tin căn hộ (APARTMENT type)
+   * Chỉ cho phép cập nhật các fields phù hợp cho loại APARTMENT
+   * @param id - ID của căn hộ
+   * @param updateApartmentDto - DTO chứa thông tin cập nhật
+   * @returns Căn hộ sau khi cập nhật
+   */
+  async updateApartment(
+    id: string,
+    updateApartmentDto: UpdateApartmentDto,
+  ): Promise<ResponseCommon<Property>> {
+    try {
+      // Bước 1: Tìm property hiện tại
+      const property = await this.propertyRepository.findOne({
+        where: { id: id },
+        relations: ['landlord'],
+      });
+
+      if (!property) {
+        throw new Error(`Property with id ${id} not found`);
+      }
+
+      // Bước 2: Kiểm tra xem property có phải loại APARTMENT không
+      if (property.type !== PropertyTypeEnum.APARTMENT) {
+        throw new Error(
+          `Property ${id} is not an APARTMENT type. Current type: ${property.type}`,
+        );
+      }
+
+      // Bước 2.5: Kiểm tra xem property đang hiển thị (isVisible = true) không
+      if (property.isVisible === false) {
+        throw new Error(
+          `Cannot update property ${id} because it is currently hidden (isVisible = false). Please make the property visible first before updating.`,
+        );
+      }
+
+      // Bước 3: Cập nhật các fields được phép cho loại APARTMENT
+      const allowedFields: (keyof UpdateApartmentDto)[] = [
+        'title',
+        'description',
+        'province',
+        'ward',
+        'address',
+        'block',
+        'unit',
+        'area',
+        'bedrooms',
+        'bathrooms',
+        'price',
+        'deposit',
+        'furnishing',
+        'legalDoc',
+        'heroImage',
+        'images',
+      ];
+
+      // Lọc và cập nhật chỉ các fields được phép
+      allowedFields.forEach((field) => {
+        if (updateApartmentDto[field] !== undefined) {
+          (property as Record<string, any>)[field] = updateApartmentDto[field];
+        }
+      });
+
+      // Bước 4: Lưu property đã cập nhật
+      await this.propertyRepository.save(property);
+
+      // Bước 5: Tải lại với relations đầy đủ
+      const result = await this.propertyRepository.findOne({
+        where: { id: id },
+        relations: ['landlord'],
+      });
+
+      if (!result) {
+        throw new Error('Failed to retrieve updated apartment');
+      }
+
+      return new ResponseCommon(200, 'Apartment updated successfully', result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Error updating apartment: ${message}`);
+    }
   }
 
   async remove(id: string): Promise<ResponseCommon<null>> {
@@ -654,7 +910,7 @@ export class PropertyService {
         property.type === PropertyTypeEnum.HOUSING ||
         property.type === PropertyTypeEnum.APARTMENT
       ) {
-        property.isVisible = false; // When approved, set visible (isVisible=false means visible)
+        property.isVisible = true; // When approved, set visible (isVisible=true means visible)
       }
 
       await this.propertyRepository.save(property);
@@ -662,7 +918,7 @@ export class PropertyService {
       // Step 3: For BOARDING type, update all rooms visibility
       if (property.type === PropertyTypeEnum.BOARDING && property.rooms) {
         const roomUpdatePromises = property.rooms.map((room) => {
-          room.isVisible = false; // When approved, rooms become visible (isVisible=false)
+          room.isVisible = true; // When approved, rooms become visible (isVisible=true)
           return this.roomRepository.save(room);
         });
 
@@ -722,7 +978,7 @@ export class PropertyService {
             property.type === PropertyTypeEnum.HOUSING ||
             property.type === PropertyTypeEnum.APARTMENT
           ) {
-            property.isVisible = false; // When approved, set visible (isVisible=false means visible)
+            property.isVisible = true; // When approved, set visible (isVisible=true means visible)
           }
 
           await this.propertyRepository.save(property);
@@ -730,7 +986,7 @@ export class PropertyService {
           // Step 4: For BOARDING type, update all rooms visibility
           if (property.type === PropertyTypeEnum.BOARDING && property.rooms) {
             const roomUpdatePromises = property.rooms.map((room) => {
-              room.isVisible = false; // When approved, rooms become visible (isVisible=false)
+              room.isVisible = true; // When approved, rooms become visible (isVisible=true)
               return this.roomRepository.save(room);
             });
 
@@ -770,6 +1026,264 @@ export class PropertyService {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Error approving properties: ${message}`);
     }
+  }
+
+  /**
+   * Filter properties with URL for Gemini chatbot
+   */
+  async filterWithUrl(
+    filterDto: Partial<FilterPropertyWithUrlDto>,
+  ): Promise<ResponseCommon<any>> {
+    const all = (await this.findAll()).data || [];
+    const frontendUrl = this.configService.get<string>('frontend.url');
+
+    const filtered = all.filter((item) => {
+      // For Property (HOUSING/APARTMENT) shape
+      if (
+        (item as Property).type &&
+        (item as Property).type !== PropertyTypeEnum.BOARDING
+      ) {
+        const p = item as Property;
+        const price = p.price ?? 0;
+        const area = p.area ?? 0;
+        const bdr = p.bedrooms ?? 0;
+        const bath = p.bathrooms ?? 0;
+        const furn = p.furnishing ?? '';
+
+        if (filterDto.fromPrice && price < filterDto.fromPrice) {
+          return false;
+        }
+        if (filterDto.toPrice && price > filterDto.toPrice) {
+          return false;
+        }
+        if (filterDto.fromArea && area < filterDto.fromArea) {
+          return false;
+        }
+        if (filterDto.toArea && area > filterDto.toArea) {
+          return false;
+        }
+        if (filterDto.bedrooms && bdr !== filterDto.bedrooms) {
+          return false;
+        }
+        if (filterDto.bathrooms && bath !== filterDto.bathrooms) {
+          return false;
+        }
+        if (filterDto.furnishing && furn !== filterDto.furnishing) {
+          return false;
+        }
+
+        // Only show approved properties for public API
+        if (p.isApproved !== true || p.isVisible !== true) {
+          return false;
+        }
+
+        if (filterDto.province && p.province !== filterDto.province) {
+          return false;
+        }
+
+        if (filterDto.ward && p.ward !== filterDto.ward) {
+          return false;
+        }
+
+        if (filterDto.type && p.type !== filterDto.type) {
+          return false;
+        }
+
+        if (filterDto.q) {
+          const searchTerm = filterDto.q.toLowerCase();
+          const title = (p.title || '').toLowerCase();
+          const description = (p.description || '').toLowerCase();
+          if (
+            !title.includes(searchTerm) &&
+            !description.includes(searchTerm)
+          ) {
+            return false;
+          }
+        }
+
+        return true;
+      }
+
+      // For RoomTypeEntry shape
+      const rt = item as RoomTypeEntry;
+      const price = rt.price ?? 0;
+      const area = rt.area ?? 0;
+      const bdr = rt.bedrooms ?? 0;
+      const bath = rt.bathrooms ?? 0;
+      const furn = rt.furnishing ?? '';
+
+      if (filterDto.fromPrice && price < filterDto.fromPrice) {
+        return false;
+      }
+      if (filterDto.toPrice && price > filterDto.toPrice) {
+        return false;
+      }
+      if (filterDto.fromArea && area < filterDto.fromArea) {
+        return false;
+      }
+      if (filterDto.toArea && area > filterDto.toArea) {
+        return false;
+      }
+      if (filterDto.bedrooms && bdr !== filterDto.bedrooms) {
+        return false;
+      }
+      if (filterDto.bathrooms && bath !== filterDto.bathrooms) {
+        return false;
+      }
+      if (filterDto.furnishing && furn !== filterDto.furnishing) {
+        return false;
+      }
+
+      // Only show approved properties for public API
+      if (rt.property && rt.property.isApproved !== true) {
+        return false;
+      }
+
+      if (filterDto.province && rt.property?.province !== filterDto.province) {
+        return false;
+      }
+
+      if (filterDto.ward && rt.property?.ward !== filterDto.ward) {
+        return false;
+      }
+
+      if (filterDto.type && filterDto.type !== PropertyTypeEnum.BOARDING) {
+        return false;
+      }
+
+      if (filterDto.q) {
+        const searchTerm = filterDto.q.toLowerCase();
+        const name = (rt.name || '').toLowerCase();
+        const description = (rt.description || '').toLowerCase();
+        const propertyTitle = (rt.property?.title || '').toLowerCase();
+        const propertyDescription = (
+          rt.property?.description || ''
+        ).toLowerCase();
+        if (
+          !name.includes(searchTerm) &&
+          !description.includes(searchTerm) &&
+          !propertyTitle.includes(searchTerm) &&
+          !propertyDescription.includes(searchTerm)
+        ) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    // Apply sorting if specified
+    const sortedData = [...filtered];
+    if (filterDto.sortBy) {
+      sortedData.sort((a, b) => {
+        let valueA: number | Date | undefined;
+        let valueB: number | Date | undefined;
+
+        // Get values based on sortBy field
+        if (filterDto.sortBy === 'price') {
+          if (
+            (a as Property).type &&
+            (a as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueA = (a as Property).price ?? 0;
+          } else {
+            valueA = (a as RoomTypeEntry).price ?? 0;
+          }
+
+          if (
+            (b as Property).type &&
+            (b as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueB = (b as Property).price ?? 0;
+          } else {
+            valueB = (b as RoomTypeEntry).price ?? 0;
+          }
+        } else if (filterDto.sortBy === 'area') {
+          if (
+            (a as Property).type &&
+            (a as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueA = (a as Property).area ?? 0;
+          } else {
+            valueA = (a as RoomTypeEntry).area ?? 0;
+          }
+
+          if (
+            (b as Property).type &&
+            (b as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueB = (b as Property).area ?? 0;
+          } else {
+            valueB = (b as RoomTypeEntry).area ?? 0;
+          }
+        } else if (filterDto.sortBy === 'createdAt') {
+          // For Property
+          if (
+            (a as Property).type &&
+            (a as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueA = (a as Property).createdAt;
+          } else {
+            valueA = (a as RoomTypeEntry).property?.createdAt;
+          }
+
+          if (
+            (b as Property).type &&
+            (b as Property).type !== PropertyTypeEnum.BOARDING
+          ) {
+            valueB = (b as Property).createdAt;
+          } else {
+            valueB = (b as RoomTypeEntry).property?.createdAt;
+          }
+        }
+
+        if (valueA === undefined && valueB === undefined) return 0;
+        if (valueA === undefined) return 1;
+        if (valueB === undefined) return -1;
+
+        const comparison = valueA < valueB ? -1 : valueA > valueB ? 1 : 0;
+        return filterDto.sortOrder === 'desc' ? -comparison : comparison;
+      });
+    }
+
+    // Apply limit
+    const limit = filterDto.limit || 10;
+    const limitedData = sortedData.slice(0, limit);
+
+    // Add URL to each item
+    const dataWithUrl: PropertyOrRoomTypeWithUrl[] = limitedData.map((item) => {
+      if (
+        (item as Property).type &&
+        (item as Property).type !== PropertyTypeEnum.BOARDING
+      ) {
+        // For Property (HOUSING/APARTMENT)
+        const property = item as Property;
+        const url = `${frontendUrl}/properties/${property.id}`;
+        return {
+          ...property,
+          url,
+        };
+      } else {
+        // For RoomType
+        const roomType = item as RoomTypeEntry;
+        const url = `${frontendUrl}/properties/${roomType.id}?type=boarding`;
+        return {
+          ...roomType,
+          url,
+        };
+      }
+    });
+
+    const result = {
+      data: dataWithUrl,
+      total: dataWithUrl.length,
+      message:
+        dataWithUrl.length > 0
+          ? `Tìm thấy ${dataWithUrl.length} bất động sản phù hợp`
+          : 'Không tìm thấy bất động sản nào phù hợp với tiêu chí tìm kiếm',
+    };
+
+    return new ResponseCommon(200, 'SUCCESS', result);
   }
 
   /**
