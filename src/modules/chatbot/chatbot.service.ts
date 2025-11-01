@@ -235,7 +235,8 @@ Hãy trả lời bằng tiếng Việt và thân thiện.`,
    */
   private async searchProperties(params: any): Promise<any> {
     try {
-      const backendUrl = 'http://localhost:3000'; // URL của backend hiện tại
+      // Lấy URL backend từ biến môi trường hoặc tự động phát hiện
+      const backendUrl = 'https://takahome-be-production.up.railway.app'; // URL của backend hiện tại
       const apiUrl = `${backendUrl}/properties/filter-with-url`;
 
       // Map parameters từ Gemini sang API format
