@@ -9,12 +9,14 @@ import { User } from '../../user/entities/user.entity';
 import { Account } from '../../account/entities/account.entity';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BlockchainModule } from 'src/modules/blockchain/blockchain.module';
+import { EmailModule } from 'src/modules/email/email.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, Account]),
     PassportModule,
     ConfigModule,
+    EmailModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

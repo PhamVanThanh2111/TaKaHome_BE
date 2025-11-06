@@ -21,6 +21,7 @@ import { vnNow } from 'src/common/datetime';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import * as admin from 'firebase-admin';
+import { EmailService } from 'src/modules/email/email.service';
 
 @Injectable()
 export class AuthService {
@@ -34,17 +35,24 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly blockchainService: BlockchainService,
     private readonly configService: ConfigService,
+    private readonly emailService: EmailService,
   ) {
     // Initialize Firebase Admin SDK if not already initialized
     if (!admin.apps.length) {
       const firebaseConfig = {
         projectId: this.configService.get<string>('FIREBASE_PROJECT_ID'),
-        privateKey: this.configService.get<string>('FIREBASE_PRIVATE_KEY')?.replace(/\\n/g, '\n'),
+        privateKey: this.configService
+          .get<string>('FIREBASE_PRIVATE_KEY')
+          ?.replace(/\\n/g, '\n'),
         clientEmail: this.configService.get<string>('FIREBASE_CLIENT_EMAIL'),
       };
 
       // Check if Firebase credentials are configured
-      if (firebaseConfig.projectId && firebaseConfig.privateKey && firebaseConfig.clientEmail) {
+      if (
+        firebaseConfig.projectId &&
+        firebaseConfig.privateKey &&
+        firebaseConfig.clientEmail
+      ) {
         admin.initializeApp({
           credential: admin.credential.cert({
             projectId: firebaseConfig.projectId,
@@ -54,7 +62,9 @@ export class AuthService {
         });
         this.logger.log('Firebase Admin SDK initialized successfully');
       } else {
-        this.logger.warn('Firebase credentials not found in environment variables');
+        this.logger.warn(
+          'Firebase credentials not found in environment variables',
+        );
       }
     }
   }
@@ -311,54 +321,309 @@ export class AuthService {
   }
 
   /**
-   * Reset password using Firebase ID Token
+   * Reset password using Firebase ID Token (SMS OTP)
    */
   async resetPassword(
     idToken: string,
     newPassword: string,
   ): Promise<ResponseCommon<{ message: string }>> {
     try {
-      // Verify Firebase ID Token
-      const decodedToken = await admin.auth().verifyIdToken(idToken);
-      let phoneNumber = decodedToken.phone_number;
-      
+      // Step 1: Verify Firebase ID Token (signature, expiry, issuer)
+      const decodedToken = await admin.auth().verifyIdToken(idToken, true);
 
+      // Step 2: Validate phone number exists in token
+      let phoneNumber = decodedToken.phone_number;
       if (!phoneNumber) {
-        throw new UnauthorizedException('Invalid token: phone number not found');
+        throw new UnauthorizedException(
+          'Invalid token: phone number not found',
+        );
       }
 
+      // Step 3: Validate token was issued recently (prevent replay attacks)
+      const tokenIssuedAt = decodedToken.auth_time || decodedToken.iat;
+      const tokenAge = Date.now() / 1000 - tokenIssuedAt;
+      const maxTokenAge = 300; // 5 minutes
+      if (tokenAge > maxTokenAge) {
+        throw new UnauthorizedException(
+          'Token đã quá hạn sử dụng. Vui lòng xác thực lại OTP.',
+        );
+      }
+
+      // Step 4: Convert phone format from international to local
+      // +84123456789 -> 0123456789
       if (phoneNumber.startsWith('+84')) {
         phoneNumber = '0' + phoneNumber.substring(3);
+      } else if (phoneNumber.startsWith('+')) {
+        // Validate only Vietnamese phone numbers
+        throw new UnauthorizedException(
+          'Chỉ hỗ trợ số điện thoại Việt Nam (+84)',
+        );
       }
 
-      // Find user by phone number
+      // Step 5: Validate phone number format (Vietnamese)
+      const vietnamesePhoneRegex = /^0[1-9]\d{8}$/;
+      if (!vietnamesePhoneRegex.test(phoneNumber)) {
+        throw new UnauthorizedException('Số điện thoại không hợp lệ');
+      }
+
+      this.logger.log(`Attempting password reset for phone: ${phoneNumber}`);
+
+      // Step 6: Find user by phone number
       const user = await this.userRepo.findOne({
         where: { phone: phoneNumber },
         relations: ['account'],
       });
 
-      if (!user || !user.account) {
-        throw new NotFoundException('Account not found with this phone number');
+      if (!user) {
+        throw new NotFoundException(
+          'Không tìm thấy tài khoản với số điện thoại này',
+        );
       }
 
-      // Hash new password
+      if (!user.account) {
+        throw new NotFoundException(
+          'Tài khoản chưa được kích hoạt hoặc không tồn tại',
+        );
+      }
+
+      // Step 7: Validate Firebase UID matches (if user has Firebase UID stored)
+      // This is extra security if you store Firebase UID in user table
+      // if (user.firebaseUid && user.firebaseUid !== decodedToken.uid) {
+      //   throw new UnauthorizedException('Token không khớp với tài khoản');
+      // }
+
+      // Step 8: Hash new password with bcrypt
       const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-      // Update password
+      // Step 9: Update password in database
       user.account.password = hashedPassword;
       await this.accountRepo.save(user.account);
 
-      this.logger.log(`Password reset successful for user: ${user.id}`);
+      this.logger.log(
+        `Password reset successful via Firebase OTP for user: ${user.id}`,
+      );
 
       return new ResponseCommon(200, 'SUCCESS', {
-        message: 'Password reset successful!',
+        message: 'Đặt lại mật khẩu thành công!',
       });
     } catch (error) {
       this.logger.error('Reset password error:', error);
-      if (error instanceof NotFoundException || error instanceof UnauthorizedException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof UnauthorizedException
+      ) {
         throw error;
       }
-      throw new UnauthorizedException('Invalid or expired token');
+      throw new UnauthorizedException(
+        'Token không hợp lệ hoặc đã hết hạn. Vui lòng xác thực OTP lại.',
+      );
+    }
+  }
+
+  /**
+   * Send forgot password email with reset token
+   */
+  async sendForgotPasswordEmail(
+    email: string,
+  ): Promise<ResponseCommon<{ message: string }>> {
+    try {
+      // Step 1: Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        // Return generic message for security
+        return new ResponseCommon(200, 'SUCCESS', {
+          message:
+            'Nếu email tồn tại trong hệ thống, bạn sẽ nhận được link reset mật khẩu.',
+        });
+      }
+
+      // Step 2: Normalize email (lowercase, trim)
+      const normalizedEmail = email.toLowerCase().trim();
+
+      // Step 3: Find account by email
+      const account = await this.accountRepo.findOne({
+        where: { email: normalizedEmail },
+        relations: ['user'],
+      });
+
+      if (!account) {
+        // Security: Don't reveal if email exists or not
+        // Still return success to prevent user enumeration
+        return new ResponseCommon(200, 'SUCCESS', {
+          message:
+            'Nếu email tồn tại trong hệ thống, bạn sẽ nhận được link reset mật khẩu.',
+        });
+      }
+
+      // Step 4: Validate account has associated user
+      if (!account.user) {
+        this.logger.warn(
+          `Account ${account.id} has no associated user. Skipping email.`,
+        );
+        return new ResponseCommon(200, 'SUCCESS', {
+          message:
+            'Nếu email tồn tại trong hệ thống, bạn sẽ nhận được link reset mật khẩu.',
+        });
+      }
+
+      // Step 5: Check if there's already a recent token (rate limiting)
+      // Prevent spam by checking if token was generated recently
+      if (account.resetPasswordToken) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          const existingToken = this.jwtService.decode(
+            account.resetPasswordToken,
+          );
+          
+          if (existingToken?.timestamp) {
+            const tokenAge = Date.now() - (existingToken.timestamp as number);
+            const minTokenAge = 60000; // 1 minute cooldown
+
+            if (tokenAge < minTokenAge) {
+              this.logger.warn(
+                `Rate limit: Reset email already sent recently for ${normalizedEmail}`,
+              );
+              return new ResponseCommon(200, 'SUCCESS', {
+                message:
+                  'Nếu email tồn tại trong hệ thống, bạn sẽ nhận được link reset mật khẩu.',
+              });
+            }
+          }
+        } catch {
+          // Invalid or expired token, proceed with new one
+        }
+      }
+
+      // Step 6: Generate reset token (JWT with 1 hour expiry)
+      const resetToken = this.jwtService.sign(
+        {
+          email: account.email,
+          type: 'reset-password',
+          timestamp: Date.now(),
+        },
+        {
+          secret: this.configService.get<string>('JWT_SECRET'),
+          expiresIn: '1h', // Token expires in 1 hour
+        },
+      );
+
+      // Step 7: Save reset token to database (overwrites old token)
+      account.resetPasswordToken = resetToken;
+      await this.accountRepo.save(account);
+
+      // Step 8: Send email with token
+      await this.emailService.sendResetPasswordEmail(
+        normalizedEmail,
+        resetToken,
+        account.user.fullName,
+      );
+
+      this.logger.log(`Reset password email sent to: ${normalizedEmail}`);
+
+      return new ResponseCommon(200, 'SUCCESS', {
+        message:
+          'Nếu email tồn tại trong hệ thống, bạn sẽ nhận được link reset mật khẩu.',
+      });
+    } catch (error) {
+      this.logger.error('Send forgot password email error:', error);
+      // Return generic error, don't expose details
+      return new ResponseCommon(200, 'SUCCESS', {
+        message:
+          'Nếu email tồn tại trong hệ thống, bạn sẽ nhận được link reset mật khẩu.',
+      });
+    }
+  }
+
+  /**
+   * Reset password using token from email
+   */
+  async resetPasswordWithToken(
+    token: string,
+    newPassword: string,
+  ): Promise<ResponseCommon<{ message: string }>> {
+    try {
+      // Step 1: Verify JWT signature and expiry
+      const decoded = this.jwtService.verify<{
+        email: string;
+        type?: string;
+        timestamp?: number;
+        [key: string]: unknown;
+      }>(token, {
+        secret: this.configService.get<string>('JWT_SECRET'),
+      });
+
+      // Step 2: Validate token type
+      if (decoded.type !== 'reset-password') {
+        throw new UnauthorizedException('Invalid token type');
+      }
+
+      // Step 3: Validate email exists in decoded token
+      if (!decoded.email) {
+        throw new UnauthorizedException('Invalid token: missing email');
+      }
+
+      // Step 4: Find account by email first
+      const account = await this.accountRepo.findOne({
+        where: { email: decoded.email },
+      });
+
+      if (!account) {
+        throw new UnauthorizedException(
+          'Token không hợp lệ hoặc tài khoản không tồn tại',
+        );
+      }
+
+      // Step 5: CRITICAL - Validate token matches the one in database
+      if (!account.resetPasswordToken) {
+        throw new UnauthorizedException(
+          'Token không hợp lệ hoặc đã được sử dụng',
+        );
+      }
+
+      // Step 6: CRITICAL - Token in DB must exactly match the provided token
+      if (account.resetPasswordToken !== token) {
+        throw new UnauthorizedException(
+          'Token không khớp. Token có thể đã được sử dụng hoặc bị thay thế.',
+        );
+      }
+
+      // Step 7: Additional security - Verify token timestamp is within reasonable time
+      const tokenAge = Date.now() - (decoded.timestamp || 0);
+      const oneHourInMs = 3600000;
+      if (tokenAge > oneHourInMs) {
+        // Extra check beyond JWT expiry
+        account.resetPasswordToken = undefined;
+        await this.accountRepo.save(account);
+        throw new UnauthorizedException('Token đã hết hạn');
+      }
+
+      // Step 8: Hash new password with bcrypt
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      // Step 9: Update password and CLEAR token (single-use token)
+      account.password = hashedPassword;
+      account.resetPasswordToken = undefined;
+      await this.accountRepo.save(account);
+
+      this.logger.log(
+        `Password reset successful via email for: ${account.email}`,
+      );
+
+      return new ResponseCommon(200, 'SUCCESS', {
+        message: 'Đặt lại mật khẩu thành công!',
+      });
+    } catch (error) {
+      this.logger.error('Reset password with token error:', error);
+      if (
+        error instanceof UnauthorizedException ||
+        error.name === 'JsonWebTokenError' ||
+        error.name === 'TokenExpiredError'
+      ) {
+        throw new UnauthorizedException(
+          'Token không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu reset mật khẩu lại.',
+        );
+      }
+      throw error;
     }
   }
 }
