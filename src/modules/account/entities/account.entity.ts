@@ -22,6 +22,9 @@ export class Account {
   @Column({ nullable: true })
   refreshToken?: string;
 
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  resetPasswordToken?: string;
+
   @Column({ default: false })
   isVerified: boolean;
 

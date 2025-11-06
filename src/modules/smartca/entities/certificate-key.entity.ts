@@ -14,7 +14,7 @@ export class CertificateKey {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @OneToOne(() => User)
+  @OneToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
   user: User;
 
@@ -27,7 +27,12 @@ export class CertificateKey {
   @Column({ type: 'text', name: 'certificate_pem' })
   certificatePem: string;
 
-  @Column({ type: 'varchar', length: 255, name: 'serial_number', nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 255,
+    name: 'serial_number',
+    nullable: true,
+  })
   serialNumber: string | null;
 
   @Column({ type: 'timestamptz', name: 'issued_at', nullable: true })
@@ -42,9 +47,17 @@ export class CertificateKey {
   @Column({ type: 'timestamptz', name: 'revoked_at', nullable: true })
   revokedAt: Date | null;
 
-  @CreateDateColumn({ type: 'timestamptz', name: 'created_at', default: () => 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({
+    type: 'timestamptz',
+    name: 'created_at',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   createdAt: Date;
 
-  @UpdateDateColumn({ type: 'timestamptz', name: 'updated_at', default: () => 'CURRENT_TIMESTAMP' })
+  @UpdateDateColumn({
+    type: 'timestamptz',
+    name: 'updated_at',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   updatedAt: Date;
 }
