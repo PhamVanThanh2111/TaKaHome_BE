@@ -20,6 +20,7 @@ import { Logger } from '@nestjs/common';
 import { vnNow } from 'src/common/datetime';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import * as admin from 'firebase-admin';
 
 @Injectable()
 export class AuthService {
@@ -33,7 +34,30 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly blockchainService: BlockchainService,
     private readonly configService: ConfigService,
-  ) {}
+  ) {
+    // Initialize Firebase Admin SDK if not already initialized
+    if (!admin.apps.length) {
+      const firebaseConfig = {
+        projectId: this.configService.get<string>('FIREBASE_PROJECT_ID'),
+        privateKey: this.configService.get<string>('FIREBASE_PRIVATE_KEY')?.replace(/\\n/g, '\n'),
+        clientEmail: this.configService.get<string>('FIREBASE_CLIENT_EMAIL'),
+      };
+
+      // Check if Firebase credentials are configured
+      if (firebaseConfig.projectId && firebaseConfig.privateKey && firebaseConfig.clientEmail) {
+        admin.initializeApp({
+          credential: admin.credential.cert({
+            projectId: firebaseConfig.projectId,
+            privateKey: firebaseConfig.privateKey,
+            clientEmail: firebaseConfig.clientEmail,
+          }),
+        });
+        this.logger.log('Firebase Admin SDK initialized successfully');
+      } else {
+        this.logger.warn('Firebase credentials not found in environment variables');
+      }
+    }
+  }
 
   async register(
     dto: RegisterDto,
@@ -284,5 +308,57 @@ export class AuthService {
     }
 
     return { account, user, isNew: true };
+  }
+
+  /**
+   * Reset password using Firebase ID Token
+   */
+  async resetPassword(
+    idToken: string,
+    newPassword: string,
+  ): Promise<ResponseCommon<{ message: string }>> {
+    try {
+      // Verify Firebase ID Token
+      const decodedToken = await admin.auth().verifyIdToken(idToken);
+      let phoneNumber = decodedToken.phone_number;
+      
+
+      if (!phoneNumber) {
+        throw new UnauthorizedException('Invalid token: phone number not found');
+      }
+
+      if (phoneNumber.startsWith('+84')) {
+        phoneNumber = '0' + phoneNumber.substring(3);
+      }
+
+      // Find user by phone number
+      const user = await this.userRepo.findOne({
+        where: { phone: phoneNumber },
+        relations: ['account'],
+      });
+
+      if (!user || !user.account) {
+        throw new NotFoundException('Account not found with this phone number');
+      }
+
+      // Hash new password
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      // Update password
+      user.account.password = hashedPassword;
+      await this.accountRepo.save(user.account);
+
+      this.logger.log(`Password reset successful for user: ${user.id}`);
+
+      return new ResponseCommon(200, 'SUCCESS', {
+        message: 'Password reset successful!',
+      });
+    } catch (error) {
+      this.logger.error('Reset password error:', error);
+      if (error instanceof NotFoundException || error instanceof UnauthorizedException) {
+        throw error;
+      }
+      throw new UnauthorizedException('Invalid or expired token');
+    }
   }
 }

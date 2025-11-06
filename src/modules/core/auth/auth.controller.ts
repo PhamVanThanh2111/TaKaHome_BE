@@ -5,6 +5,8 @@ import { LoginDto } from './dto/login.dto';
 import { ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { RegisterResponseDto } from './dto/register-response.dto';
 import { LoginResponseDto } from './dto/login-response.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ResetPasswordResponseDto } from './dto/reset-password-response.dto';
 import { Response } from 'express';
 
 @Controller('auth')
@@ -71,5 +73,25 @@ export class AuthController {
       // Xử lý lỗi OAuth
       return res.redirect(`${process.env.FRONTEND_URL}/login?error=oauth_failed`);
     }
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset mật khẩu sau xác thực OTP Firebase' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    type: ResetPasswordResponseDto,
+    description: 'Reset mật khẩu thành công',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Token không hợp lệ hoặc đã hết hạn',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Không tìm thấy tài khoản với số điện thoại này',
+  })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto.idToken, dto.newPassword);
   }
 }

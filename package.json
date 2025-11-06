@@ -53,6 +53,7 @@
     "dotenv": "^17.2.0",
     "fabric-ca-client": "^2.2.20",
     "fabric-network": "^2.2.20",
+    "firebase-admin": "^13.5.0",
     "fontkit": "^2.0.4",
     "form-data": "^4.0.4",
     "joi": "^18.0.0",
