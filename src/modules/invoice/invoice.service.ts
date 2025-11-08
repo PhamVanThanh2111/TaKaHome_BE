@@ -92,6 +92,37 @@ export class InvoiceService {
   }
 
   async create(dto: CreateInvoiceDto): Promise<ResponseCommon<Invoice>> {
+    // Validate DAMAGE_COMPENSATION serviceType: chỉ cho phép tạo trong 7 ngày cuối hợp đồng
+    const hasDamageCompensation = dto.items.some(
+      (item) => item.serviceType === ServiceTypeEnum.DAMAGE_COMPENSATION,
+    );
+
+    if (hasDamageCompensation) {
+      // Lấy thông tin hợp đồng để kiểm tra endDate
+      const contract = await this.contractRepository.findOne({
+        where: { id: dto.contractId },
+      });
+
+      if (!contract) {
+        throw new BadRequestException('Không tìm thấy hợp đồng');
+      }
+
+      // Tính số giờ còn lại đến khi hợp đồng kết thúc
+      // Demo: 1 giờ = 1 ngày => 7 ngày = 7 giờ
+      const now = vnNow();
+      const endDate = contract.endDate;
+      const hoursUntilEnd =
+        (endDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+      // Chỉ cho phép tạo hóa đơn DAMAGE_COMPENSATION trong 7 giờ cuối cùng của hợp đồng
+      if (hoursUntilEnd > 7 || hoursUntilEnd < 0) {
+        throw new BadRequestException(
+          `Hóa đơn bồi thường hư hỏng chỉ có thể được tạo trong vòng 7 giờ (tương đương 7 ngày thực tế) cuối cùng của hợp đồng. ` +
+            `Hiện tại còn ${Math.floor(hoursUntilEnd)} giờ đến khi hợp đồng kết thúc.`,
+        );
+      }
+    }
+
     const items = dto.items.map((i) => this.itemRepository.create(i));
     const total = items.reduce((sum, item) => sum + item.amount, 0);
     const code = this.generateCode();
@@ -125,6 +156,37 @@ export class InvoiceService {
       throw new BadRequestException(
         'Không được có dịch vụ trùng lặp trong cùng một hóa đơn',
       );
+    }
+
+    // Validate DAMAGE_COMPENSATION: chỉ cho phép tạo trong 7 ngày cuối hợp đồng
+    const hasDamageCompensation = dto.services.some(
+      (s) => s.serviceType === ServiceTypeEnum.DAMAGE_COMPENSATION,
+    );
+
+    if (hasDamageCompensation) {
+      // Lấy thông tin hợp đồng để kiểm tra endDate
+      const contractForValidation = await this.contractRepository.findOne({
+        where: { id: dto.contractId },
+      });
+
+      if (!contractForValidation) {
+        throw new BadRequestException('Không tìm thấy hợp đồng');
+      }
+
+      // Tính số giờ còn lại đến khi hợp đồng kết thúc
+      // Demo: 1 giờ = 1 ngày => 7 ngày = 7 giờ
+      const now = vnNow();
+      const endDate = contractForValidation.endDate;
+      const hoursUntilEnd =
+        (endDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+      // Chỉ cho phép tạo hóa đơn DAMAGE_COMPENSATION trong 7 giờ cuối cùng của hợp đồng
+      if (hoursUntilEnd > 7 || hoursUntilEnd < 0) {
+        throw new BadRequestException(
+          `Hóa đơn bồi thường hư hỏng chỉ có thể được tạo trong vòng 7 giờ (tương đương 7 ngày thực tế) cuối cùng của hợp đồng. ` +
+            `Hiện tại còn ${Math.floor(hoursUntilEnd)} giờ đến khi hợp đồng kết thúc.`,
+        );
+      }
     }
 
     // Validate từng service item
