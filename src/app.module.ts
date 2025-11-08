@@ -1,5 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard } from '@nestjs/throttler';
 
 // Import all module classes
 import { UserModule } from './modules/user/user.module';
@@ -76,9 +78,44 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
     }),
     ThrottlerModule.forRoot([
       {
+        name: 'default',
+        ttl: 60000, // 60 giây (1 phút)
+        limit: 100, // Giới hạn 100 requests mỗi phút cho các API thông thường
+      },
+      {
+        name: 'auth',
+        ttl: 60000, // 1 phút
+        limit: 5, // Rất nghiêm ngặt cho login/register để chống brute force
+      },
+      {
+        name: 'password',
+        ttl: 300000, // 5 phút
+        limit: 3, // Rất nghiêm ngặt cho forgot password, reset password
+      },
+      {
+        name: 'payment',
+        ttl: 60000, // 1 phút
+        limit: 10, // Nghiêm ngặt cho các giao dịch thanh toán
+      },
+      {
+        name: 'upload',
+        ttl: 60000, // 1 phút
+        limit: 10, // Giới hạn upload file để tránh abuse
+      },
+      {
+        name: 'verification',
+        ttl: 60000, // 1 phút
+        limit: 5, // Nghiêm ngặt cho xác minh CCCD, OTP, etc.
+      },
+      {
+        name: 'report',
+        ttl: 60000, // 1 phút
+        limit: 10, // Chống spam report
+      },
+      {
         name: 'chatbot',
         ttl: 60000, // 1 phút
-        limit: 1000, // High limit - chỉ để module hoạt động, control ở controller level
+        limit: 1000, // High limit cho chatbot
       },
     ]),
     AuthModule,
@@ -104,7 +141,12 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
     CronModule,
     StatisticsModule,
   ],
-  providers: [],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

@@ -35,6 +35,7 @@ import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 import { Public } from 'src/common/decorators/public.decorator';
 import { ConfigType } from '@nestjs/config';
 import frontendConfig from '../../config/frontend.config';
+import { Throttle } from '@nestjs/throttler';
 
 interface PaymentState {
   userId: string;
@@ -52,6 +53,7 @@ export class PaymentController {
     private readonly frontend: ConfigType<typeof frontendConfig>,
   ) {}
 
+  @Throttle({ payment: {} })
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo payment' })
@@ -79,6 +81,7 @@ export class PaymentController {
     });
   }
 
+  @Throttle({ payment: {} })
   @Post('invoice/:invoiceId')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo payment từ hóa đơn' })
@@ -142,6 +145,7 @@ export class PaymentController {
     return this.paymentService.update(id, updatePaymentDto);
   }
 
+  @Throttle({ payment: {} })
   @Get('vnpay/create')
   async createVnpay(
     @Query('contractId') contractId: string,

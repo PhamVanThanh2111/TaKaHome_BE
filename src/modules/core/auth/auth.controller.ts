@@ -10,11 +10,13 @@ import { ResetPasswordResponseDto } from './dto/reset-password-response.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordWithTokenDto } from './dto/reset-password-with-token.dto';
 import { Response } from 'express';
+import { Throttle } from '@nestjs/throttler';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @Throttle({ auth: {} })
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Đăng ký tài khoản mới' })
@@ -31,6 +33,7 @@ export class AuthController {
     return await this.authService.register(dto);
   }
 
+  @Throttle({ auth: {} })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Đăng nhập' })
@@ -77,6 +80,7 @@ export class AuthController {
     }
   }
 
+  @Throttle({ password: {} })
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset mật khẩu sau xác thực OTP Firebase' })
@@ -97,6 +101,7 @@ export class AuthController {
     return this.authService.resetPassword(dto.idToken, dto.newPassword);
   }
 
+  @Throttle({ password: {} })
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Gửi email reset mật khẩu' })
@@ -109,6 +114,7 @@ export class AuthController {
     return this.authService.sendForgotPasswordEmail(dto.email);
   }
 
+  @Throttle({ password: {} })
   @Post('reset-password-email')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset mật khẩu bằng token từ email' })

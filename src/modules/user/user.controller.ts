@@ -24,6 +24,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 import { CccdRecognitionResponseDto, CccdRecognitionErrorDto } from './dto/cccd-recognition.dto';
+import { Throttle } from '@nestjs/throttler';
 
 @Controller('users')
 @ApiBearerAuth()
@@ -69,6 +70,7 @@ export class UserController {
     return this.userService.remove(id);
   }
 
+  @Throttle({ upload: {} })
   @Post('upload-avatar')
   @UseInterceptors(FileInterceptor('avatar'))
   @ApiOperation({ 
@@ -152,6 +154,7 @@ export class UserController {
     );
   }
 
+  @Throttle({ verification: {} })
   @Post('recognize-cccd')
   @UseInterceptors(FileInterceptor('image'))
   @ApiOperation({ 

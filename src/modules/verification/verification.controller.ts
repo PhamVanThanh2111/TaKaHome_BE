@@ -13,11 +13,13 @@ import { CreateVerificationDto } from './dto/create-verification.dto';
 import { UpdateVerificationDto } from './dto/update-verification.dto';
 import { ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { VerificationResponseDto } from './dto/verification-response.dto';
+import { Throttle } from '@nestjs/throttler';
 
 @Controller('verifications')
 export class VerificationController {
   constructor(private readonly verificationService: VerificationService) {}
 
+  @Throttle({ verification: {} })
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo yêu cầu xác minh giấy tờ' })
