@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { JwtLogoutStrategy } from './strategies/jwt-logout.strategy';
 import { User } from '../../user/entities/user.entity';
 import { Account } from '../../account/entities/account.entity';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -28,7 +29,7 @@ import { EmailModule } from 'src/modules/email/email.module';
     forwardRef(() => BlockchainModule),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, JwtLogoutStrategy],
   exports: [AuthService],
 })
 export class AuthModule {}

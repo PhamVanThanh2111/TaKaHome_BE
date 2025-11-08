@@ -17,7 +17,6 @@ import { ReportResponseDto } from './dto/report-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
-import { Throttle } from '@nestjs/throttler';
 
 @Controller('reports')
 @ApiBearerAuth()
@@ -25,7 +24,6 @@ import { Throttle } from '@nestjs/throttler';
 export class ReportController {
   constructor(private readonly reportService: ReportService) {}
 
-  @Throttle({ report: {} })
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo báo cáo mới' })

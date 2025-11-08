@@ -80,37 +80,27 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
       {
         name: 'default',
         ttl: 60000, // 60 giây (1 phút)
-        limit: 100, // Giới hạn 100 requests mỗi phút cho các API thông thường
+        limit: 300, // Giới hạn 300 requests mỗi phút cho các API thông thường
       },
       {
         name: 'auth',
         ttl: 60000, // 1 phút
-        limit: 5, // Rất nghiêm ngặt cho login/register để chống brute force
+        limit: 15, // Rất nghiêm ngặt cho login/register để chống brute force
       },
       {
         name: 'password',
         ttl: 300000, // 5 phút
-        limit: 3, // Rất nghiêm ngặt cho forgot password, reset password
+        limit: 9, // Rất nghiêm ngặt cho forgot password, reset password
       },
       {
         name: 'payment',
         ttl: 60000, // 1 phút
-        limit: 10, // Nghiêm ngặt cho các giao dịch thanh toán
+        limit: 30, // Nghiêm ngặt cho các giao dịch thanh toán
       },
       {
         name: 'upload',
         ttl: 60000, // 1 phút
-        limit: 10, // Giới hạn upload file để tránh abuse
-      },
-      {
-        name: 'verification',
-        ttl: 60000, // 1 phút
-        limit: 5, // Nghiêm ngặt cho xác minh CCCD, OTP, etc.
-      },
-      {
-        name: 'report',
-        ttl: 60000, // 1 phút
-        limit: 10, // Chống spam report
+        limit: 30, // Giới hạn upload file để tránh abuse
       },
       {
         name: 'chatbot',
