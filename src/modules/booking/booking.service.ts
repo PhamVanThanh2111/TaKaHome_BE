@@ -33,6 +33,7 @@ import { Property } from '../property/entities/property.entity';
 import { Room } from '../property/entities/room.entity';
 import { User } from '../user/entities/user.entity';
 import { RoleEnum } from '../common/enums/role.enum';
+import { ServiceTypeEnum } from '../common/enums/service-type.enum';
 
 @Injectable()
 export class BookingService {
@@ -757,6 +758,7 @@ export class BookingService {
           {
             description: 'First month rent payment',
             amount: monthlyRent,
+            serviceType: ServiceTypeEnum.RENT,
           },
         ],
         billingPeriod: formatVN(dueDate, 'yyyy-MM'),

@@ -7,6 +7,7 @@ import { formatVN, vnNow } from '../../common/datetime';
 import { BlockchainService } from '../blockchain/blockchain.service';
 import { Contract } from '../contract/entities/contract.entity';
 import { InvoiceService } from './invoice.service';
+import { ServiceTypeEnum } from '../common/enums/service-type.enum';
 
 @Injectable()
 export class InvoiceCronService {
@@ -167,6 +168,7 @@ export class InvoiceCronService {
                 {
                   description: `Monthly rent - Period ${period}`,
                   amount: payment.amount,
+                  serviceType: ServiceTypeEnum.RENT,
                 },
               ],
               billingPeriod,
