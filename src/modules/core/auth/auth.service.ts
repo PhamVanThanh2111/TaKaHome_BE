@@ -148,7 +148,9 @@ export class AuthService {
 
   async login(
     dto: LoginDto,
-  ): Promise<ResponseCommon<{ accessToken: string; account: any }>> {
+  ): Promise<
+    ResponseCommon<{ accessToken: string; refreshToken: string; account: any }>
+  > {
     const acc = await this.accountRepo.findOne({
       where: { email: dto.email },
       relations: ['user'],
@@ -164,11 +166,23 @@ export class AuthService {
       fullName: acc.user.fullName,
     };
 
+    // Generate access token
+    const accessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
+
+    // Generate refresh token (7 days)
+    const refreshToken = this.jwtService.sign(
+      { sub: acc.user.id, email: acc.email, type: 'refresh' },
+      { expiresIn: '7d' },
+    );
+
+    // Save refresh token to database
+    acc.refreshToken = refreshToken;
     acc.lastLoginAt = vnNow();
     await this.accountRepo.save(acc);
 
     return new ResponseCommon(200, 'SUCCESS', {
-      accessToken: this.jwtService.sign(payload),
+      accessToken,
+      refreshToken,
       account: {
         id: acc.id,
         email: acc.email,
@@ -190,6 +204,7 @@ export class AuthService {
 
   async handleGoogleLogin(code: string): Promise<{
     accessToken: string;
+    refreshToken: string;
     account: any;
     accountStatus: 'new' | 'existing';
   }> {
@@ -233,12 +248,23 @@ export class AuthService {
         fullName: result.user.fullName,
       };
 
-      // Cập nhật last login
+      // Generate access token
+      const accessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
+
+      // Generate refresh token (7 days)
+      const refreshToken = this.jwtService.sign(
+        { sub: result.user.id, email: result.account.email, type: 'refresh' },
+        { expiresIn: '7d' },
+      );
+
+      // Save refresh token and update last login
+      result.account.refreshToken = refreshToken;
       result.account.lastLoginAt = vnNow();
       await this.accountRepo.save(result.account);
 
       return {
-        accessToken: this.jwtService.sign(payload),
+        accessToken,
+        refreshToken,
         account: {
           id: result.account.id,
           email: result.account.email,
@@ -624,6 +650,141 @@ export class AuthService {
         );
       }
       throw error;
+    }
+  }
+
+  /**
+   * Refresh access token using refresh token
+   */
+  async refreshAccessToken(
+    refreshToken: string,
+  ): Promise<ResponseCommon<{ accessToken: string; refreshToken: string }>> {
+    try {
+      // Step 1: Verify JWT signature and expiry
+      const decoded = this.jwtService.verify<{
+        sub: string;
+        email: string;
+        type?: string;
+        [key: string]: unknown;
+      }>(refreshToken, {
+        secret: this.configService.get<string>('JWT_SECRET'),
+      });
+
+      // Step 2: Validate token type
+      if (decoded.type !== 'refresh') {
+        throw new UnauthorizedException('Invalid token type');
+      }
+
+      // Step 3: Validate email exists in decoded token
+      if (!decoded.email || !decoded.sub) {
+        throw new UnauthorizedException('Invalid token: missing credentials');
+      }
+
+      // Step 4: Find account by email
+      const account = await this.accountRepo.findOne({
+        where: { email: decoded.email },
+        relations: ['user'],
+      });
+
+      if (!account) {
+        throw new UnauthorizedException(
+          'Token không hợp lệ hoặc tài khoản không tồn tại',
+        );
+      }
+
+      // Step 5: CRITICAL - Validate refresh token matches the one in database
+      if (!account.refreshToken) {
+        throw new UnauthorizedException(
+          'Refresh token không tồn tại. Vui lòng đăng nhập lại.',
+        );
+      }
+
+      // Step 6: CRITICAL - Token in DB must exactly match the provided token
+      if (account.refreshToken !== refreshToken) {
+        throw new UnauthorizedException(
+          'Refresh token không khớp. Vui lòng đăng nhập lại.',
+        );
+      }
+
+      // Step 7: Validate user ID matches
+      if (account.user.id !== decoded.sub) {
+        throw new UnauthorizedException('Token không khớp với tài khoản');
+      }
+
+      // Step 8: Generate new access token
+      const payload = {
+        sub: account.user.id,
+        email: account.email,
+        roles: account.roles,
+        fullName: account.user.fullName,
+      };
+
+      const newAccessToken = this.jwtService.sign(payload, {
+        expiresIn: '15m',
+      });
+
+      // Step 9: Optionally rotate refresh token (recommended for security)
+      // Generate new refresh token
+      const newRefreshToken = this.jwtService.sign(
+        { sub: account.user.id, email: account.email, type: 'refresh' },
+        { expiresIn: '7d' },
+      );
+
+      // Save new refresh token to database
+      account.refreshToken = newRefreshToken;
+      await this.accountRepo.save(account);
+
+      this.logger.log(`Access token refreshed for user: ${account.email}`);
+
+      return new ResponseCommon(200, 'SUCCESS', {
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+      });
+    } catch (error) {
+      this.logger.error('Refresh token error:', error);
+      if (
+        error instanceof UnauthorizedException ||
+        error.name === 'JsonWebTokenError' ||
+        error.name === 'TokenExpiredError'
+      ) {
+        throw new UnauthorizedException(
+          'Refresh token không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Logout - clear refresh token from database
+   */
+  async logout(userId: string): Promise<ResponseCommon<{ message: string }>> {
+    try {
+      // Find account by user ID
+      const account = await this.accountRepo.findOne({
+        where: { user: { id: userId } },
+        relations: ['user'],
+      });
+
+      if (!account) {
+        throw new NotFoundException('Tài khoản không tồn tại');
+      }
+
+      // Clear refresh token
+      account.refreshToken = undefined;
+      await this.accountRepo.save(account);
+
+      this.logger.log(`User logged out: ${account.email}`);
+
+      return new ResponseCommon(200, 'SUCCESS', {
+        message: 'Đăng xuất thành công!',
+      });
+    } catch (error) {
+      this.logger.error('Logout error:', error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new UnauthorizedException('Đăng xuất thất bại');
     }
   }
 }
