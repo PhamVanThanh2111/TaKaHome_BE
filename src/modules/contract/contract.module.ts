@@ -18,6 +18,7 @@ import { User } from '../user/entities/user.entity';
 import { Escrow } from '../escrow/entities/escrow.entity';
 import { Property } from '../property/entities/property.entity';
 import { Room } from '../property/entities/room.entity';
+import { Invoice } from '../invoice/entities/invoice.entity';
 import { EscrowModule } from '../escrow/escrow.module';
 import { NotificationModule } from '../notification/notification.module';
 import { WalletModule } from '../wallet/wallet.module';
@@ -33,7 +34,8 @@ import { SmartCAModule } from '../smartca/smartca.module';
       User,
       Escrow,
       Property,
-      Room, 
+      Room,
+      Invoice,
     ]),
     BlockchainModule,
     S3StorageModule,
