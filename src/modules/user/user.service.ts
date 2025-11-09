@@ -142,6 +142,7 @@ export class UserService {
         if (user) {
           await this.userRepository.update(userId, {
             CCCD: result.id,
+            isVerified: true,
           });
         }
       }
