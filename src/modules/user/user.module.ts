@@ -7,10 +7,11 @@ import { UserController } from './user.controller';
 import { S3StorageModule } from '../s3-storage/s3-storage.module';
 import { CccdRecognitionService } from './cccd-recognition.service';
 import fptAiConfig from '../../config/fpt-ai.config';
+import { Account } from '../account/entities/account.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, Account]),
     S3StorageModule,
     ConfigModule.forFeature(fptAiConfig),
   ],

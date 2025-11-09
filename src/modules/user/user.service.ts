@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
@@ -7,12 +11,15 @@ import { ResponseCommon } from 'src/common/dto/response.dto';
 import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { CccdRecognitionService } from './cccd-recognition.service';
 import { CccdRecognitionResponseDto } from './dto/cccd-recognition.dto';
+import { Account } from '../account/entities/account.entity';
 
 @Injectable()
 export class UserService {
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(Account)
+    private accountRepository: Repository<Account>,
     private readonly s3StorageService: S3StorageService,
     private readonly cccdRecognitionService: CccdRecognitionService,
   ) {}
@@ -41,7 +48,7 @@ export class UserService {
     if (!existingUser) {
       throw new NotFoundException(`User with id ${id} not found`);
     }
-    
+
     await this.userRepository.update(id, updateUserDto);
     const updatedUser = await this.findOne(id);
     return updatedUser;
@@ -52,7 +59,7 @@ export class UserService {
     if (!existingUser) {
       throw new NotFoundException(`User with id ${id} not found`);
     }
-    
+
     await this.userRepository.delete(id);
     return new ResponseCommon(200, 'SUCCESS');
   }
@@ -76,10 +83,15 @@ export class UserService {
       // Delete old avatar if exists
       if (user.avatarUrl) {
         try {
-          const oldKey = this.s3StorageService.extractKeyFromUrl(user.avatarUrl);
+          const oldKey = this.s3StorageService.extractKeyFromUrl(
+            user.avatarUrl,
+          );
           await this.s3StorageService.deleteAvatar(oldKey);
         } catch (error) {
-          console.warn('Failed to delete old avatar:', error instanceof Error ? error.message : 'Unknown error');
+          console.warn(
+            'Failed to delete old avatar:',
+            error instanceof Error ? error.message : 'Unknown error',
+          );
           // Continue with upload even if old avatar deletion fails
         }
       }
@@ -112,10 +124,13 @@ export class UserService {
         },
       });
     } catch (error) {
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
-      
+
       console.error('Failed to upload avatar:', error);
       throw new BadRequestException(
         `Failed to upload avatar: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -138,20 +153,38 @@ export class UserService {
         originalFilename,
       );
       if (userId) {
-        const user = await this.userRepository.findOne({ where: { id: userId } });
-        if (user) {
-          await this.userRepository.update(userId, {
-            CCCD: result.id,
-            isVerified: true,
-          });
+        const user = await this.userRepository.findOne({
+          where: { id: userId },
+          relations: ['account'],
+        });
+        if (!user) {
+          throw new NotFoundException(`User with id ${userId} not found`);
+        }
+
+        user.CCCD = result.id;
+        user.isVerified = true;
+
+        if (user.account) {
+          user.account.isVerified = true;
+        }
+
+        await this.userRepository.save(user);
+
+        if (user.account) {
+          user.account.isVerified = true;
+          await this.accountRepository.save(user.account);
         }
       }
-      return new ResponseCommon(200, 'CCCD recognition completed successfully', result);
+      return new ResponseCommon(
+        200,
+        'CCCD recognition completed successfully',
+        result,
+      );
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
       }
-      
+
       console.error('Failed to recognize CCCD:', error);
       throw new BadRequestException(
         `Failed to recognize CCCD: ${error instanceof Error ? error.message : 'Unknown error'}`,

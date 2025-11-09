@@ -167,7 +167,7 @@ export class AuthService {
     };
 
     // Generate access token
-    const accessToken = this.jwtService.sign(payload, { expiresIn: '7d' });
+    const accessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
 
     // Generate refresh token (7 days)
     const refreshToken = this.jwtService.sign(
@@ -249,7 +249,7 @@ export class AuthService {
       };
 
       // Generate access token
-      const accessToken = this.jwtService.sign(payload, { expiresIn: '7d' });
+      const accessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
 
       // Generate refresh token (7 days)
       const refreshToken = this.jwtService.sign(
@@ -720,7 +720,7 @@ export class AuthService {
       };
 
       const newAccessToken = this.jwtService.sign(payload, {
-        expiresIn: '7d',
+        expiresIn: '15m',
       });
 
       // Step 9: Optionally rotate refresh token (recommended for security)
