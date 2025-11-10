@@ -771,7 +771,7 @@ export class AuthService {
       }
 
       // Clear refresh token
-      account.refreshToken = undefined;
+      account.refreshToken = '';
       await this.accountRepo.save(account);
 
       this.logger.log(`User logged out: ${account.email}`);
