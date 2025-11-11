@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InvoiceService } from './invoice.service';
+import { INVOICE_ERRORS } from 'src/common/constants/error-messages.constant';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -139,7 +140,7 @@ export class InvoiceController {
     @UploadedFile() file: Express.Multer.File,
   ): Promise<ResponseCommon<ProcessInvoiceResponseDto>> {
     if (!file) {
-      throw new BadRequestException('Vui lòng upload file hình ảnh hóa đơn');
+      throw new BadRequestException(INVOICE_ERRORS.FILE_UPLOAD_REQUIRED);
     }
 
     // Kiểm tra định dạng file
@@ -150,13 +151,13 @@ export class InvoiceController {
       'application/pdf',
     ];
     if (!allowedMimeTypes.includes(file.mimetype)) {
-      throw new BadRequestException('Chỉ hỗ trợ file ảnh (JPEG, PNG) hoặc PDF');
+      throw new BadRequestException(INVOICE_ERRORS.UNSUPPORTED_FILE_TYPE);
     }
 
     // Kiểm tra kích thước file (tối đa 10MB)
     const maxSize = 10 * 1024 * 1024; // 10MB
     if (file.size > maxSize) {
-      throw new BadRequestException('Kích thước file không được vượt quá 10MB');
+      throw new BadRequestException(INVOICE_ERRORS.FILE_SIZE_EXCEEDED);
     }
 
     return await this.invoiceService.processInvoiceImage(

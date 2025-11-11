@@ -13,6 +13,7 @@ import { ResponseCommon } from 'src/common/dto/response.dto';
 import { vnNow } from '../../common/datetime';
 import { WalletDirection } from '../common/enums/wallet-txn-direction.enum';
 import { WalletTxnStatus } from '../common/enums/wallet-txn-status.enum';
+import { WALLET_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class WalletService {
@@ -54,7 +55,7 @@ export class WalletService {
     ResponseCommon<{ walletId: string; balance: number; txnId: string }>
   > {
     const { amount, type, refId, note } = dto;
-    if (amount <= 0) throw new BadRequestException('Amount must be > 0');
+    if (amount <= 0) throw new BadRequestException(WALLET_ERRORS.AMOUNT_MUST_BE_POSITIVE);
 
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
@@ -115,7 +116,7 @@ export class WalletService {
     ResponseCommon<{ walletId: string; balance: number; txnId: string }>
   > {
     const { amount, type, refId, note } = dto;
-    if (amount <= 0) throw new BadRequestException('Amount must be > 0');
+    if (amount <= 0) throw new BadRequestException(WALLET_ERRORS.AMOUNT_MUST_BE_POSITIVE);
 
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
@@ -127,11 +128,11 @@ export class WalletService {
         where: { userId },
         lock: { mode: 'pessimistic_write' },
       });
-      if (!wallet) throw new NotFoundException('Wallet not found');
+      if (!wallet) throw new NotFoundException(WALLET_ERRORS.WALLET_NOT_FOUND);
 
       const cur = BigInt(wallet.availableBalance);
       const amt = BigInt(amount);
-      if (cur < amt) throw new BadRequestException('Insufficient balance');
+      if (cur < amt) throw new BadRequestException(WALLET_ERRORS.INSUFFICIENT_BALANCE);
 
       wallet.availableBalance = (cur - amt).toString();
       wallet.updatedAt = vnNow();

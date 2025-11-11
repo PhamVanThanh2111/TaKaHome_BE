@@ -14,6 +14,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { AUTH_ERRORS } from 'src/common/constants/error-messages.constant';
 import { AccountService } from './account.service';
 import { UpdateAccountDto } from './dto/update-account.dto';
 import { AccountResponseDto } from './dto/account-response.dto';
@@ -57,7 +58,7 @@ export class AccountController {
     const response = await this.accountService.findOne(id);
     const acc = response.data;
     if (!acc) {
-      throw new NotFoundException('Account not found');
+      throw new NotFoundException(AUTH_ERRORS.ACCOUNT_NOT_FOUND);
     }
     return new ResponseCommon(response.code, response.message, {
       id: acc.id,
@@ -80,7 +81,7 @@ export class AccountController {
     const response = await this.accountService.update(id, dto);
     const acc = response.data;
     if (!acc) {
-      throw new NotFoundException('Account not found');
+      throw new NotFoundException(AUTH_ERRORS.ACCOUNT_NOT_FOUND);
     }
     return new ResponseCommon(response.code, response.message, {
       id: acc.id,

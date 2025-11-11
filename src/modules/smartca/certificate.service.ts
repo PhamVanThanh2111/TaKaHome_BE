@@ -18,6 +18,7 @@ import { RootCAService } from './root-ca.service';
 import { encryptPrivateKey } from './crypto.util';
 import * as crypto from 'crypto';
 import { UserService } from '../user/user.service';
+import { CERTIFICATE_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class CertificateService {
@@ -39,10 +40,10 @@ export class CertificateService {
     userId: string,
     userDetails: { fullName?: string; email?: string },
   ) {
-    if (!userId) throw new BadRequestException('userId required');
+    if (!userId) throw new BadRequestException(CERTIFICATE_ERRORS.USER_ID_REQUIRED);
     const systemKey = process.env.SYSTEM_ENC_KEY;
     if (!systemKey)
-      throw new BadRequestException('SYSTEM_ENC_KEY not configured');
+      throw new BadRequestException(CERTIFICATE_ERRORS.SYSTEM_ENC_KEY_NOT_CONFIGURED);
 
     // Generate RSA keypair (2048 for compatibility)
     const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
@@ -112,9 +113,9 @@ export class CertificateService {
   }
 
   public async revokeCertificate(serialNumber: string) {
-    if (!serialNumber) throw new BadRequestException('serialNumber required');
+    if (!serialNumber) throw new BadRequestException(CERTIFICATE_ERRORS.SERIAL_NUMBER_REQUIRED);
     const rec = await this.certRepo.findOne({ where: { serialNumber } });
-    if (!rec) throw new BadRequestException('certificate not found');
+    if (!rec) throw new BadRequestException(CERTIFICATE_ERRORS.CERTIFICATE_NOT_FOUND);
     rec.revoked = true;
     rec.revokedAt = new Date();
     await this.certRepo.save(rec);
@@ -136,7 +137,7 @@ export class CertificateService {
 
     if (!userId) {
       this.logger.warn('[signPdfWithUserKey] missing userId');
-      throw new BadRequestException('userId is required');
+      throw new BadRequestException(CERTIFICATE_ERRORS.USER_ID_REQUIRED);
     }
 
     let rec = await this.certRepo.findOne({ where: { userId } });
@@ -155,7 +156,7 @@ export class CertificateService {
         };
         
         if (!user) {
-          throw new BadRequestException(`User with id ${userId} not found`);
+          throw new BadRequestException(CERTIFICATE_ERRORS.USER_NOT_FOUND);
         }
 
         this.logger.debug(
@@ -172,7 +173,7 @@ export class CertificateService {
         rec = await this.certRepo.findOne({ where: { userId } });
         
         if (!rec) {
-          throw new BadRequestException('Failed to generate certificate for user');
+          throw new BadRequestException(CERTIFICATE_ERRORS.GENERATE_CERTIFICATE_FAILED);
         }
 
         this.logger.debug(
@@ -187,10 +188,10 @@ export class CertificateService {
         );
       }
     }
-    if (rec.revoked) throw new BadRequestException('Certificate revoked');
+    if (rec.revoked) throw new BadRequestException(CERTIFICATE_ERRORS.CERTIFICATE_REVOKED);
     const systemKey = process.env.SYSTEM_ENC_KEY;
     if (!systemKey)
-      throw new BadRequestException('SYSTEM_ENC_KEY not configured');
+      throw new BadRequestException(CERTIFICATE_ERRORS.SYSTEM_ENC_KEY_NOT_CONFIGURED);
     try {
       this.logger.debug('[signPdfWithUserKey] decrypting private key');
       const t0 = Date.now();
@@ -223,10 +224,10 @@ export class CertificateService {
           !rec.certificatePem ||
           !rec.certificatePem.includes('-----BEGIN CERTIFICATE-----')
         ) {
-          throw new Error('Invalid or missing certificate PEM');
+          throw new BadRequestException(CERTIFICATE_ERRORS.INVALID_CERTIFICATE_PEM);
         }
         if (!userPrivPem || !userPrivPem.includes('-----BEGIN')) {
-          throw new Error('Invalid or missing private key PEM');
+          throw new BadRequestException(CERTIFICATE_ERRORS.INVALID_PRIVATE_KEY_PEM);
         }
 
         const cert = forge.pki.certificateFromPem(rec.certificatePem);
@@ -248,9 +249,7 @@ export class CertificateService {
             '[signPdfWithUserKey] certificatePem head: ' +
               String((rec.certificatePem || '').slice(0, 400)),
           );
-          throw new Error(
-            'Certificate PEM appears malformed or unsupported by forge',
-          );
+          throw new BadRequestException(CERTIFICATE_ERRORS.CERTIFICATE_PEM_CONVERSION_FAILED);
         }
 
         try {
@@ -269,9 +268,7 @@ export class CertificateService {
             '[signPdfWithUserKey] privatePem head: ' +
               String((userPrivPem || '').slice(0, 400)),
           );
-          throw new Error(
-            'Private key PEM appears malformed or unsupported by forge',
-          );
+          throw new BadRequestException(CERTIFICATE_ERRORS.CERTIFICATE_PEM_CONVERSION_FAILED);
         }
 
         p7.addCertificate(cert);
@@ -307,7 +304,7 @@ export class CertificateService {
             this.logger.error(
               '[signPdfWithUserKey] p7.toAsn1() returned falsy value',
             );
-            throw new Error('p7.toAsn1() returned no ASN.1 structure');
+            throw new BadRequestException(CERTIFICATE_ERRORS.ASN1_STRUCTURE_MISSING);
           }
           let der;
           try {
@@ -377,9 +374,7 @@ export class CertificateService {
             '[signPdfWithUserKey] privatePem head: ' +
               String((userPrivPem || '').slice(0, 200)),
           );
-          throw new BadRequestException(
-            'Failed to build CMS: invalid DER produced',
-          );
+          throw new BadRequestException(CERTIFICATE_ERRORS.CMS_CREATION_FAILED);
         }
       } catch (parseErr) {
         this.logger.error(
@@ -387,10 +382,7 @@ export class CertificateService {
             String((parseErr as Error).message || parseErr),
         );
         // rethrow as BadRequest for clearer client error
-        throw new BadRequestException(
-          'Certificate or private key invalid or malformed: ' +
-            String((parseErr as Error).message || parseErr),
-        );
+        throw new BadRequestException(CERTIFICATE_ERRORS.CERTIFICATE_INFO_EXTRACTION_FAILED);
       }
     } catch (err) {
       this.logger.error(

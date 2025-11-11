@@ -27,6 +27,7 @@ import { User } from '../user/entities/user.entity';
 import { BlockchainService } from '../blockchain/blockchain.service';
 import { PdfFillService, PdfTemplateType } from './pdf-fill.service';
 import * as crypto from 'crypto';
+import { CONTRACT_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class ContractExtensionService {
@@ -58,7 +59,7 @@ export class ContractExtensionService {
     });
 
     if (!contract) {
-      throw new NotFoundException('Contract not found');
+      throw new NotFoundException(CONTRACT_ERRORS.CONTRACT_NOT_FOUND);
     }
 
     // Chỉ tenant mới có thể yêu cầu gia hạn
@@ -150,7 +151,7 @@ export class ContractExtensionService {
     });
 
     if (!extension) {
-      throw new NotFoundException('Extension request not found');
+      throw new NotFoundException(CONTRACT_ERRORS.EXTENSION_NOT_FOUND);
     }
 
     // Chỉ landlord mới có thể phản hồi
@@ -162,7 +163,7 @@ export class ContractExtensionService {
 
     // Extension phải đang pending
     if (extension.status !== ExtensionStatus.PENDING) {
-      throw new BadRequestException('Extension request is not pending');
+      throw new BadRequestException(CONTRACT_ERRORS.EXTENSION_REQUEST_NOT_PENDING);
     }
 
     // Cập nhật extension
@@ -384,7 +385,7 @@ export class ContractExtensionService {
     });
 
     if (!contract) {
-      throw new NotFoundException('Contract not found');
+      throw new NotFoundException(CONTRACT_ERRORS.CONTRACT_NOT_FOUND);
     }
 
     if (contract.tenant.id !== userId && contract.landlord.id !== userId) {
@@ -419,7 +420,7 @@ export class ContractExtensionService {
     });
 
     if (!contract) {
-      throw new NotFoundException('Contract not found');
+      throw new NotFoundException(CONTRACT_ERRORS.CONTRACT_NOT_FOUND);
     }
 
     // Kiểm tra user có liên quan đến contract này không (có thể là TENANT hoặc LANDLORD)
@@ -455,12 +456,12 @@ export class ContractExtensionService {
     });
 
     if (!extension) {
-      throw new NotFoundException('Extension request not found');
+      throw new NotFoundException(CONTRACT_ERRORS.EXTENSION_NOT_FOUND);
     }
 
     // Chỉ tenant (người tạo extension) mới có thể cancel
     if (extension.contract.tenant.id !== userId) {
-      throw new ForbiddenException('Only the tenant can cancel the extension');
+      throw new ForbiddenException(CONTRACT_ERRORS.ONLY_TENANT_CAN_CANCEL);
     }
 
     // Chỉ có thể cancel khi đang pending
@@ -491,12 +492,12 @@ export class ContractExtensionService {
     });
 
     if (!extension) {
-      throw new NotFoundException('Extension request not found');
+      throw new NotFoundException(CONTRACT_ERRORS.EXTENSION_NOT_FOUND);
     }
 
     // Chỉ đúng tenant mới có thể đồng ý/từ chối
     if (extension.contract.tenant.id !== userId) {
-      throw new ForbiddenException('Only tenant can respond to this extension');
+      throw new ForbiddenException(CONTRACT_ERRORS.ONLY_TENANT_CAN_RESPOND);
     }
 
     // Extension phải đang ở trạng thái LANDLORD_RESPONDED
@@ -546,12 +547,12 @@ export class ContractExtensionService {
     });
 
     if (!extension) {
-      throw new NotFoundException('Extension request not found');
+      throw new NotFoundException(CONTRACT_ERRORS.EXTENSION_NOT_FOUND);
     }
 
     // Chỉ landlord mới có thể ký
     if (extension.contract.landlord.id !== userId) {
-      throw new ForbiddenException('Only landlord can sign extension contract');
+      throw new ForbiddenException(CONTRACT_ERRORS.ONLY_LANDLORD_CAN_SIGN);
     }
 
     // Extension phải ở trạng thái AWAITING_SIGNATURES
@@ -712,12 +713,12 @@ export class ContractExtensionService {
     });
 
     if (!extension) {
-      throw new NotFoundException('Extension request not found');
+      throw new NotFoundException(CONTRACT_ERRORS.EXTENSION_NOT_FOUND);
     }
 
     // Chỉ tenant mới có thể ký
     if (extension.contract.tenant.id !== userId) {
-      throw new ForbiddenException('Only tenant can sign extension contract');
+      throw new ForbiddenException(CONTRACT_ERRORS.ONLY_TENANT_CAN_SIGN);
     }
 
     // Extension phải ở trạng thái LANDLORD_SIGNED

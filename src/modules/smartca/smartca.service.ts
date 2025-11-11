@@ -24,6 +24,7 @@ import {
 
 import { CertificateService } from './certificate.service';
 import { UserService } from '../user/user.service';
+import { SMARTCA_ERRORS } from 'src/common/constants/error-messages.constant';
 
 const OID_SHA256 = forge.pki.oids.sha256 as string;
 const OID_RSA = forge.pki.oids.rsaEncryption as string;
@@ -62,7 +63,7 @@ export class SmartCAService {
     const places: Place[] = 'places' in options ? options.places : [options];
 
     if (!Buffer.isBuffer(pdfBuffer)) {
-      throw new Error('pdfBuffer must be a Buffer');
+      throw new BadRequestException(SMARTCA_ERRORS.INVALID_PDF_BUFFER);
     }
     if (!places.length) return Buffer.from(pdfBuffer);
 
@@ -83,12 +84,10 @@ export class SmartCAService {
         rect.length !== 4 ||
         rect.some((n) => typeof n !== 'number' || !Number.isFinite(n))
       ) {
-        throw new BadRequestException('Invalid rect for placeholder');
+        throw new BadRequestException(SMARTCA_ERRORS.INVALID_RECT_PLACEHOLDER);
       }
       if (signatureLength < 4096) {
-        throw new BadRequestException(
-          'signatureLength too small (>= 4096 recommended)',
-        );
+        throw new BadRequestException(SMARTCA_ERRORS.BYTERANGE_INSUFFICIENT_GAP);
       }
 
       const opts: PlainAddPlaceholderInput = {
@@ -128,7 +127,7 @@ export class SmartCAService {
       byteRanges.push({ text: m[0], start: m.index });
     }
     if (!byteRanges.length) {
-      throw new BadRequestException('No /ByteRange found after placeholders');
+      throw new BadRequestException(SMARTCA_ERRORS.NO_BYTERANGE_FOUND);
     }
 
     // collect signature /Contents only: we take the hex region inside <...>
@@ -144,9 +143,7 @@ export class SmartCAService {
     }
 
     if (contents.length < byteRanges.length) {
-      throw new BadRequestException(
-        `Found ${byteRanges.length} /ByteRange but only ${contents.length} /Contents`,
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.MULTIPLE_PLACEHOLDERS_NOT_SUPPORTED);
     }
 
     // debug removed
@@ -224,13 +221,11 @@ export class SmartCAService {
       if (finalOption === 'SELF_CA') {
         const actorUserId = (options.userIdOverride || '').trim();
         if (!actorUserId) {
-          throw new BadRequestException(
-            'SELF_CA signing requires actor user id: pass userIdOverride as internal user id',
-          );
+          throw new BadRequestException(SMARTCA_ERRORS.MISSING_CCCD_OR_USERID);
         }
 
         if (!this.certificateService) {
-          throw new BadRequestException('CertificateService is not available');
+          throw new BadRequestException(SMARTCA_ERRORS.CERTIFICATE_SERVICE_NOT_AVAILABLE);
         }
 
         // CertificateService will return cmsBase64 (detached). Embed it here.
@@ -240,7 +235,7 @@ export class SmartCAService {
           signatureIndex,
         );
         if (!certResult || !certResult.cmsBase64) {
-          throw new Error('SELF_CA signing failed: no cms returned');
+          throw new BadRequestException(SMARTCA_ERRORS.SELF_CA_SIGNING_FAILED);
         }
 
         const signedPdf = this.embedCmsAtIndex(
@@ -275,7 +270,7 @@ export class SmartCAService {
       });
 
       if (!signResult.cmsBase64) {
-        throw new Error('Failed to get CMS signature from VNPT');
+        throw new BadRequestException(SMARTCA_ERRORS.VNPT_CMS_FAILED);
       }
 
       // Step 3: Embed CMS into PDF
@@ -463,27 +458,21 @@ export class SmartCAService {
 
     for (const { name, attr } of attrs) {
       if (!attr || !attr.value || !Array.isArray(attr.value)) {
-        throw new Error(`[NEAC-CMS] Invalid ${name} attribute structure`);
+        throw new BadRequestException(SMARTCA_ERRORS.INVALID_ATTRIBUTE_STRUCTURE);
       }
 
       // Check that attribute has proper SEQUENCE structure with OID and SET
       if (attr.value.length !== 2) {
-        throw new Error(
-          `[NEAC-CMS] Invalid ${name} attribute: must have OID and SET`,
-        );
+        throw new BadRequestException(SMARTCA_ERRORS.INVALID_ATTRIBUTE_STRUCTURE);
       }
 
       const [oid, set] = attr.value;
       if (oid.type !== forge.asn1.Type.OID) {
-        throw new Error(
-          `[NEAC-CMS] Invalid ${name} attribute: first element must be OID`,
-        );
+        throw new BadRequestException(SMARTCA_ERRORS.INVALID_ATTRIBUTE_STRUCTURE);
       }
 
       if (set.type !== forge.asn1.Type.SET) {
-        throw new Error(
-          `[NEAC-CMS] Invalid ${name} attribute: second element must be SET`,
-        );
+        throw new BadRequestException(SMARTCA_ERRORS.INVALID_ATTRIBUTE_STRUCTURE);
       }
     }
   }
@@ -512,9 +501,7 @@ export class SmartCAService {
     const reContents = /\/Contents\s*<([\s\S]*?)>/g;
     const contentsMatches = Array.from(s0.matchAll(reContents));
     if (signatureIndex < 0 || signatureIndex >= contentsMatches.length) {
-      throw new BadRequestException(
-        `Cannot find /Contents for signature index ${signatureIndex}`,
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.CANNOT_LOCATE_SIGNATURE_DICT);
     }
     const m = contentsMatches[signatureIndex];
     const full = m[0];
@@ -524,16 +511,12 @@ export class SmartCAService {
     const dictStart = s0.lastIndexOf('<<', m.index);
     const dictEnd = s0.indexOf('>>', gtPos);
     if (dictStart < 0 || dictEnd < 0 || dictEnd <= dictStart) {
-      throw new BadRequestException(
-        'Cannot locate signature dictionary in signToCmsPades',
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.CANNOT_LOCATE_SIGNATURE_DICT);
     }
     const dictStr = s0.slice(dictStart, dictEnd + 2);
     const relBR = dictStr.match(/\/ByteRange\s*\[([^\]]+)\]/);
     if (!relBR || relBR.index == null) {
-      throw new BadRequestException(
-        'ByteRange not found inside signature dictionary in signToCmsPades',
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.MISSING_BYTE_RANGE);
     }
     const oldBR = relBR[0];
     const brAbsStart = dictStart + relBR.index;
@@ -542,9 +525,7 @@ export class SmartCAService {
     // 3) Tạo chuỗi ByteRange số thật [0 b c d] và PAD cho đúng độ dài placeholder
     let newBR = `/ByteRange [0 ${b} ${c} ${d}]`;
     if (newBR.length > oldBR.length) {
-      throw new BadRequestException(
-        `new /ByteRange longer than placeholder by ${newBR.length - oldBR.length} bytes`,
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.BYTERANGE_INSUFFICIENT_GAP);
     }
     if (newBR.length < oldBR.length) {
       newBR =
@@ -559,7 +540,7 @@ export class SmartCAService {
 
     // Sentinel: bắt buộc tại b là '<' và tại c-1 là '>'
     if (simulated[b] !== 0x3c || simulated[c - 1] !== 0x3e) {
-      throw new BadRequestException('sign-to-cms: not "<...>" at [b..c-1]');
+      throw new BadRequestException(SMARTCA_ERRORS.BYTERANGE_MISMATCH);
     }
 
     // 5) Hash PAdES: SHA-256( simulated[0..b) || simulated[c..EOF] )
@@ -578,22 +559,20 @@ export class SmartCAService {
 
     // Use auto-selected latest certificate
     if (!certResp.selectedSerialNumber) {
-      throw new BadRequestException('No certificate available for selection');
+      throw new BadRequestException(SMARTCA_ERRORS.NO_CERTIFICATE_AVAILABLE);
     }
 
     const selectedCert = certResp.certificates.find(
       (cert: any) => cert.serial_number === certResp.selectedSerialNumber,
     );
     if (!selectedCert) {
-      throw new BadRequestException(
-        `Auto-selected certificate ${certResp.selectedSerialNumber} not found`,
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.CERTIFICATE_NOT_FOUND_BY_SERIAL);
     }
 
     const { signerPem, chainPem, serial } = this.extractPemChainFromGetCertResp(
       [selectedCert],
     );
-    if (!serial) throw new BadRequestException('No serial_number');
+    if (!serial) throw new BadRequestException(SMARTCA_ERRORS.NO_SERIAL_NUMBER);
 
     // 7) Build SignedAttributes DER từ pdfDigestHex
     const signedAttrsDER = this.buildSignedAttrsDER(pdfDigestHex, signerPem);
@@ -631,21 +610,19 @@ export class SmartCAService {
 
     // Check for polling errors first
     if ((poll as any).error) {
-      throw new BadRequestException(
-        `SmartCA signing failed: ${(poll as any).error}`,
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.SMARTCA_NOT_RESPONDING);
     }
 
     const raw = (poll as any).raw?.data ?? {};
     const st = raw?.status_code;
-    if (!st) throw new BadRequestException('No status returned from SmartCA');
+    if (!st) throw new BadRequestException(SMARTCA_ERRORS.NO_STATUS_FROM_SMARTCA);
 
     const sig =
       raw?.data?.signature_value ||
       raw?.data?.signatures?.[0]?.signature_value ||
       null;
     if (!sig) {
-      throw new BadRequestException('No signature_value in SmartCA result');
+      throw new BadRequestException(SMARTCA_ERRORS.NO_SIGNATURE_VALUE);
     }
 
     // 10) Lắp CMS detached (Base64) (GIỮ NGUYÊN)
@@ -692,9 +669,7 @@ export class SmartCAService {
     const reContents = /\/Contents\s*<([\s\S]*?)>/g;
     const hits = Array.from(s0.matchAll(reContents));
     if (signatureIndex < 0 || signatureIndex >= hits.length) {
-      throw new BadRequestException(
-        `Cannot find /Contents for signature index ${signatureIndex}`,
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.CANNOT_LOCATE_SIGNATURE_DICT);
     }
     const m = hits[signatureIndex];
     const full = m[0];
@@ -705,9 +680,7 @@ export class SmartCAService {
     const reservedHex = (m[1] || '').replace(/\s+/g, '');
     const reservedLen = reservedHex.length;
     if (cmsHex.length > reservedLen) {
-      throw new BadRequestException(
-        `CMS hex length ${cmsHex.length} exceeds reserved ${reservedLen}`,
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.BYTERANGE_INSUFFICIENT_GAP);
     }
 
     // 2) Put CMS hex in-place BETWEEN < >
@@ -729,10 +702,10 @@ export class SmartCAService {
     // 4) Sync with locateContentsGap + size invariant
     const expect = this.locateContentsGap(work, signatureIndex);
     if (expect.start !== b || expect.end !== c) {
-      throw new BadRequestException('ByteRange mismatch with expected gap');
+      throw new BadRequestException(SMARTCA_ERRORS.BYTERANGE_MISMATCH);
     }
     if (b + (c - b) + d !== work.length) {
-      throw new BadRequestException('ByteRange sums do not match file size');
+      throw new BadRequestException(SMARTCA_ERRORS.BYTERANGE_SUM_MISMATCH);
     }
 
     // 5) Write /ByteRange INSIDE the signature dictionary (not by global index)
@@ -741,14 +714,10 @@ export class SmartCAService {
     // ========= VERIFY BLOCK (1): read /ByteRange back from file =========
     const got = this.readByteRangeInSigDict(work, signatureIndex);
     if (!got.length) {
-      throw new BadRequestException(
-        'Post-embed: no /ByteRange found in signature dictionary',
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.MISSING_BYTE_RANGE);
     }
     if (got[0] !== a || got[1] !== b || got[2] !== c || got[3] !== d) {
-      throw new BadRequestException(
-        `Post-embed /ByteRange mismatch: wrote [${a} ${b} ${c} ${d}] but file has [${got.join(' ')}]`,
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.BYTERANGE_MISMATCH);
     }
 
     // ========= VERIFY BLOCK (2): check sentinel bytes at b and c-1 =========
@@ -783,16 +752,14 @@ export class SmartCAService {
     const reContents = /\/Contents\s*<([\s\S]*?)>/g;
     const hits = Array.from(s.matchAll(reContents));
     if (signatureIndex < 0 || signatureIndex >= hits.length) {
-      throw new BadRequestException(
-        `Cannot find /Contents for signature index ${signatureIndex}`,
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.CANNOT_LOCATE_SIGNATURE_DICT);
     }
 
     const m = hits[signatureIndex];
     const dictStart = s.lastIndexOf('<<', m.index);
     const dictEnd = s.indexOf('>>', s.indexOf('>', m.index));
     if (dictStart < 0 || dictEnd < 0 || dictEnd <= dictStart) {
-      throw new BadRequestException('Cannot locate signature dictionary to set Name');
+      throw new BadRequestException(SMARTCA_ERRORS.CANNOT_LOCATE_SIGNATURE_DICT);
     }
 
     let dictStr = s.slice(dictStart, dictEnd + 2);
@@ -819,7 +786,7 @@ export class SmartCAService {
     transactionId?: string;
   }) {
     if (!options?.userId) {
-      throw new BadRequestException('Missing CCCD / userId in getCertificates');
+      throw new BadRequestException(SMARTCA_ERRORS.MISSING_CCCD_OR_USERID);
     }
     const user_id = (options?.userId ?? '').trim();
     const basePayload: any = {
@@ -912,7 +879,7 @@ export class SmartCAService {
       );
 
     if (!signerPem) {
-      throw new BadRequestException('signerPem is null or undefined');
+      throw new BadRequestException(SMARTCA_ERRORS.GET_CERTIFICATE_FAILED);
     }
 
     const chainPem: string[] = [];
@@ -1252,17 +1219,13 @@ export class SmartCAService {
     if (!serial_number) {
       const certResp = await this.getCertificates({ userId: user_id });
       if (certResp.status !== 200) {
-        throw new BadRequestException(
-          `get_certificate failed (status ${certResp.status})`,
-        );
+        throw new BadRequestException(SMARTCA_ERRORS.GET_CERTIFICATE_FAILED);
       }
       serial_number = this.pickActiveSerial(
         certResp.certificates as SmartCAUserCertificate[],
       );
       if (!serial_number) {
-        throw new BadRequestException(
-          'No certificate/serial_number found for this user_id',
-        );
+        throw new BadRequestException(SMARTCA_ERRORS.NO_CERTIFICATE_AVAILABLE);
       }
     }
 
@@ -1387,7 +1350,7 @@ export class SmartCAService {
    */
   public async requestSmartCASignStatus(transactionId: string) {
     if (!transactionId?.trim()) {
-      throw new Error('transactionId is required');
+      throw new BadRequestException(SMARTCA_ERRORS.TRANSACTION_ID_REQUIRED);
     }
     const url = `${this.smartca.smartcaBaseUrl}${(this.smartca.smartcaSignStatusTmpl ?? '').replace('{tranId}', encodeURIComponent(transactionId))}`;
     const res = await axios.post(url, undefined, {
@@ -1683,7 +1646,7 @@ export class SmartCAService {
     const lt = before.length + full.indexOf('<'); // index of '<'
     const gt = before.length + full.lastIndexOf('>'); // index of '>'
     if (lt < 0 || gt < 0 || gt <= lt) {
-      throw new BadRequestException('Malformed /Contents <...>');
+      throw new BadRequestException(SMARTCA_ERRORS.INVALID_CONTENTS_HEX);
     }
 
     const innerRaw = m[1]; // may include \r\n/space
@@ -1696,7 +1659,7 @@ export class SmartCAService {
       innerHexLen % 2 !== 0 ||
       /[^0-9A-Fa-f]/.test(innerHex)
     ) {
-      throw new BadRequestException('Invalid hex in /Contents');
+      throw new BadRequestException(SMARTCA_ERRORS.INVALID_CONTENTS_HEX);
     }
 
     // Exclude the whole token `<...>`
@@ -1706,9 +1669,7 @@ export class SmartCAService {
     const excludedLen = end - start;
     // Must equal raw `<...>` bytes length: innerRawLen + 2 (two sentinels)
     if (excludedLen !== innerRawLen + 2) {
-      throw new BadRequestException(
-        'Excluded range length != raw length (+2) in /Contents',
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.BYTERANGE_MISMATCH);
     }
 
     return {
@@ -1739,15 +1700,13 @@ export class SmartCAService {
     const reCont = /\/Contents\s*<([\s\S]*?)>/g;
     const hits = Array.from(s.matchAll(reCont));
     if (signatureIndex < 0 || signatureIndex >= hits.length) {
-      throw new BadRequestException(
-        `Cannot find /Contents for index ${signatureIndex}`,
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.CANNOT_LOCATE_SIGNATURE_DICT);
     }
     const m = hits[signatureIndex];
     const dictStart = s.lastIndexOf('<<', m.index);
     const dictEnd = s.indexOf('>>', s.indexOf('>', m.index));
     if (dictStart < 0 || dictEnd < 0 || dictEnd <= dictStart) {
-      throw new BadRequestException('Cannot locate signature dictionary');
+      throw new BadRequestException(SMARTCA_ERRORS.CANNOT_LOCATE_SIGNATURE_DICT);
     }
     const dictStr = s.slice(dictStart, dictEnd + 2);
     const br = dictStr.match(/\/ByteRange\s*\[([^\]]+)\]/);
@@ -1771,18 +1730,14 @@ export class SmartCAService {
     // and offset2 + length2 should equal file size
     if (a !== 0) {
       console.error(`[NEAC-ERROR] ByteRange offset1 should be 0, got ${a}`);
-      throw new BadRequestException(
-        `ByteRange offset1 error: expected 0, got ${a}`,
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.INVALID_PDF_OBJECT);
     }
 
     if (c + d !== pdf.length) {
       console.error(
         `[NEAC-ERROR] ByteRange end invalid: ${c} + ${d} = ${c + d}, but file size is ${pdf.length}`,
       );
-      throw new BadRequestException(
-        `ByteRange end error: ${c} + ${d} ≠ ${pdf.length}`,
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.BYTERANGE_MISMATCH);
     }
 
     const s = pdf.toString('latin1');
@@ -1792,20 +1747,18 @@ export class SmartCAService {
     const dictStart = s.lastIndexOf('<<', m.index);
     const dictEnd = s.indexOf('>>', s.indexOf('>', m.index));
     if (dictStart < 0 || dictEnd < 0 || dictEnd <= dictStart) {
-      throw new BadRequestException('Cannot locate signature dictionary');
+      throw new BadRequestException(SMARTCA_ERRORS.CANNOT_LOCATE_SIGNATURE_DICT);
     }
     const dictStr = s.slice(dictStart, dictEnd + 2);
 
     const relBR = dictStr.match(/\/ByteRange\s*\[([^\]]+)\]/);
     if (!relBR || relBR.index == null) {
-      throw new BadRequestException('ByteRange not found in dict');
+      throw new BadRequestException(SMARTCA_ERRORS.MISSING_BYTE_RANGE);
     }
     const oldBR = relBR[0];
     let newBR = `/ByteRange [${arr[0]} ${arr[1]} ${arr[2]} ${arr[3]}]`;
     if (newBR.length > oldBR.length) {
-      throw new BadRequestException(
-        `new /ByteRange longer than placeholder by ${newBR.length - oldBR.length}`,
-      );
+      throw new BadRequestException(SMARTCA_ERRORS.BYTERANGE_INSUFFICIENT_GAP);
     }
     if (newBR.length < oldBR.length) {
       newBR =

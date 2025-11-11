@@ -34,6 +34,7 @@ import { Room } from '../property/entities/room.entity';
 import { User } from '../user/entities/user.entity';
 import { RoleEnum } from '../common/enums/role.enum';
 import { ServiceTypeEnum } from '../common/enums/service-type.enum';
+import { BOOKING_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class BookingService {
@@ -62,11 +63,11 @@ export class BookingService {
   ): Promise<ResponseCommon<Booking>> {
     // Validate input: either propertyId or roomId must be provided
     if (!dto.propertyId && !dto.roomId) {
-      throw new BadRequestException('Either propertyId or roomId must be provided');
+      throw new BadRequestException(BOOKING_ERRORS.PROPERTY_ID_OR_ROOM_ID_REQUIRED);
     }
 
     if (dto.propertyId && dto.roomId) {
-      throw new BadRequestException('Cannot provide both propertyId and roomId');
+      throw new BadRequestException(BOOKING_ERRORS.CANNOT_PROVIDE_BOTH_PROPERTY_AND_ROOM);
     }
 
     let property: Property;
@@ -84,11 +85,11 @@ export class BookingService {
       }
 
       if (foundProperty.isVisible === false) {
-        throw new BadRequestException('Property is not already booked');
+        throw new BadRequestException(BOOKING_ERRORS.PROPERTY_ALREADY_BOOKED);
       }
 
       if (foundProperty.type === PropertyTypeEnum.BOARDING) {
-        throw new BadRequestException('For BOARDING property, use roomId instead of propertyId');
+        throw new BadRequestException(BOOKING_ERRORS.BOARDING_PROPERTY_USE_ROOM_ID);
       }
 
       property = foundProperty;
@@ -104,11 +105,11 @@ export class BookingService {
       }
 
       if (foundRoom.isVisible === false) {
-        throw new BadRequestException('Room is not already booked');
+        throw new BadRequestException(BOOKING_ERRORS.ROOM_ALREADY_BOOKED);
       }
 
       if (foundRoom.property.type !== PropertyTypeEnum.BOARDING) {
-        throw new BadRequestException('roomId can only be used for BOARDING property type');
+        throw new BadRequestException(BOOKING_ERRORS.ROOM_ID_ONLY_FOR_BOARDING);
       }
 
       room = foundRoom;
@@ -137,7 +138,7 @@ export class BookingService {
     // Ensure contract exists before landlord signing
     const contract = await this.ensureContractForBooking(booking);
     if (!contract) {
-      throw new BadRequestException('Failed to create or retrieve contract for landlord approval');
+      throw new BadRequestException(BOOKING_ERRORS.CONTRACT_CREATION_FAILED);
     }
 
     let signedPdfPresignedUrl: string | undefined;
@@ -226,7 +227,7 @@ export class BookingService {
     }
 
     if (!keyUrl) {
-      throw new BadRequestException('Failed to upload signed PDF to storage');
+      throw new BadRequestException(BOOKING_ERRORS.PDF_UPLOAD_FAILED);
     }
 
     // Update contract status to PENDING_SIGNATURE and integrate with blockchain
@@ -542,7 +543,7 @@ export class BookingService {
         'contract',
       ],
     });
-    if (!booking) throw new NotFoundException('Booking not found');
+    if (!booking) throw new NotFoundException(BOOKING_ERRORS.BOOKING_NOT_FOUND);
     console.log(booking);
     return booking;
   }
@@ -578,7 +579,7 @@ export class BookingService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException(BOOKING_ERRORS.USER_NOT_FOUND);
     }
     const roles = user.account.roles;
     // Filter by tenantId
@@ -642,7 +643,7 @@ export class BookingService {
       propertyId,
     );
     if (!booking)
-      throw new NotFoundException('Booking not found for tenant/property');
+      throw new NotFoundException(BOOKING_ERRORS.BOOKING_NOT_FOUND);
     return this.markTenantDepositFunded(booking.id);
   }
 
@@ -655,7 +656,7 @@ export class BookingService {
       propertyId,
     );
     if (!booking)
-      throw new NotFoundException('Booking not found for tenant/property');
+      throw new NotFoundException(BOOKING_ERRORS.BOOKING_NOT_FOUND);
     return this.markLandlordDepositFunded(booking.id);
   }
 
@@ -668,7 +669,7 @@ export class BookingService {
       propertyId,
     );
     if (!booking)
-      throw new NotFoundException('Booking not found for tenant/property');
+      throw new NotFoundException(BOOKING_ERRORS.BOOKING_NOT_FOUND);
     return this.markFirstRentPaid(booking.id);
   }
 
@@ -676,7 +677,7 @@ export class BookingService {
     const normalized = value.length === 10 ? `${value}T00:00:00` : value;
     const parsed = zonedTimeToUtc(normalized, VN_TZ);
     if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
-      throw new BadRequestException('Invalid date input provided');
+      throw new BadRequestException(BOOKING_ERRORS.INVALID_DATE_INPUT);
     }
     return parsed;
   }

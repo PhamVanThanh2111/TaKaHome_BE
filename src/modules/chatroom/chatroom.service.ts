@@ -6,6 +6,7 @@ import { CreateChatRoomDto } from './dto/create-chatroom.dto';
 import { UpdateChatRoomDto } from './dto/update-chatroom.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { Property } from '../property/entities/property.entity';
+import { CHATROOM_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class ChatRoomService {
@@ -41,7 +42,7 @@ export class ChatRoomService {
       relations: ['user1', 'user2', 'property', 'messages'],
     });
     if (!chatRoom) {
-      throw new NotFoundException(`ChatRoom with id ${id} not found`);
+      throw new NotFoundException(CHATROOM_ERRORS.CHATROOM_NOT_FOUND);
     }
     return new ResponseCommon(200, 'SUCCESS', chatRoom);
   }
@@ -76,18 +77,18 @@ export class ChatRoomService {
     });
 
     if (!property) {
-      throw new NotFoundException(`Property with id ${propertyId} not found`);
+      throw new NotFoundException(CHATROOM_ERRORS.PROPERTY_NOT_FOUND);
     }
 
     if (!property.landlord) {
-      throw new BadRequestException('Property does not have a landlord assigned');
+      throw new BadRequestException(CHATROOM_ERRORS.PROPERTY_NO_LANDLORD);
     }
 
     const landlordId = property.landlord.id;
 
     // Không cho phép chat với chính mình
     if (currentUserId === landlordId) {
-      throw new BadRequestException('Cannot create chat with yourself');
+      throw new BadRequestException(CHATROOM_ERRORS.CANNOT_CHAT_WITH_SELF);
     }
 
     // 2. Tìm chatroom đã tồn tại
@@ -127,7 +128,7 @@ export class ChatRoomService {
     });
 
     if (!fullRoom) {
-      throw new BadRequestException('Failed to retrieve created chat room');
+      throw new BadRequestException(CHATROOM_ERRORS.CHATROOM_RETRIEVE_FAILED);
     }
 
     return new ResponseCommon(201, 'CREATED', fullRoom);
