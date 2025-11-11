@@ -30,24 +30,33 @@ export class CccdRecognitionService {
     private readonly fptAi: ConfigType<typeof fptAiConfig>,
   ) {}
 
-  async recognizeCccd(imageBuffer: Buffer, originalFilename: string): Promise<CccdRecognitionResponseDto> {
+  async recognizeCccd(
+    imageBuffer: Buffer,
+    originalFilename: string,
+  ): Promise<CccdRecognitionResponseDto> {
     try {
       // Validate FPT.AI configuration
       if (!this.fptAi.apiKey || this.fptAi.apiKey.trim() === '') {
         console.error('FPT.AI API key not configured or empty');
-        throw new BadRequestException('FPT.AI API key not configured. Please set FPT_AI_API_KEY in environment variables.');
+        throw new BadRequestException(
+          'FPT.AI API key not configured. Please set FPT_AI_API_KEY in environment variables.',
+        );
       }
 
       if (!this.fptAi.endpoint || this.fptAi.endpoint.trim() === '') {
         console.error('FPT.AI endpoint not configured or empty');
-        throw new BadRequestException('FPT.AI endpoint not configured. Please set FPT_AI_ENDPOINT in environment variables.');
+        throw new BadRequestException(
+          'FPT.AI endpoint not configured. Please set FPT_AI_ENDPOINT in environment variables.',
+        );
       }
 
       // Log configuration (safely)
       console.log('FPT.AI Configuration:', {
         endpoint: this.fptAi.endpoint,
         apiKeySet: !!this.fptAi.apiKey,
-        apiKeyPrefix: this.fptAi.apiKey ? this.fptAi.apiKey.substring(0, 6) + '***' : 'NOT_SET'
+        apiKeyPrefix: this.fptAi.apiKey
+          ? this.fptAi.apiKey.substring(0, 6) + '***'
+          : 'NOT_SET',
       });
 
       // Validate image buffer
@@ -95,7 +104,7 @@ export class CccdRecognitionService {
 
       // Extract data from response
       const data = responseData.data?.[0] || {};
-      
+
       // Map FPT.AI response to our DTO format
       const result: CccdRecognitionResponseDto = {
         id: String(data.id || ''),
@@ -111,7 +120,6 @@ export class CccdRecognitionService {
       console.log('CCCD recognition completed successfully');
       console.log('Recognized CCCD Data:', result);
       return result;
-
     } catch (error) {
       console.error('Error during CCCD recognition:', error);
 
@@ -124,43 +132,47 @@ export class CccdRecognitionService {
       if (axios.isAxiosError(error)) {
         const status = error.response?.status;
         const responseData = error.response?.data as any;
-        
+
         // Handle specific HTTP status codes
         if (status === 401) {
           console.error('FPT.AI Authentication failed:', {
             status,
             data: responseData,
-            apiKeyUsed: this.fptAi.apiKey
+            apiKeyUsed: this.fptAi.apiKey,
           });
           throw new BadRequestException(
-            'FPT.AI Authentication failed. Please check your API key configuration.'
+            'FPT.AI Authentication failed. Please check your API key configuration.',
           );
         }
-        
+
         if (status === 403) {
           throw new BadRequestException(
-            'FPT.AI Access forbidden. Your API key may not have permission for this service.'
+            'FPT.AI Access forbidden. Your API key may not have permission for this service.',
           );
         }
-        
+
         if (status === 429) {
           throw new BadRequestException(
-            'FPT.AI Rate limit exceeded. Please try again later.'
+            'FPT.AI Rate limit exceeded. Please try again later.',
           );
         }
-        
+
         const errorMessage = String(
-          responseData?.message || 
-          responseData?.error_message || 
-          error.message || 
-          'FPT.AI API error'
+          responseData?.message ||
+            responseData?.error_message ||
+            error.message ||
+            'FPT.AI API error',
         );
-        throw new BadRequestException(`FPT.AI API error (${status || 'Unknown'}): ${errorMessage}`);
+        throw new BadRequestException(
+          `FPT.AI API error (${status || 'Unknown'}): ${errorMessage}`,
+        );
       }
 
       // Handle timeout errors
       if (error instanceof Error && error.message.includes('timeout')) {
-        throw new BadRequestException('CCCD recognition timeout. Please try again.');
+        throw new BadRequestException(
+          'CCCD recognition timeout. Please try again.',
+        );
       }
 
       // Handle other errors
