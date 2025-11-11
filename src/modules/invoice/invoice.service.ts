@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -15,6 +14,7 @@ import { InvoiceStatusEnum } from '../common/enums/invoice-status.enum';
 import { ServiceTypeEnum } from '../common/enums/service-type.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { VN_TZ, formatVN, vnNow } from '../../common/datetime';
+import { INVOICE_ERRORS } from 'src/common/constants/error-messages.constant';
 
 // DTO for process invoice feature
 export interface InvoiceExtractionResultDto {
@@ -92,6 +92,36 @@ export class InvoiceService {
   }
 
   async create(dto: CreateInvoiceDto): Promise<ResponseCommon<Invoice>> {
+    // Validate DAMAGE_COMPENSATION serviceType: chỉ cho phép tạo trong 7 ngày cuối hợp đồng
+    const hasDamageCompensation = dto.items.some(
+      (item) => item.serviceType === ServiceTypeEnum.DAMAGE_COMPENSATION,
+    );
+
+    if (hasDamageCompensation) {
+      // Lấy thông tin hợp đồng để kiểm tra endDate
+      const contract = await this.contractRepository.findOne({
+        where: { id: dto.contractId },
+      });
+
+      if (!contract) {
+        throw new BadRequestException(INVOICE_ERRORS.CONTRACT_NOT_FOUND);
+      }
+
+      // Tính số giờ còn lại đến khi hợp đồng kết thúc
+      // Demo: 1 giờ = 1 ngày => 7 ngày = 7 giờ
+      const now = vnNow();
+      const endDate = contract.endDate;
+      const hoursUntilEnd =
+        (endDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+      // Chỉ cho phép tạo hóa đơn DAMAGE_COMPENSATION trong 7 giờ cuối cùng của hợp đồng
+      if (hoursUntilEnd > 7 || hoursUntilEnd < 0) {
+        throw new BadRequestException(
+          INVOICE_ERRORS.DAMAGE_COMPENSATION_TIMING_INVALID,
+        );
+      }
+    }
+
     const items = dto.items.map((i) => this.itemRepository.create(i));
     const total = items.reduce((sum, item) => sum + item.amount, 0);
     const code = this.generateCode();
@@ -115,7 +145,7 @@ export class InvoiceService {
     // Backward compatibility: nếu sử dụng old format, convert sang new format
     // Validate services array
     if (!dto.services || dto.services.length === 0) {
-      throw new BadRequestException('Danh sách dịch vụ không được để trống');
+      throw new BadRequestException(INVOICE_ERRORS.SERVICE_LIST_EMPTY);
     }
 
     // Kiểm tra duplicate serviceType trong cùng một invoice
@@ -123,8 +153,38 @@ export class InvoiceService {
     const uniqueServiceTypes = new Set(serviceTypes);
     if (serviceTypes.length !== uniqueServiceTypes.size) {
       throw new BadRequestException(
-        'Không được có dịch vụ trùng lặp trong cùng một hóa đơn',
+        INVOICE_ERRORS.DUPLICATE_SERVICE_TYPE,
       );
+    }
+
+    // Validate DAMAGE_COMPENSATION: chỉ cho phép tạo trong 7 ngày cuối hợp đồng
+    const hasDamageCompensation = dto.services.some(
+      (s) => s.serviceType === ServiceTypeEnum.DAMAGE_COMPENSATION,
+    );
+
+    if (hasDamageCompensation) {
+      // Lấy thông tin hợp đồng để kiểm tra endDate
+      const contractForValidation = await this.contractRepository.findOne({
+        where: { id: dto.contractId },
+      });
+
+      if (!contractForValidation) {
+        throw new BadRequestException(INVOICE_ERRORS.CONTRACT_NOT_FOUND);
+      }
+
+      // Tính số giờ còn lại đến khi hợp đồng kết thúc
+      // Demo: 1 giờ = 1 ngày => 7 ngày = 7 giờ
+      const now = vnNow();
+      const endDate = contractForValidation.endDate;
+      const hoursUntilEnd =
+        (endDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+      // Chỉ cho phép tạo hóa đơn DAMAGE_COMPENSATION trong 7 giờ cuối cùng của hợp đồng
+      if (hoursUntilEnd > 7 || hoursUntilEnd < 0) {
+        throw new BadRequestException(
+          INVOICE_ERRORS.DAMAGE_COMPENSATION_TIMING_INVALID,
+        );
+      }
     }
 
     // Validate từng service item
@@ -134,11 +194,11 @@ export class InvoiceService {
         !service.KwhNo
       ) {
         throw new BadRequestException(
-          'KwhNo là bắt buộc cho dịch vụ ELECTRICITY',
+          INVOICE_ERRORS.KWH_NO_REQUIRED,
         );
       }
       if (service.serviceType === ServiceTypeEnum.WATER && !service.M3No) {
-        throw new BadRequestException('M3No là bắt buộc cho dịch vụ WATER');
+        throw new BadRequestException(INVOICE_ERRORS.M3_NO_REQUIRED);
       }
       if (
         service.serviceType !== ServiceTypeEnum.ELECTRICITY &&
@@ -146,7 +206,7 @@ export class InvoiceService {
         !service.amount
       ) {
         throw new BadRequestException(
-          `Amount là bắt buộc cho dịch vụ ${service.serviceType}`,
+          INVOICE_ERRORS.PAYMENT_DETAILS_MISSING,
         );
       }
     }
@@ -158,11 +218,11 @@ export class InvoiceService {
     });
 
     if (!contract) {
-      throw new BadRequestException('Không tìm thấy hợp đồng');
+      throw new BadRequestException(INVOICE_ERRORS.CONTRACT_NOT_FOUND);
     }
 
     if (!contract.property) {
-      throw new BadRequestException('Hợp đồng không có thông tin bất động sản');
+      throw new BadRequestException(INVOICE_ERRORS.CONTRACT_NO_PROPERTY);
     }
 
     // Kiểm tra duplicate trong database cho từng service type
@@ -183,7 +243,7 @@ export class InvoiceService {
 
       if (hasExistingServiceType) {
         throw new BadRequestException(
-          `Đã tồn tại hóa đơn có dịch vụ ${service.serviceType} cho kỳ ${dto.billingPeriod}. Không thể tạo hóa đơn trùng lặp.`,
+          INVOICE_ERRORS.DUPLICATE_SERVICE_TYPE,
         );
       }
     }
@@ -204,7 +264,7 @@ export class InvoiceService {
         const electricityPrice = contract.property.electricityPricePerKwh;
         if (!electricityPrice) {
           throw new BadRequestException(
-            'Giá điện chưa được thiết lập cho bất động sản này',
+            INVOICE_ERRORS.PAYMENT_DETAILS_MISSING,
           );
         }
         itemAmount = service.KwhNo * Number(electricityPrice);
@@ -219,7 +279,7 @@ export class InvoiceService {
         const waterPrice = contract.property.waterPricePerM3;
         if (!waterPrice) {
           throw new BadRequestException(
-            'Giá nước chưa được thiết lập cho bất động sản này',
+            INVOICE_ERRORS.PAYMENT_DETAILS_MISSING,
           );
         }
         itemAmount = service.M3No * Number(waterPrice);
@@ -230,7 +290,7 @@ export class InvoiceService {
         // Các dịch vụ khác
         if (!service.amount) {
           throw new BadRequestException(
-            `Amount là bắt buộc cho dịch vụ ${service.serviceType}`,
+            INVOICE_ERRORS.PAYMENT_DETAILS_MISSING,
           );
         }
         itemAmount = service.amount;
@@ -303,7 +363,7 @@ export class InvoiceService {
 
   async markPaid(id: string): Promise<ResponseCommon<Invoice>> {
     const invoice = await this.loadInvoice(id);
-    if (!invoice) throw new Error(`Invoice with id ${id} not found`);
+    if (!invoice) throw new NotFoundException(INVOICE_ERRORS.INVOICE_NOT_FOUND);
     this.ensureStatus(invoice, [InvoiceStatusEnum.PENDING]);
     invoice.status = InvoiceStatusEnum.PAID;
     const saved = await this.invoiceRepository.save(invoice);
@@ -312,7 +372,7 @@ export class InvoiceService {
 
   async cancel(id: string): Promise<ResponseCommon<Invoice>> {
     const invoice = await this.loadInvoice(id);
-    if (!invoice) throw new Error(`Invoice with id ${id} not found`);
+    if (!invoice) throw new NotFoundException(INVOICE_ERRORS.INVOICE_NOT_FOUND);
     this.ensureStatus(invoice, [InvoiceStatusEnum.PENDING]);
     invoice.status = InvoiceStatusEnum.CANCELLED;
     const saved = await this.invoiceRepository.save(invoice);

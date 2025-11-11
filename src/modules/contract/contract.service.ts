@@ -30,6 +30,7 @@ import {
 } from './dispute-handling.service';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ContractExtensionService } from './contract-extension.service';
+import { CONTRACT_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class ContractService {
@@ -397,12 +398,12 @@ export class ContractService {
     });
 
     if (!contract) {
-      throw new NotFoundException('Không tìm thấy hợp đồng');
+      throw new NotFoundException(CONTRACT_ERRORS.CONTRACT_NOT_FOUND);
     }
 
     // Kiểm tra contractFileUrl có tồn tại không
     if (!contract.contractFileUrl) {
-      throw new NotFoundException('Hợp đồng chưa có file đính kèm');
+      throw new NotFoundException(CONTRACT_ERRORS.CONTRACT_FILE_NOT_FOUND);
     }
 
     // Kiểm tra quyền truy cập: chỉ tenant hoặc landlord của hợp đồng mới được phép
@@ -410,7 +411,7 @@ export class ContractService {
     const isLandlord = contract.landlord?.id === userId;
 
     if (!isTenant && !isLandlord) {
-      throw new ForbiddenException('Bạn không có quyền truy cập hợp đồng này');
+      throw new ForbiddenException(CONTRACT_ERRORS.ACCESS_DENIED);
     }
 
     try {
@@ -454,7 +455,7 @@ export class ContractService {
         `Failed to generate presigned URL for contract ${contractId}:`,
         error,
       );
-      throw new BadRequestException('Không thể tạo URL truy cập file hợp đồng');
+      throw new BadRequestException(CONTRACT_ERRORS.PRESIGNED_URL_GENERATION_FAILED);
     }
   }
 
@@ -473,7 +474,7 @@ export class ContractService {
     const normalized = value.length === 10 ? `${value}T00:00:00` : value;
     const date = zonedTimeToUtc(normalized, VN_TZ);
     if (Number.isNaN(date.getTime())) {
-      throw new BadRequestException('Invalid date provided for contract');
+      throw new BadRequestException(CONTRACT_ERRORS.INVALID_DATE_PROVIDED);
     }
     return date;
   }
@@ -978,7 +979,7 @@ export class ContractService {
     });
 
     if (!contract) {
-      throw new NotFoundException('Contract not found');
+      throw new NotFoundException(CONTRACT_ERRORS.CONTRACT_NOT_FOUND);
     }
 
     // Tìm extension được active gần nhất
@@ -1028,7 +1029,7 @@ export class ContractService {
     });
 
     if (!extension) {
-      throw new NotFoundException('Extension not found');
+      throw new NotFoundException(CONTRACT_ERRORS.EXTENSION_NOT_FOUND);
     }
 
     extension.tenantEscrowDepositFundedAt = vnNow();
@@ -1065,7 +1066,7 @@ export class ContractService {
     });
 
     if (!extension) {
-      throw new NotFoundException('Extension not found');
+      throw new NotFoundException(CONTRACT_ERRORS.EXTENSION_NOT_FOUND);
     }
 
     extension.landlordEscrowDepositFundedAt = vnNow();

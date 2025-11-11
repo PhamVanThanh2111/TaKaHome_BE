@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Payment } from './entities/payment.entity';
@@ -35,6 +35,7 @@ import {
 } from '../../common/datetime';
 import { WalletTxnType } from '../common/enums/wallet-txn-type.enum';
 import { UserService } from '../user/user.service';
+import { PAYMENT_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class PaymentService {
@@ -79,17 +80,15 @@ export class PaymentService {
     });
 
     if (!invoice) {
-      throw new Error(`Invoice ${invoiceId} not found`);
+      throw new NotFoundException(PAYMENT_ERRORS.INVOICE_NOT_FOUND);
     }
 
     if (invoice.status !== InvoiceStatusEnum.PENDING) {
-      throw new Error(`Invoice ${invoiceId} is not pending payment`);
+      throw new BadRequestException(PAYMENT_ERRORS.INVOICE_NOT_PENDING);
     }
 
     if (invoice.contract?.tenant?.id !== ctx.userId) {
-      throw new Error(
-        `User ${ctx.userId} is not authorized to pay invoice ${invoiceId}`,
-      );
+      throw new UnauthorizedException(PAYMENT_ERRORS.TENANT_NOT_IN_CONTRACT);
     }
 
     // Determine payment purpose based on invoice description
@@ -119,8 +118,8 @@ export class PaymentService {
 
     // Ensure invoice has an associated contract
     if (!invoice.contract || !invoice.contract.id) {
-      throw new Error(
-        `Invoice ${invoiceId} does not have an associated contract`,
+      throw new BadRequestException(
+        PAYMENT_ERRORS.INVOICE_ALREADY_HAS_PAYMENT,
       );
     }
     const contractId = invoice.contract.id;
@@ -179,7 +178,7 @@ export class PaymentService {
         });
       } catch (error) {
         console.error('Error debiting wallet:', error);
-        throw new Error('Failed to process wallet payment');
+        throw new BadRequestException(PAYMENT_ERRORS.WALLET_PAYMENT_FAILED);
       }
 
       payment.status = PaymentStatusEnum.PAID;
@@ -208,7 +207,7 @@ export class PaymentService {
         expireIn: dto.expireIn ?? 15,
       });
       if (!data) {
-        throw new Error('Failed to create VNPay payment link');
+        throw new BadRequestException(PAYMENT_ERRORS.VNPAY_PAYMENT_FAILED);
       }
       const { paymentUrl, txnRef } = data;
 
@@ -227,7 +226,7 @@ export class PaymentService {
       });
     }
 
-    throw new BadRequestException('Unsupported payment method');
+    throw new BadRequestException(PAYMENT_ERRORS.UNSUPPORTED_PAYMENT_METHOD);
   }
 
   async findAll(): Promise<ResponseCommon<Payment[]>> {
@@ -251,7 +250,7 @@ export class PaymentService {
     });
 
     if (!payment) {
-      throw new Error(`Payment with id ${id} not found`);
+      throw new NotFoundException(PAYMENT_ERRORS.PAYMENT_NOT_FOUND);
     }
 
     return new ResponseCommon(200, 'SUCCESS', payment);
@@ -267,7 +266,7 @@ export class PaymentService {
       relations: ['contract'],
     });
     if (!updated) {
-      throw new Error(`Payment with id ${id} not found`);
+      throw new NotFoundException(PAYMENT_ERRORS.PAYMENT_NOT_FOUND);
     }
     if (updatePaymentDto.status === PaymentStatusEnum.PAID) {
       await this.onPaymentPaid(updated.id);
@@ -306,8 +305,8 @@ export class PaymentService {
     const returnUrl = this.vnpay.returnUrl;
 
     if (!tmnCode || !hashSecret || !vnpUrl || !returnUrl) {
-      throw new Error(
-        'VNPay config is missing (tmnCode/hashSecret/url/returnUrl).',
+      throw new BadRequestException(
+        PAYMENT_ERRORS.PAYMENT_URL_GENERATION_FAILED,
       );
     }
 
@@ -394,7 +393,7 @@ export class PaymentService {
     // 1) Lấy secret từ config
     const secret = this.vnpay.hashSecret;
     if (!secret) {
-      throw new Error('VNPay hashSecret is missing.');
+      throw new BadRequestException(PAYMENT_ERRORS.VNPAY_HASH_SECRET_MISSING);
     }
 
     // 2) Lấy hash và loại nó khỏi tập tham số
@@ -797,7 +796,7 @@ export class PaymentService {
       });
 
       if (!paymentWithInvoice) {
-        throw new Error(`Payment ${payment.id} not found`);
+        throw new NotFoundException(PAYMENT_ERRORS.PAYMENT_NOT_FOUND);
       }
 
       // 3. Record payment on blockchain
@@ -850,24 +849,22 @@ export class PaymentService {
    */
   private async processWalletTopUpPayment(payment: Payment): Promise<void> {
     try {
-      // Kiểm tra xem payment có userId không
-      if (!payment.userId) {
-        console.error('Missing userId for wallet top-up payment', {
-          paymentId: payment.id,
-        });
-        throw new BadRequestException(
-          'Missing user information for wallet top-up',
-        );
-      }
-
-      // Verify user exists
+    // Kiểm tra xem payment có userId không
+    if (!payment.userId) {
+      console.error('Missing userId for wallet top-up payment', {
+        paymentId: payment.id,
+      });
+      throw new BadRequestException(
+        PAYMENT_ERRORS.MISSING_USER_INFO_WALLET_TOPUP,
+      );
+    }      // Verify user exists
       const user = await this.userService.findOne(payment.userId);
       if (!user) {
         console.error('User not found for wallet top-up payment', {
           paymentId: payment.id,
           userId: payment.userId,
         });
-        throw new BadRequestException('User not found');
+        throw new BadRequestException(PAYMENT_ERRORS.USER_NOT_FOUND);
       }
 
       // Credit user wallet
@@ -1209,14 +1206,14 @@ export class PaymentService {
 
     if (!dto.contractId) {
       throw new BadRequestException(
-        'Contract ID is required for extension escrow deposits',
+        PAYMENT_ERRORS.CONTRACT_ID_REQUIRED,
       );
     }
 
     // Lấy contract với extension relations
     const contract = await this.contractService.findRawById(dto.contractId);
     if (!contract) {
-      throw new BadRequestException('Contract not found');
+      throw new BadRequestException(PAYMENT_ERRORS.CONTRACT_NOT_FOUND);
     }
     console.log(contract.extensions);
 
@@ -1230,7 +1227,7 @@ export class PaymentService {
 
     if (!activeExtension) {
       throw new BadRequestException(
-        'No active extension awaiting escrow deposits for this contract',
+        PAYMENT_ERRORS.NO_ACTIVE_EXTENSION,
       );
     }
 
@@ -1238,23 +1235,23 @@ export class PaymentService {
     if (dto.purpose === PaymentPurpose.TENANT_EXTENSION_ESCROW_DEPOSIT) {
       if (contract.tenant.id !== userId) {
         throw new BadRequestException(
-          'Only tenant can pay tenant extension escrow deposit',
+          PAYMENT_ERRORS.ONLY_TENANT_CAN_PAY,
         );
       }
       if (activeExtension.tenantEscrowDepositFundedAt) {
         throw new BadRequestException(
-          'Tenant extension escrow deposit already paid',
+          PAYMENT_ERRORS.TENANT_ESCROW_ALREADY_PAID,
         );
       }
     } else {
       if (contract.landlord.id !== userId) {
         throw new BadRequestException(
-          'Only landlord can pay landlord extension escrow deposit',
+          PAYMENT_ERRORS.ONLY_LANDLORD_CAN_PAY,
         );
       }
       if (activeExtension.landlordEscrowDepositFundedAt) {
         throw new BadRequestException(
-          'Landlord extension escrow deposit already paid',
+          PAYMENT_ERRORS.LANDLORD_ESCROW_ALREADY_PAID,
         );
       }
     }

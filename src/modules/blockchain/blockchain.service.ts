@@ -19,6 +19,7 @@ import {
   BlockchainContract,
   ContractHistory,
 } from './interfaces/contract.interface';
+import { BLOCKCHAIN_ERRORS } from 'src/common/constants/error-messages.constant';
 import {
   Payment,
   PaymentSchedule,
@@ -619,22 +620,18 @@ export class BlockchainService implements OnModuleInit {
     const errorMessage = error.message || 'Unknown blockchain error';
 
     if (errorMessage.includes('Identity not found')) {
-      throw new BadRequestException('Blockchain user not enrolled');
+      throw new BadRequestException(BLOCKCHAIN_ERRORS.USER_NOT_ENROLLED);
     } else if (errorMessage.includes('already exists')) {
-      throw new ConflictException('Resource already exists on blockchain');
+      throw new ConflictException(BLOCKCHAIN_ERRORS.RESOURCE_ALREADY_EXISTS);
     } else if (
       errorMessage.includes('does not exist') ||
       errorMessage.includes('not found')
     ) {
-      throw new NotFoundException('Resource not found on blockchain');
+      throw new NotFoundException(BLOCKCHAIN_ERRORS.RESOURCE_NOT_FOUND);
     } else if (errorMessage.includes('Missing required fields')) {
-      throw new BadRequestException(
-        'Invalid input data for blockchain operation',
-      );
+      throw new BadRequestException(BLOCKCHAIN_ERRORS.INVALID_INPUT_DATA);
     } else {
-      throw new InternalServerErrorException(
-        `Blockchain network error: ${errorMessage}`,
-      );
+      throw new InternalServerErrorException(BLOCKCHAIN_ERRORS.NETWORK_ERROR);
     }
   }
 

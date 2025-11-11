@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
@@ -7,14 +11,21 @@ import { ResponseCommon } from 'src/common/dto/response.dto';
 import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { CccdRecognitionService } from './cccd-recognition.service';
 import { CccdRecognitionResponseDto } from './dto/cccd-recognition.dto';
+import { Account } from '../account/entities/account.entity';
+import { USER_ERRORS } from 'src/common/constants/error-messages.constant';
+import { FaceVerificationService } from './face-verification.service';
+import { FaceVerificationResponseDto } from './dto/face-verification.dto';
 
 @Injectable()
 export class UserService {
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(Account)
+    private accountRepository: Repository<Account>,
     private readonly s3StorageService: S3StorageService,
     private readonly cccdRecognitionService: CccdRecognitionService,
+    private readonly faceVerificationService: FaceVerificationService,
   ) {}
 
   async findAll(): Promise<ResponseCommon> {
@@ -28,7 +39,7 @@ export class UserService {
       relations: ['account'],
     });
     if (!user) {
-      throw new NotFoundException(`User with id ${id} not found`);
+      throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
     }
     return new ResponseCommon(200, 'SUCCESS', user);
   }
@@ -39,9 +50,9 @@ export class UserService {
   ): Promise<ResponseCommon> {
     const existingUser = await this.userRepository.findOne({ where: { id } });
     if (!existingUser) {
-      throw new NotFoundException(`User with id ${id} not found`);
+      throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
     }
-    
+
     await this.userRepository.update(id, updateUserDto);
     const updatedUser = await this.findOne(id);
     return updatedUser;
@@ -50,9 +61,9 @@ export class UserService {
   async remove(id: string): Promise<ResponseCommon> {
     const existingUser = await this.userRepository.findOne({ where: { id } });
     if (!existingUser) {
-      throw new NotFoundException(`User with id ${id} not found`);
+      throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
     }
-    
+
     await this.userRepository.delete(id);
     return new ResponseCommon(200, 'SUCCESS');
   }
@@ -70,16 +81,21 @@ export class UserService {
       // Validate user exists
       const user = await this.userRepository.findOne({ where: { id: userId } });
       if (!user) {
-        throw new NotFoundException(`User with id ${userId} not found`);
+        throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
       }
 
       // Delete old avatar if exists
       if (user.avatarUrl) {
         try {
-          const oldKey = this.s3StorageService.extractKeyFromUrl(user.avatarUrl);
+          const oldKey = this.s3StorageService.extractKeyFromUrl(
+            user.avatarUrl,
+          );
           await this.s3StorageService.deleteAvatar(oldKey);
         } catch (error) {
-          console.warn('Failed to delete old avatar:', error instanceof Error ? error.message : 'Unknown error');
+          console.warn(
+            'Failed to delete old avatar:',
+            error instanceof Error ? error.message : 'Unknown error',
+          );
           // Continue with upload even if old avatar deletion fails
         }
       }
@@ -112,14 +128,15 @@ export class UserService {
         },
       });
     } catch (error) {
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
-      
+
       console.error('Failed to upload avatar:', error);
-      throw new BadRequestException(
-        `Failed to upload avatar: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
+      throw new BadRequestException(USER_ERRORS.INVALID_IMAGE_BUFFER);
     }
   }
 
@@ -138,22 +155,129 @@ export class UserService {
         originalFilename,
       );
       if (userId) {
-        const user = await this.userRepository.findOne({ where: { id: userId } });
-        if (user) {
-          await this.userRepository.update(userId, {
-            CCCD: result.id,
-          });
+        const user = await this.userRepository.findOne({
+          where: { id: userId },
+          relations: ['account'],
+        });
+        if (!user) {
+          throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
+        }
+
+        user.CCCD = result.id;
+        user.isVerified = true;
+
+        if (user.account) {
+          user.account.isVerified = true;
+        }
+
+        await this.userRepository.save(user);
+
+        if (user.account) {
+          user.account.isVerified = true;
+          await this.accountRepository.save(user.account);
         }
       }
-      return new ResponseCommon(200, 'CCCD recognition completed successfully', result);
+      return new ResponseCommon(
+        200,
+        'CCCD recognition completed successfully',
+        result,
+      );
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
       }
-      
+
       console.error('Failed to recognize CCCD:', error);
+      throw new BadRequestException(USER_ERRORS.INVALID_IMAGE_BUFFER);
+    }
+  }
+
+  /**
+   * Verify face with CCCD - Combined flow
+   * 1. Recognize CCCD information from CCCD image
+   * 2. Verify face matching between face image and CCCD image
+   * 3. Update user verification status if successful
+   */
+  async verifyFaceWithCccd(
+    faceImageBuffer: Buffer,
+    cccdImageBuffer: Buffer,
+    faceImageFilename: string,
+    cccdImageFilename: string,
+    userId: string,
+  ): Promise<ResponseCommon<FaceVerificationResponseDto>> {
+    try {
+      // Step 1: Recognize CCCD first
+      console.log('Step 1: Recognizing CCCD information...');
+      const cccdResult = await this.cccdRecognitionService.recognizeCccd(
+        cccdImageBuffer,
+        cccdImageFilename,
+      );
+
+      console.log('CCCD recognized successfully:', cccdResult);
+
+      // Step 2: Verify face matching
+      console.log('Step 2: Verifying face matching...');
+      const faceVerificationResult =
+        await this.faceVerificationService.verifyFace(
+          faceImageBuffer,
+          cccdImageBuffer,
+          faceImageFilename,
+          cccdImageFilename,
+        );
+
+      console.log('Face verification result:', faceVerificationResult);
+
+      // Step 3: Check if faces match (similarity >= 80%)
+      if (!faceVerificationResult.isMatch) {
+        throw new BadRequestException(`Khuôn mặt không khớp với ảnh CCCD.`);
+      }
+
+      // Step 4: Update user information if userId is provided
+      if (userId) {
+        const user = await this.userRepository.findOne({
+          where: { id: userId },
+          relations: ['account'],
+        });
+
+        if (!user) {
+          throw new NotFoundException(`User with id ${userId} not found`);
+        }
+
+        // Update user CCCD and verification status
+        user.CCCD = cccdResult.id;
+        user.isVerified = true;
+
+        if (user.account) {
+          user.account.isVerified = true;
+        }
+
+        await this.userRepository.save(user);
+
+        if (user.account) {
+          await this.accountRepository.save(user.account);
+        }
+
+        console.log(
+          `User ${userId} verified successfully with CCCD ${cccdResult.id}`,
+        );
+      }
+
+      // Return success response with verification result
+      return new ResponseCommon(200, 'Xác thực gương mặt và CCCD thành công', {
+        ...faceVerificationResult,
+        cccdInfo: cccdResult,
+      });
+    } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
+      ) {
+        throw error;
+      }
+
+      console.error('Failed to verify face with CCCD:', error);
       throw new BadRequestException(
-        `Failed to recognize CCCD: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `Failed to verify face with CCCD: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
     }
   }

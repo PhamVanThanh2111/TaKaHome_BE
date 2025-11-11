@@ -42,7 +42,7 @@ export class User {
   })
   status: UserStatusEnum;
 
-  @Column({ nullable: true })
+  @Column({ nullable: true, unique: true })
   CCCD?: string;
 
   @CreateDateColumn({

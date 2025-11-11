@@ -7,6 +7,7 @@ import { Contract } from '../contract/entities/contract.entity';
 import { Booking } from '../booking/entities/booking.entity';
 import { Property } from '../property/entities/property.entity';
 import { Room } from '../property/entities/room.entity';
+import { Invoice } from '../invoice/entities/invoice.entity';
 import { EscrowService } from '../escrow/escrow.service';
 import { BlockchainService } from '../blockchain/blockchain.service';
 import { NotificationService } from '../notification/notification.service';
@@ -14,12 +15,15 @@ import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 import { BookingStatus } from '../common/enums/booking-status.enum';
 import { NotificationTypeEnum } from '../common/enums/notification-type.enum';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
+import { InvoiceStatusEnum } from '../common/enums/invoice-status.enum';
 
 export interface TerminationCalculation {
   refundToTenant: number;
   refundToLandlord: number;
   penaltyAmount: number;
   remainingRent: number;
+  unpaidInvoicesTotal: number;
+  unpaidInvoicesCount: number;
   escrowBalance: {
     tenant: number;
     landlord: number;
@@ -52,6 +56,8 @@ export class ContractTerminationService {
     private propertyRepository: Repository<Property>,
     @InjectRepository(Room)
     private roomRepository: Repository<Room>,
+    @InjectRepository(Invoice)
+    private invoiceRepository: Repository<Invoice>,
 
     private escrowService: EscrowService,
     private blockchainService: BlockchainService,
@@ -150,6 +156,24 @@ export class ContractTerminationService {
         throw new Error(`Contract ${contractId} not found`);
       }
 
+      // Check for unpaid invoices
+      const unpaidInvoices = await this.invoiceRepository.find({
+        where: {
+          contract: { id: contractId },
+          status: InvoiceStatusEnum.PENDING,
+        },
+      });
+
+      const unpaidInvoicesTotal = unpaidInvoices.reduce(
+        (sum, invoice) => sum + invoice.totalAmount,
+        0,
+      );
+      const unpaidInvoicesCount = unpaidInvoices.length;
+
+      this.logger.log(
+        `📋 Found ${unpaidInvoicesCount} unpaid invoice(s) totaling ${unpaidInvoicesTotal.toLocaleString('vi-VN')} VND`,
+      );
+
       const monthlyRent = contract.property?.price || 0;
       const now = vnNow();
 
@@ -162,9 +186,26 @@ export class ContractTerminationService {
         ),
       );
 
-      // Simple refund logic: Return deposits to their respective parties
-      const refundToTenant = tenantBalance;
-      const refundToLandlord = landlordBalance;
+      // NEW LOGIC: Deduct unpaid invoices from tenant's escrow balance
+      let refundToTenant = tenantBalance - unpaidInvoicesTotal;
+      let refundToLandlord = landlordBalance;
+
+      // If tenant balance is not enough to cover unpaid invoices
+      if (refundToTenant < 0) {
+        // Transfer the shortfall from landlord's balance
+        const shortfall = Math.abs(refundToTenant);
+        this.logger.warn(
+          `⚠️ Tenant balance insufficient! Shortfall: ${shortfall.toLocaleString('vi-VN')} VND`,
+        );
+
+        // Landlord gets tenant's full balance + unpaid amount from their own balance
+        refundToLandlord = landlordBalance + unpaidInvoicesTotal;
+        refundToTenant = 0;
+      } else {
+        // Tenant balance is sufficient - transfer unpaid amount to landlord
+        refundToLandlord = landlordBalance + unpaidInvoicesTotal;
+      }
+
       const penaltyAmount = 0; // No penalties, just return deposits
 
       return {
@@ -172,6 +213,8 @@ export class ContractTerminationService {
         refundToLandlord: Math.max(0, refundToLandlord),
         penaltyAmount,
         remainingRent: remainingMonths * monthlyRent,
+        unpaidInvoicesTotal,
+        unpaidInvoicesCount,
         escrowBalance: {
           tenant: tenantBalance,
           landlord: landlordBalance,
@@ -206,7 +249,10 @@ export class ContractTerminationService {
         },
       );
 
-      // 3. Process refunds
+      // 3. Cancel unpaid invoices (mark as CANCELLED)
+      await this.cancelUnpaidInvoices(contract.id);
+
+      // 4. Process refunds (with unpaid invoices deducted)
       await this.processRefunds(contract, calculation);
 
       // 5. Hide property/room visibility
@@ -231,6 +277,42 @@ export class ContractTerminationService {
         error,
       );
       throw error;
+    }
+  }
+
+  /**
+   * Cancel all unpaid invoices for the contract
+   */
+  private async cancelUnpaidInvoices(contractId: string): Promise<void> {
+    try {
+      const unpaidInvoices = await this.invoiceRepository.find({
+        where: {
+          contract: { id: contractId },
+          status: InvoiceStatusEnum.PENDING,
+        },
+      });
+
+      if (unpaidInvoices.length > 0) {
+        await this.invoiceRepository.update(
+          {
+            contract: { id: contractId },
+            status: InvoiceStatusEnum.PENDING,
+          },
+          {
+            status: InvoiceStatusEnum.CANCELLED,
+          },
+        );
+
+        this.logger.log(
+          `📋 Cancelled ${unpaidInvoices.length} unpaid invoice(s) for contract ${contractId}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to cancel unpaid invoices for contract ${contractId}:`,
+        error,
+      );
+      // Don't throw - continue with termination
     }
   }
 
@@ -379,12 +461,26 @@ export class ContractTerminationService {
     try {
       const terminationDate = formatVN(vnNow(), 'dd/MM/yyyy HH:mm');
 
+      // Build notification content based on unpaid invoices
+      let tenantContent = `Hợp đồng thuê căn hộ ${contract.property.title} đã chấm dứt vào ${terminationDate}. Lý do: ${reason}.`;
+      let landlordContent = `Hợp đồng với người thuê ${contract.tenant.fullName} cho căn hộ ${contract.property.title} đã chấm dứt vào ${terminationDate}. Lý do: ${reason}.`;
+
+      // Add unpaid invoice information if any
+      if (calculation.unpaidInvoicesCount > 0) {
+        const unpaidInfo = `\n\n⚠️ Có ${calculation.unpaidInvoicesCount} hóa đơn chưa thanh toán (Tổng: ${calculation.unpaidInvoicesTotal.toLocaleString('vi-VN')} VND) đã được trừ vào tiền cọc.`;
+        tenantContent += unpaidInfo;
+        landlordContent += `\n\n✅ Số tiền hóa đơn chưa thanh toán (${calculation.unpaidInvoicesTotal.toLocaleString('vi-VN')} VND) đã được chuyển từ tiền cọc của người thuê.`;
+      }
+
+      tenantContent += `\n\nSố tiền hoàn trả: ${calculation.refundToTenant.toLocaleString('vi-VN')} VND.`;
+      landlordContent += `\n\nSố tiền thanh toán: ${calculation.refundToLandlord.toLocaleString('vi-VN')} VND.`;
+
       // Notify tenant
       await this.notificationService.create({
         userId: contract.tenant.id,
         type: NotificationTypeEnum.CONTRACT,
         title: '🛑 Hợp đồng đã chấm dứt',
-        content: `Hợp đồng thuê căn hộ ${contract.property.title} đã chấm dứt vào ${terminationDate}. Lý do: ${reason}. Số tiền hoàn trả: ${calculation.refundToTenant.toLocaleString('vi-VN')} VND.`,
+        content: tenantContent,
       });
 
       // Notify landlord
@@ -392,7 +488,7 @@ export class ContractTerminationService {
         userId: contract.landlord.id,
         type: NotificationTypeEnum.CONTRACT,
         title: '🛑 Hợp đồng đã chấm dứt',
-        content: `Hợp đồng với người thuê ${contract.tenant.fullName} cho căn hộ ${contract.property.title} đã chấm dứt vào ${terminationDate}. Lý do: ${reason}. Số tiền thanh toán: ${calculation.refundToLandlord.toLocaleString('vi-VN')} VND.`,
+        content: landlordContent,
       });
 
       this.logger.log(

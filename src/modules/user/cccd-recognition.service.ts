@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+ 
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Injectable, BadRequestException, Inject } from '@nestjs/common';
@@ -7,6 +7,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import fptAiConfig from 'src/config/fpt-ai.config';
 import { CccdRecognitionResponseDto } from './dto/cccd-recognition.dto';
+import { CCCD_ERRORS } from 'src/common/constants/error-messages.constant';
 
 interface FptAiResponse {
   error_code?: number;
@@ -30,37 +31,40 @@ export class CccdRecognitionService {
     private readonly fptAi: ConfigType<typeof fptAiConfig>,
   ) {}
 
-  async recognizeCccd(imageBuffer: Buffer, originalFilename: string): Promise<CccdRecognitionResponseDto> {
+  async recognizeCccd(
+    imageBuffer: Buffer,
+    originalFilename: string,
+  ): Promise<CccdRecognitionResponseDto> {
     try {
       // Validate FPT.AI configuration
       if (!this.fptAi.apiKey || this.fptAi.apiKey.trim() === '') {
         console.error('FPT.AI API key not configured or empty');
-        throw new BadRequestException('FPT.AI API key not configured. Please set FPT_AI_API_KEY in environment variables.');
+        throw new BadRequestException(CCCD_ERRORS.FPT_AI_API_KEY_NOT_CONFIGURED);
       }
 
       if (!this.fptAi.endpoint || this.fptAi.endpoint.trim() === '') {
         console.error('FPT.AI endpoint not configured or empty');
-        throw new BadRequestException('FPT.AI endpoint not configured. Please set FPT_AI_ENDPOINT in environment variables.');
+        throw new BadRequestException(CCCD_ERRORS.FPT_AI_ENDPOINT_NOT_CONFIGURED);
       }
 
       // Log configuration (safely)
       console.log('FPT.AI Configuration:', {
         endpoint: this.fptAi.endpoint,
         apiKeySet: !!this.fptAi.apiKey,
-        apiKeyPrefix: this.fptAi.apiKey ? this.fptAi.apiKey.substring(0, 6) + '***' : 'NOT_SET'
+        apiKeyPrefix: this.fptAi.apiKey
+          ? this.fptAi.apiKey.substring(0, 6) + '***'
+          : 'NOT_SET',
       });
 
       // Validate image buffer
       if (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {
-        throw new BadRequestException('Invalid image buffer provided');
+        throw new BadRequestException(CCCD_ERRORS.INVALID_IMAGE_BUFFER);
       }
 
       // Validate file type (only images)
       const fileExtension = originalFilename.split('.').pop()?.toLowerCase();
       if (!fileExtension || !['jpg', 'jpeg', 'png'].includes(fileExtension)) {
-        throw new BadRequestException(
-          'Invalid file type. Only JPEG and PNG images are allowed for CCCD recognition.',
-        );
+        throw new BadRequestException(CCCD_ERRORS.INVALID_IMAGE_BUFFER);
       }
 
       console.log(`Starting CCCD recognition for file: ${originalFilename}`);
@@ -88,14 +92,12 @@ export class CccdRecognitionService {
 
       // Check if API returned error
       if (responseData.error_code || responseData.error_message) {
-        throw new BadRequestException(
-          `FPT.AI API error: ${responseData.error_message || 'Unknown error'}`,
-        );
+        throw new BadRequestException(CCCD_ERRORS.FPT_AI_API_ERROR);
       }
 
       // Extract data from response
       const data = responseData.data?.[0] || {};
-      
+
       // Map FPT.AI response to our DTO format
       const result: CccdRecognitionResponseDto = {
         id: String(data.id || ''),
@@ -111,7 +113,6 @@ export class CccdRecognitionService {
       console.log('CCCD recognition completed successfully');
       console.log('Recognized CCCD Data:', result);
       return result;
-
     } catch (error) {
       console.error('Error during CCCD recognition:', error);
 
@@ -124,49 +125,35 @@ export class CccdRecognitionService {
       if (axios.isAxiosError(error)) {
         const status = error.response?.status;
         const responseData = error.response?.data as any;
-        
+
         // Handle specific HTTP status codes
         if (status === 401) {
           console.error('FPT.AI Authentication failed:', {
             status,
             data: responseData,
-            apiKeyUsed: this.fptAi.apiKey
+            apiKeyUsed: this.fptAi.apiKey,
           });
-          throw new BadRequestException(
-            'FPT.AI Authentication failed. Please check your API key configuration.'
-          );
+          throw new BadRequestException(CCCD_ERRORS.FPT_AI_API_KEY_NOT_CONFIGURED);
         }
-        
+
         if (status === 403) {
-          throw new BadRequestException(
-            'FPT.AI Access forbidden. Your API key may not have permission for this service.'
-          );
+          throw new BadRequestException(CCCD_ERRORS.FPT_AI_API_KEY_NOT_CONFIGURED);
         }
-        
+
         if (status === 429) {
-          throw new BadRequestException(
-            'FPT.AI Rate limit exceeded. Please try again later.'
-          );
+          throw new BadRequestException(CCCD_ERRORS.CCCD_RECOGNITION_ERROR);
         }
         
-        const errorMessage = String(
-          responseData?.message || 
-          responseData?.error_message || 
-          error.message || 
-          'FPT.AI API error'
-        );
-        throw new BadRequestException(`FPT.AI API error (${status || 'Unknown'}): ${errorMessage}`);
+        throw new BadRequestException(CCCD_ERRORS.FPT_AI_API_ERROR);
       }
 
       // Handle timeout errors
       if (error instanceof Error && error.message.includes('timeout')) {
-        throw new BadRequestException('CCCD recognition timeout. Please try again.');
+        throw new BadRequestException(CCCD_ERRORS.CCCD_RECOGNITION_TIMEOUT);
       }
 
       // Handle other errors
-      throw new BadRequestException(
-        `Failed to recognize CCCD: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
+      throw new BadRequestException(CCCD_ERRORS.CCCD_RECOGNITION_ERROR);
     }
   }
 }

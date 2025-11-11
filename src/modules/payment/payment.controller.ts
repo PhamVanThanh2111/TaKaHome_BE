@@ -19,6 +19,7 @@ import {
 import { PaymentService } from './payment.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
+import { PAYMENT_ERRORS } from 'src/common/constants/error-messages.constant';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -35,6 +36,7 @@ import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 import { Public } from 'src/common/decorators/public.decorator';
 import { ConfigType } from '@nestjs/config';
 import frontendConfig from '../../config/frontend.config';
+import { Throttle } from '@nestjs/throttler';
 
 interface PaymentState {
   userId: string;
@@ -52,6 +54,7 @@ export class PaymentController {
     private readonly frontend: ConfigType<typeof frontendConfig>,
   ) {}
 
+  @Throttle({ payment: {} })
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo payment' })
@@ -79,6 +82,7 @@ export class PaymentController {
     });
   }
 
+  @Throttle({ payment: {} })
   @Post('invoice/:invoiceId')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo payment từ hóa đơn' })
@@ -142,6 +146,7 @@ export class PaymentController {
     return this.paymentService.update(id, updatePaymentDto);
   }
 
+  @Throttle({ payment: {} })
   @Get('vnpay/create')
   async createVnpay(
     @Query('contractId') contractId: string,
@@ -173,7 +178,7 @@ export class PaymentController {
       expireIn: expireIn ? Number(expireIn) : undefined,
     });
     if (!data) {
-      throw new BadRequestException('Không tạo được link thanh toán VNPay');
+      throw new BadRequestException(PAYMENT_ERRORS.PAYMENT_URL_GENERATION_FAILED);
     }
     const { paymentUrl, txnRef } = data;
 

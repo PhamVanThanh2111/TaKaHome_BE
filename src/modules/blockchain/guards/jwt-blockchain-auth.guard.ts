@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { BlockchainConfigService } from '../blockchain-config.service';
 import { IS_PUBLIC_KEY } from 'src/common/decorators/public.decorator';
+import { BLOCKCHAIN_ERRORS } from 'src/common/constants/error-messages.constant';
 
 /**
  * JWT + Blockchain Combined Auth Guard
@@ -42,28 +43,24 @@ export class JwtBlockchainAuthGuard extends AuthGuard('jwt') implements CanActiv
 
     // Validate organization name
     if (!orgName) {
-      throw new BadRequestException('Missing required header: orgName or x-org-name');
+      throw new BadRequestException(BLOCKCHAIN_ERRORS.MISSING_ORG_HEADER);
     }
 
     if (!this.blockchainConfig.isValidOrganization(orgName)) {
-      throw new UnauthorizedException(
-        `Invalid organization: ${orgName}. Supported organizations: ${this.blockchainConfig.getOrganizations()}`
-      );
+      throw new UnauthorizedException(BLOCKCHAIN_ERRORS.INVALID_ORGANIZATION);
     }
 
     // Verify user has permission for this organization
     const user = request.user; // From JWT auth
     if (!this.canUserAccessOrganization(user, orgName)) {
-      throw new UnauthorizedException(
-        `User ${user.id} does not have permission to access organization: ${orgName}`
-      );
+      throw new UnauthorizedException(BLOCKCHAIN_ERRORS.INVALID_ORGANIZATION);
     }
 
     // If userId not provided, use default for organization or user ID from JWT
     const finalUserId = userId || user.id || this.blockchainConfig.getDefaultUserForOrg(orgName);
     
     if (!finalUserId) {
-      throw new UnauthorizedException(`No user identity available for organization: ${orgName}`);
+      throw new UnauthorizedException(BLOCKCHAIN_ERRORS.NO_USER_IDENTITY);
     }
 
     // Attach blockchain user info to request
