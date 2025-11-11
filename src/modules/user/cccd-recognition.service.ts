@@ -31,7 +31,10 @@ export class CccdRecognitionService {
     private readonly fptAi: ConfigType<typeof fptAiConfig>,
   ) {}
 
-  async recognizeCccd(imageBuffer: Buffer, originalFilename: string): Promise<CccdRecognitionResponseDto> {
+  async recognizeCccd(
+    imageBuffer: Buffer,
+    originalFilename: string,
+  ): Promise<CccdRecognitionResponseDto> {
     try {
       // Validate FPT.AI configuration
       if (!this.fptAi.apiKey || this.fptAi.apiKey.trim() === '') {
@@ -48,7 +51,9 @@ export class CccdRecognitionService {
       console.log('FPT.AI Configuration:', {
         endpoint: this.fptAi.endpoint,
         apiKeySet: !!this.fptAi.apiKey,
-        apiKeyPrefix: this.fptAi.apiKey ? this.fptAi.apiKey.substring(0, 6) + '***' : 'NOT_SET'
+        apiKeyPrefix: this.fptAi.apiKey
+          ? this.fptAi.apiKey.substring(0, 6) + '***'
+          : 'NOT_SET',
       });
 
       // Validate image buffer
@@ -92,7 +97,7 @@ export class CccdRecognitionService {
 
       // Extract data from response
       const data = responseData.data?.[0] || {};
-      
+
       // Map FPT.AI response to our DTO format
       const result: CccdRecognitionResponseDto = {
         id: String(data.id || ''),
@@ -108,7 +113,6 @@ export class CccdRecognitionService {
       console.log('CCCD recognition completed successfully');
       console.log('Recognized CCCD Data:', result);
       return result;
-
     } catch (error) {
       console.error('Error during CCCD recognition:', error);
 
@@ -121,21 +125,21 @@ export class CccdRecognitionService {
       if (axios.isAxiosError(error)) {
         const status = error.response?.status;
         const responseData = error.response?.data as any;
-        
+
         // Handle specific HTTP status codes
         if (status === 401) {
           console.error('FPT.AI Authentication failed:', {
             status,
             data: responseData,
-            apiKeyUsed: this.fptAi.apiKey
+            apiKeyUsed: this.fptAi.apiKey,
           });
           throw new BadRequestException(CCCD_ERRORS.FPT_AI_API_KEY_NOT_CONFIGURED);
         }
-        
+
         if (status === 403) {
           throw new BadRequestException(CCCD_ERRORS.FPT_AI_API_KEY_NOT_CONFIGURED);
         }
-        
+
         if (status === 429) {
           throw new BadRequestException(CCCD_ERRORS.CCCD_RECOGNITION_ERROR);
         }
