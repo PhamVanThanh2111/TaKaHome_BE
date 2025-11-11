@@ -232,9 +232,7 @@ export class UserService {
 
       // Step 3: Check if faces match (similarity >= 80%)
       if (!faceVerificationResult.isMatch) {
-        throw new BadRequestException(
-          `Khuôn mặt không khớp với ảnh CCCD. Độ giống nhau: ${faceVerificationResult.similarity.toFixed(2)}% (yêu cầu >= 80%)`,
-        );
+        throw new BadRequestException(`Khuôn mặt không khớp với ảnh CCCD.`);
       }
 
       // Step 4: Update user information if userId is provided
