@@ -12,6 +12,7 @@ import {
   UseInterceptors,
   Logger,
 } from '@nestjs/common';
+import { SMARTCA_ERRORS } from 'src/common/constants/error-messages.constant';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -60,7 +61,7 @@ export class SmartCAController {
     @Res() res: Response,
   ) {
     if (!file?.buffer?.length) {
-      throw new BadRequestException('Missing file "pdf"');
+      throw new BadRequestException(SMARTCA_ERRORS.MISSING_PDF_FILE);
     }
 
     // helper: parse rect -> [x, y, w, h]
@@ -190,7 +191,7 @@ export class SmartCAController {
     @CurrentUser() user?: JwtUser,
   ) {
     if (!file?.buffer?.length)
-      throw new BadRequestException('Missing file "pdf"');
+      throw new BadRequestException(SMARTCA_ERRORS.MISSING_PDF_FILE);
 
     // Debug log entry
     this.logger.debug(
@@ -235,7 +236,7 @@ export class SmartCAController {
 
         // Always return CMS (base64) for the client to embed via /embed-cms.
         if (!result.cmsBase64) {
-          throw new BadRequestException('Failed to generate CMS for SELF_CA');
+          throw new BadRequestException(SMARTCA_ERRORS.GENERATE_CMS_FAILED_SELF_CA);
         }
 
         this.logger.debug(
@@ -298,7 +299,7 @@ export class SmartCAController {
     summary: 'Generate self-signed certificate for a user (signed by Root CA)',
   })
   async createCertificate(@CurrentUser() user: JwtUser) {
-    if (!user.id) throw new BadRequestException('userId required');
+    if (!user.id) throw new BadRequestException(SMARTCA_ERRORS.USER_ID_REQUIRED);
     // Reverted: allow creating certificate even if JWT lacks fullName.
     // The CertificateService will fallback to a default subject CN (user-<id>) when fullName is not provided.
     const res = await this.certificateService.generateUserKeyAndCert(user.id, {
@@ -324,7 +325,7 @@ export class SmartCAController {
   })
   async revokeCertificate(@Body() body: { serialNumber: string }) {
     if (!body?.serialNumber)
-      throw new BadRequestException('serialNumber required');
+      throw new BadRequestException(SMARTCA_ERRORS.SERIAL_NUMBER_REQUIRED);
     const res = await this.certificateService.revokeCertificate(
       body.serialNumber,
     );
@@ -334,7 +335,7 @@ export class SmartCAController {
   @Post('list-local-certificates')
   @ApiOperation({ summary: 'List certificates issued by SELF_CA for a user' })
   async listLocalCertificates(@Body() body: { userId: string }) {
-    if (!body?.userId) throw new BadRequestException('userId required');
+    if (!body?.userId) throw new BadRequestException(SMARTCA_ERRORS.USER_ID_REQUIRED);
     // Simple query via repository through service
     const repo = (this.certificateService as any).certRepo;
     const list = await repo.find({ where: { userId: body.userId } });
@@ -406,13 +407,13 @@ export class SmartCAController {
     @Res() res: Response,
   ) {
     if (!file?.buffer?.length) {
-      throw new BadRequestException('Missing file "pdf"');
+      throw new BadRequestException(SMARTCA_ERRORS.MISSING_PDF_FILE);
     }
 
     const signatureIndex =
       body.signatureIndex !== undefined ? Number(body.signatureIndex) : 0;
     if (!Number.isFinite(signatureIndex) || signatureIndex < 0) {
-      throw new BadRequestException('Invalid signatureIndex');
+      throw new BadRequestException(SMARTCA_ERRORS.INVALID_SIGNATURE_INDEX);
     }
 
     const cmsBase64 = (body.cmsBase64 || '').trim();
@@ -420,10 +421,10 @@ export class SmartCAController {
     const signerName = ((body as any).signerName || '').trim();
 
     if (!cmsBase64 && !cmsHex) {
-      throw new BadRequestException('Missing CMS: provide cmsBase64 or cmsHex');
+      throw new BadRequestException(SMARTCA_ERRORS.MISSING_CMS_DATA);
     }
     if (cmsBase64 && cmsHex) {
-      throw new BadRequestException('Provide only one of cmsBase64 or cmsHex');
+      throw new BadRequestException(SMARTCA_ERRORS.PROVIDE_ONLY_ONE_CMS_FORMAT);
     }
 
     // Convert CMS input to hex string
@@ -479,7 +480,7 @@ export class SmartCAController {
     @UploadedFile() file: Express.Multer.File,
   ): Array<Record<string, unknown>> {
     if (!file?.buffer?.length) {
-      throw new BadRequestException('PDF file is required');
+      throw new BadRequestException(SMARTCA_ERRORS.MISSING_PDF_FILE);
     }
     return this.smartcaService.debugScanSignatures(file.buffer) as Array<
       Record<string, unknown>

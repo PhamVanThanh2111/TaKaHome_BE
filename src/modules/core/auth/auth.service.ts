@@ -22,6 +22,7 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import * as admin from 'firebase-admin';
 import { EmailService } from 'src/modules/email/email.service';
+import { AUTH_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class AuthService {
@@ -76,7 +77,7 @@ export class AuthService {
     const exist = await this.accountRepo.findOne({
       where: { email: dto.email },
     });
-    if (exist) throw new ConflictException('Email already registered');
+    if (exist) throw new ConflictException(AUTH_ERRORS.EMAIL_ALREADY_REGISTERED);
 
     const hash = await bcrypt.hash(dto.password, 10);
 
@@ -155,9 +156,9 @@ export class AuthService {
       where: { email: dto.email },
       relations: ['user'],
     });
-    if (!acc) throw new NotFoundException('Account not found');
+    if (!acc) throw new NotFoundException(AUTH_ERRORS.ACCOUNT_NOT_FOUND);
     if (!(await bcrypt.compare(dto.password, acc.password))) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException(AUTH_ERRORS.INVALID_CREDENTIALS);
     }
     const payload = {
       sub: acc.user.id,
@@ -285,7 +286,7 @@ export class AuthService {
       };
     } catch (error) {
       this.logger.error('Google OAuth error:', error);
-      throw new UnauthorizedException('Google authentication failed');
+      throw new UnauthorizedException(AUTH_ERRORS.GOOGLE_AUTH_FAILED);
     }
   }
 
@@ -360,9 +361,7 @@ export class AuthService {
       // Step 2: Validate phone number exists in token
       let phoneNumber = decodedToken.phone_number;
       if (!phoneNumber) {
-        throw new UnauthorizedException(
-          'Invalid token: phone number not found',
-        );
+        throw new UnauthorizedException(AUTH_ERRORS.TOKEN_INVALID_PHONE);
       }
 
       // Step 3: Validate token was issued recently (prevent replay attacks)
@@ -370,9 +369,7 @@ export class AuthService {
       const tokenAge = Date.now() / 1000 - tokenIssuedAt;
       const maxTokenAge = 300; // 5 minutes
       if (tokenAge > maxTokenAge) {
-        throw new UnauthorizedException(
-          'Token đã quá hạn sử dụng. Vui lòng xác thực lại OTP.',
-        );
+        throw new UnauthorizedException(AUTH_ERRORS.TOKEN_TOO_OLD);
       }
 
       // Step 4: Convert phone format from international to local
@@ -381,15 +378,13 @@ export class AuthService {
         phoneNumber = '0' + phoneNumber.substring(3);
       } else if (phoneNumber.startsWith('+')) {
         // Validate only Vietnamese phone numbers
-        throw new UnauthorizedException(
-          'Chỉ hỗ trợ số điện thoại Việt Nam (+84)',
-        );
+        throw new UnauthorizedException(AUTH_ERRORS.PHONE_NOT_SUPPORTED);
       }
 
       // Step 5: Validate phone number format (Vietnamese)
       const vietnamesePhoneRegex = /^0[1-9]\d{8}$/;
       if (!vietnamesePhoneRegex.test(phoneNumber)) {
-        throw new UnauthorizedException('Số điện thoại không hợp lệ');
+        throw new UnauthorizedException(AUTH_ERRORS.INVALID_PHONE_NUMBER);
       }
 
       this.logger.log(`Attempting password reset for phone: ${phoneNumber}`);
@@ -401,15 +396,11 @@ export class AuthService {
       });
 
       if (!user) {
-        throw new NotFoundException(
-          'Không tìm thấy tài khoản với số điện thoại này',
-        );
+        throw new NotFoundException(AUTH_ERRORS.USER_NOT_FOUND_BY_PHONE);
       }
 
       if (!user.account) {
-        throw new NotFoundException(
-          'Tài khoản chưa được kích hoạt hoặc không tồn tại',
-        );
+        throw new NotFoundException(AUTH_ERRORS.ACCOUNT_NOT_ACTIVATED);
       }
 
       // Step 7: Validate Firebase UID matches (if user has Firebase UID stored)
@@ -440,9 +431,7 @@ export class AuthService {
       ) {
         throw error;
       }
-      throw new UnauthorizedException(
-        'Token không hợp lệ hoặc đã hết hạn. Vui lòng xác thực OTP lại.',
-      );
+      throw new UnauthorizedException(AUTH_ERRORS.INVALID_TOKEN);
     }
   }
 
@@ -580,12 +569,12 @@ export class AuthService {
 
       // Step 2: Validate token type
       if (decoded.type !== 'reset-password') {
-        throw new UnauthorizedException('Invalid token type');
+        throw new UnauthorizedException(AUTH_ERRORS.INVALID_TOKEN_TYPE);
       }
 
       // Step 3: Validate email exists in decoded token
       if (!decoded.email) {
-        throw new UnauthorizedException('Invalid token: missing email');
+        throw new UnauthorizedException(AUTH_ERRORS.TOKEN_MISSING_EMAIL);
       }
 
       // Step 4: Find account by email first
@@ -594,23 +583,17 @@ export class AuthService {
       });
 
       if (!account) {
-        throw new UnauthorizedException(
-          'Token không hợp lệ hoặc tài khoản không tồn tại',
-        );
+        throw new UnauthorizedException(AUTH_ERRORS.ACCOUNT_NOT_FOUND);
       }
 
       // Step 5: CRITICAL - Validate token matches the one in database
       if (!account.resetPasswordToken) {
-        throw new UnauthorizedException(
-          'Token không hợp lệ hoặc đã được sử dụng',
-        );
+        throw new UnauthorizedException(AUTH_ERRORS.TOKEN_ALREADY_USED);
       }
 
       // Step 6: CRITICAL - Token in DB must exactly match the provided token
       if (account.resetPasswordToken !== token) {
-        throw new UnauthorizedException(
-          'Token không khớp. Token có thể đã được sử dụng hoặc bị thay thế.',
-        );
+        throw new UnauthorizedException(AUTH_ERRORS.TOKEN_MISMATCH);
       }
 
       // Step 7: Additional security - Verify token timestamp is within reasonable time
@@ -620,7 +603,7 @@ export class AuthService {
         // Extra check beyond JWT expiry
         account.resetPasswordToken = undefined;
         await this.accountRepo.save(account);
-        throw new UnauthorizedException('Token đã hết hạn');
+        throw new UnauthorizedException(AUTH_ERRORS.TOKEN_EXPIRED);
       }
 
       // Step 8: Hash new password with bcrypt
@@ -645,9 +628,7 @@ export class AuthService {
         error.name === 'JsonWebTokenError' ||
         error.name === 'TokenExpiredError'
       ) {
-        throw new UnauthorizedException(
-          'Token không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu reset mật khẩu lại.',
-        );
+        throw new UnauthorizedException(AUTH_ERRORS.INVALID_TOKEN);
       }
       throw error;
     }
@@ -672,12 +653,12 @@ export class AuthService {
 
       // Step 2: Validate token type
       if (decoded.type !== 'refresh') {
-        throw new UnauthorizedException('Invalid token type');
+        throw new UnauthorizedException(AUTH_ERRORS.INVALID_TOKEN_TYPE);
       }
 
       // Step 3: Validate email exists in decoded token
       if (!decoded.email || !decoded.sub) {
-        throw new UnauthorizedException('Invalid token: missing credentials');
+        throw new UnauthorizedException(AUTH_ERRORS.TOKEN_MISSING_CREDENTIALS);
       }
 
       // Step 4: Find account by email
@@ -687,28 +668,22 @@ export class AuthService {
       });
 
       if (!account) {
-        throw new UnauthorizedException(
-          'Token không hợp lệ hoặc tài khoản không tồn tại',
-        );
+        throw new UnauthorizedException(AUTH_ERRORS.ACCOUNT_NOT_FOUND);
       }
 
       // Step 5: CRITICAL - Validate refresh token matches the one in database
       if (!account.refreshToken) {
-        throw new UnauthorizedException(
-          'Refresh token không tồn tại. Vui lòng đăng nhập lại.',
-        );
+        throw new UnauthorizedException(AUTH_ERRORS.REFRESH_TOKEN_NOT_FOUND);
       }
 
       // Step 6: CRITICAL - Token in DB must exactly match the provided token
       if (account.refreshToken !== refreshToken) {
-        throw new UnauthorizedException(
-          'Refresh token không khớp. Vui lòng đăng nhập lại.',
-        );
+        throw new UnauthorizedException(AUTH_ERRORS.REFRESH_TOKEN_MISMATCH);
       }
 
       // Step 7: Validate user ID matches
       if (account.user.id !== decoded.sub) {
-        throw new UnauthorizedException('Token không khớp với tài khoản');
+        throw new UnauthorizedException(AUTH_ERRORS.TOKEN_USER_MISMATCH);
       }
 
       // Step 8: Generate new access token
@@ -747,9 +722,7 @@ export class AuthService {
         error.name === 'JsonWebTokenError' ||
         error.name === 'TokenExpiredError'
       ) {
-        throw new UnauthorizedException(
-          'Refresh token không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.',
-        );
+        throw new UnauthorizedException(AUTH_ERRORS.INVALID_TOKEN);
       }
       throw error;
     }
@@ -767,7 +740,7 @@ export class AuthService {
       });
 
       if (!account) {
-        throw new NotFoundException('Tài khoản không tồn tại');
+        throw new NotFoundException(AUTH_ERRORS.ACCOUNT_NOT_FOUND);
       }
 
       // Clear refresh token
@@ -784,7 +757,7 @@ export class AuthService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new UnauthorizedException('Đăng xuất thất bại');
+      throw new UnauthorizedException(AUTH_ERRORS.LOGOUT_FAILED);
     }
   }
 }

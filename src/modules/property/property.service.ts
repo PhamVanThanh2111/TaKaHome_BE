@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ResponseCommon } from 'src/common/dto/response.dto';
@@ -21,6 +21,7 @@ import { RoomType } from './entities/room-type.entity';
 import { Room } from './entities/room.entity';
 import { PropertyOrRoomTypeWithUrl } from './interfaces/property-with-url.interface';
 import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
+import { PROPERTY_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class PropertyService {
@@ -54,7 +55,7 @@ export class PropertyService {
 
     // Validate entity exists
     if (!entityId) {
-      throw new Error('entityId is required');
+      throw new BadRequestException(PROPERTY_ERRORS.ENTITY_ID_REQUIRED);
     }
 
     let heroUrl: string | undefined;
@@ -89,7 +90,7 @@ export class PropertyService {
       const roomType = await this.roomTypeRepository.findOne({
         where: { id: entityId },
       });
-      if (!roomType) throw new Error('RoomType not found');
+      if (!roomType) throw new NotFoundException(PROPERTY_ERRORS.ROOM_TYPE_NOT_FOUND);
       if (heroUrl) roomType.heroImage = heroUrl;
       if (galleryUrls.length > 0)
         roomType.images = [...(roomType.images || []), ...galleryUrls];
@@ -101,7 +102,7 @@ export class PropertyService {
     const property = await this.propertyRepository.findOne({
       where: { id: entityId },
     });
-    if (!property) throw new Error('Property not found');
+    if (!property) throw new NotFoundException(PROPERTY_ERRORS.PROPERTY_NOT_FOUND);
     if (heroUrl) property.heroImage = heroUrl;
     if (galleryUrls.length > 0)
       property.images = [...(property.images || []), ...galleryUrls];
@@ -144,13 +145,12 @@ export class PropertyService {
       });
 
       if (!result) {
-        throw new Error('Failed to retrieve created property');
+        throw new NotFoundException(PROPERTY_ERRORS.PROPERTY_CREATE_FAILED);
       }
 
       return new ResponseCommon(201, 'Property created successfully', result);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(`Error creating property: ${message}`);
+    } catch {
+      throw new BadRequestException(PROPERTY_ERRORS.PROPERTY_CREATE_FAILED);
     }
   }
 
@@ -657,13 +657,11 @@ export class PropertyService {
       });
 
       if (!room) {
-        throw new Error(`Room with id ${roomId} not found`);
+        throw new NotFoundException(PROPERTY_ERRORS.ROOM_NOT_FOUND);
       }
 
       if (room.isVisible === false) {
-        throw new Error(
-          `Cannot move room ${roomId} because it is currently hidden. Please make the room visible first.`,
-        );
+        throw new BadRequestException(PROPERTY_ERRORS.ROOM_NOT_OWNED_BY_USER);
       }
 
       const property = await this.propertyRepository.findOne({
@@ -672,19 +670,17 @@ export class PropertyService {
       });
 
       if (!property) {
-        throw new Error('Parent property not found for this room');
+        throw new NotFoundException(PROPERTY_ERRORS.PARENT_PROPERTY_NOT_FOUND);
       }
 
       // Check if property is BOARDING type
       if (property.type !== PropertyTypeEnum.BOARDING) {
-        throw new Error(
-          `Cannot move room because property is not BOARDING type. Current type: ${property.type}`,
-        );
+        throw new BadRequestException(PROPERTY_ERRORS.PROPERTY_NOT_OWNED_BY_USER);
       }
 
       // Ownership check (landlord must be the caller)
       if (property.landlord && property.landlord.id !== currentUserId) {
-        throw new Error('Forbidden: you are not the owner of this property');
+        throw new ForbiddenException(PROPERTY_ERRORS.FORBIDDEN_NOT_OWNER);
       }
 
       let targetRoomType: RoomType;
@@ -701,8 +697,8 @@ export class PropertyService {
           moveRoomDto.newRoomTypeDeposit === undefined ||
           !moveRoomDto.newRoomTypeFurnishing
         ) {
-          throw new Error(
-            'Missing required fields for new RoomType: name, bedrooms, bathrooms, area, price, deposit, furnishing are required',
+          throw new BadRequestException(
+            PROPERTY_ERRORS.ROOM_TYPE_REQUIRED_FIELDS_MISSING,
           );
         }
 
@@ -725,8 +721,8 @@ export class PropertyService {
       // Mode 2: Move to existing RoomType
       else {
         if (!moveRoomDto.targetRoomTypeId) {
-          throw new Error(
-            'targetRoomTypeId is required when createNewRoomType is false or undefined',
+          throw new BadRequestException(
+            PROPERTY_ERRORS.TARGET_ROOM_TYPE_ID_REQUIRED,
           );
         }
 
@@ -737,9 +733,7 @@ export class PropertyService {
         });
 
         if (!existingRoomType) {
-          throw new Error(
-            `Target RoomType ${moveRoomDto.targetRoomTypeId} not found`,
-          );
+          throw new NotFoundException(PROPERTY_ERRORS.TARGET_ROOM_TYPE_NOT_FOUND);
         }
 
         // Determine if targetRoomType is associated with the same property by
@@ -753,8 +747,8 @@ export class PropertyService {
           );
 
         if (!targetBelongsToProperty) {
-          throw new Error(
-            'Target RoomType does not belong to the same property',
+          throw new BadRequestException(
+            PROPERTY_ERRORS.TARGET_ROOM_TYPE_NOT_IN_PROPERTY,
           );
         }
 
@@ -795,9 +789,8 @@ export class PropertyService {
         : 'Room moved successfully';
 
       return new ResponseCommon(200, message, result as Room);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(`Error moving room: ${message}`);
+    } catch {
+      throw new BadRequestException(PROPERTY_ERRORS.ROOM_MOVE_FAILED);
     }
   }
 
@@ -820,21 +813,17 @@ export class PropertyService {
       });
 
       if (!property) {
-        throw new Error(`Property with id ${id} not found`);
+        throw new NotFoundException(PROPERTY_ERRORS.PROPERTY_NOT_FOUND);
       }
 
       // Bước 2: Kiểm tra xem property có phải loại APARTMENT không
       if (property.type !== PropertyTypeEnum.APARTMENT) {
-        throw new Error(
-          `Property ${id} is not an APARTMENT type. Current type: ${property.type}`,
-        );
+        throw new BadRequestException(PROPERTY_ERRORS.PROPERTY_NOT_OWNED_BY_USER);
       }
 
       // Bước 2.5: Kiểm tra xem property đang hiển thị (isVisible = true) không
       if (property.isVisible === false) {
-        throw new Error(
-          `Cannot update property ${id} because it is currently hidden (isVisible = false). Please make the property visible first before updating.`,
-        );
+        throw new BadRequestException(PROPERTY_ERRORS.ROOM_NOT_OWNED_BY_USER);
       }
 
       // Bước 3: Cập nhật các fields được phép cho loại APARTMENT
@@ -874,13 +863,12 @@ export class PropertyService {
       });
 
       if (!result) {
-        throw new Error('Failed to retrieve updated apartment');
+        throw new NotFoundException(PROPERTY_ERRORS.PROPERTY_UPDATE_FAILED);
       }
 
       return new ResponseCommon(200, 'Apartment updated successfully', result);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(`Error updating apartment: ${message}`);
+    } catch {
+      throw new BadRequestException(PROPERTY_ERRORS.PROPERTY_UPDATE_FAILED);
     }
   }
 
@@ -898,7 +886,7 @@ export class PropertyService {
       });
 
       if (!property) {
-        throw new Error(`Property with id ${propertyId} not found`);
+        throw new NotFoundException(PROPERTY_ERRORS.PROPERTY_NOT_FOUND);
       }
 
       // Step 1.5: Validate if property has active bookings (only when approving)
@@ -935,13 +923,12 @@ export class PropertyService {
       });
 
       if (!result) {
-        throw new Error('Failed to retrieve updated property');
+        throw new NotFoundException(PROPERTY_ERRORS.PROPERTY_APPROVE_FAILED);
       }
 
       return new ResponseCommon(200, 'Property approved successfully', result);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(`Error approving property: ${message}`);
+    } catch {
+      throw new BadRequestException(PROPERTY_ERRORS.PROPERTY_APPROVE_FAILED);
     }
   }
 
@@ -1022,9 +1009,8 @@ export class PropertyService {
         `Successfully approved ${approvedProperties.length} properties`,
         result,
       );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(`Error approving properties: ${message}`);
+    } catch {
+      throw new BadRequestException(PROPERTY_ERRORS.PROPERTIES_APPROVE_FAILED);
     }
   }
 
@@ -1305,8 +1291,8 @@ export class PropertyService {
         });
 
         if (activeRoomBookings.length > 0) {
-          throw new Error(
-            'Property này đã từng được Approve và đang có người thuê rồi',
+          throw new BadRequestException(
+            PROPERTY_ERRORS.PROPERTY_HAS_ACTIVE_BOOKINGS,
           );
         }
       }
@@ -1320,8 +1306,8 @@ export class PropertyService {
       });
 
       if (activePropertyBookings.length > 0) {
-        throw new Error(
-          'Property này đã từng được Approve và đang có người thuê rồi',
+        throw new BadRequestException(
+          PROPERTY_ERRORS.PROPERTY_HAS_ACTIVE_BOOKINGS,
         );
       }
     }

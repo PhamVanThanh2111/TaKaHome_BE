@@ -6,9 +6,10 @@ import {
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { Injectable, Inject, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import s3Config from '../../config/s3.config';
+import { S3_ERRORS } from 'src/common/constants/error-messages.constant';
 
 export interface UploadResult {
   key: string;
@@ -36,14 +37,14 @@ export class S3StorageService {
   ) {
     // Validate S3 configuration
     if (!this.s3.accessKeyId || !this.s3.secretAccessKey) {
-      throw new Error(
-        'AWS credentials not configured. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in environment variables.',
+      throw new BadRequestException(
+        S3_ERRORS.S3_CREDENTIALS_NOT_CONFIGURED,
       );
     }
 
     if (!this.s3.bucketName) {
-      throw new Error(
-        'S3 bucket not configured. Please set AWS_S3_BUCKET in environment variables.',
+      throw new BadRequestException(
+        S3_ERRORS.S3_BUCKET_NOT_CONFIGURED,
       );
     }
 
@@ -69,7 +70,7 @@ export class S3StorageService {
   ): Promise<UploadResult> {
     try {
       if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
-        throw new BadRequestException('Invalid file buffer');
+        throw new BadRequestException(S3_ERRORS.INVALID_FILE_BUFFER);
       }
 
       const uploadParams: PutObjectCommandInput = {
@@ -100,7 +101,7 @@ export class S3StorageService {
     } catch (error) {
       console.error('[S3Upload] ❌ uploadFile failed:', error);
       throw new BadRequestException(
-        `Failed to upload file to S3: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        S3_ERRORS.S3_UPLOAD_FAILED,
       );
     }
   }
@@ -118,11 +119,11 @@ export class S3StorageService {
 
       // Validate inputs
       if (!Buffer.isBuffer(pdfBuffer) || pdfBuffer.length === 0) {
-        throw new BadRequestException('Invalid PDF buffer provided');
+        throw new BadRequestException(S3_ERRORS.INVALID_PDF_BUFFER);
       }
 
       if (!contractId?.trim()) {
-        throw new BadRequestException('Contract ID is required');
+        throw new BadRequestException(S3_ERRORS.CONTRACT_ID_REQUIRED);
       }
 
       // Generate structured S3 key
@@ -176,18 +177,18 @@ export class S3StorageService {
       // AWS S3 specific errors
       if (error instanceof Error && error.name === 'NoSuchBucket') {
         throw new BadRequestException(
-          `S3 bucket '${this.s3.bucketName}' does not exist`,
+          S3_ERRORS.S3_BUCKET_NOT_CONFIGURED,
         );
       }
 
       if (error instanceof Error && error.name === 'AccessDenied') {
         throw new BadRequestException(
-          'Access denied to S3 bucket. Check AWS credentials and permissions.',
+          S3_ERRORS.S3_CREDENTIALS_NOT_CONFIGURED,
         );
       }
 
       throw new BadRequestException(
-        `Failed to upload PDF to S3: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        S3_ERRORS.S3_UPLOAD_FAILED,
       );
     }
   }
@@ -213,7 +214,7 @@ export class S3StorageService {
     } catch (error) {
       console.error('[S3Download] ❌ Failed to generate signed URL:', error);
       throw new BadRequestException(
-        `Failed to generate download URL: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        S3_ERRORS.S3_GET_FAILED,
       );
     }
   }
@@ -232,7 +233,7 @@ export class S3StorageService {
     } catch (error) {
       console.error('[S3Delete] ❌ Failed to delete PDF:', error);
       throw new BadRequestException(
-        `Failed to delete PDF from S3: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        S3_ERRORS.S3_DELETE_FAILED,
       );
     }
   }
@@ -256,7 +257,7 @@ export class S3StorageService {
     } catch (error) {
       console.error('[S3List] ❌ Failed to list contract PDFs:', error);
       throw new BadRequestException(
-        `Failed to list contract PDFs: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        S3_ERRORS.S3_GET_FAILED,
       );
     }
   }
@@ -286,7 +287,7 @@ export class S3StorageService {
         error,
       );
       throw new BadRequestException(
-        `Failed to generate presigned GET URL: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        S3_ERRORS.S3_GET_FAILED,
       );
     }
   }
@@ -314,7 +315,7 @@ export class S3StorageService {
     } catch (error) {
       console.error('[S3Upload] ❌ Failed to generate upload URL:', error);
       throw new BadRequestException(
-        `Failed to generate upload URL: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        S3_ERRORS.S3_UPLOAD_FAILED,
       );
     }
   }
@@ -332,7 +333,7 @@ export class S3StorageService {
       const response = await this.s3Client.send(command);
 
       if (!response.Body) {
-        throw new BadRequestException(`File not found: ${key}`);
+        throw new NotFoundException(S3_ERRORS.FILE_NOT_FOUND);
       }
 
       // Convert ReadableStream to Buffer
@@ -353,7 +354,7 @@ export class S3StorageService {
     } catch (error) {
       console.error('[S3Download] ❌ Failed to download file:', error);
       throw new BadRequestException(
-        `Failed to download file: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        S3_ERRORS.S3_GET_FAILED,
       );
     }
   }
@@ -371,22 +372,22 @@ export class S3StorageService {
     try {
       // Validate inputs
       if (!Buffer.isBuffer(avatarBuffer) || avatarBuffer.length === 0) {
-        throw new BadRequestException('Invalid avatar buffer provided');
+        throw new BadRequestException(S3_ERRORS.INVALID_AVATAR_BUFFER);
       }
 
       if (!userId?.trim()) {
-        throw new BadRequestException('User ID is required');
+        throw new BadRequestException(S3_ERRORS.USER_ID_REQUIRED);
       }
 
       if (!originalFilename?.trim()) {
-        throw new BadRequestException('Original filename is required');
+        throw new BadRequestException(S3_ERRORS.ORIGINAL_FILENAME_REQUIRED);
       }
 
       // Validate file type (only images)
       const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
       if (!allowedTypes.includes(contentType)) {
         throw new BadRequestException(
-          'Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed.',
+          S3_ERRORS.INVALID_IMAGE_EXTENSION,
         );
       }
 
@@ -445,18 +446,18 @@ export class S3StorageService {
       // AWS S3 specific errors
       if (error instanceof Error && error.name === 'NoSuchBucket') {
         throw new BadRequestException(
-          `S3 bucket '${this.s3.bucketName}' does not exist`,
+          S3_ERRORS.S3_BUCKET_NOT_CONFIGURED,
         );
       }
 
       if (error instanceof Error && error.name === 'AccessDenied') {
         throw new BadRequestException(
-          'Access denied to S3 bucket. Check AWS credentials and permissions.',
+          S3_ERRORS.S3_CREDENTIALS_NOT_CONFIGURED,
         );
       }
 
       throw new BadRequestException(
-        `Failed to upload avatar to S3: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        S3_ERRORS.S3_UPLOAD_FAILED,
       );
     }
   }
@@ -475,7 +476,7 @@ export class S3StorageService {
     } catch (error) {
       console.error('[S3Delete] ❌ Failed to delete avatar:', error);
       throw new BadRequestException(
-        `Failed to delete avatar from S3: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        S3_ERRORS.S3_DELETE_FAILED,
       );
     }
   }
@@ -490,7 +491,7 @@ export class S3StorageService {
       const key = url.pathname.substring(1);
       return key;
     } catch {
-      throw new BadRequestException(`Invalid S3 URL format: ${s3Url}`);
+      throw new BadRequestException(S3_ERRORS.INVALID_S3_URL_FORMAT);
     }
   }
 }

@@ -25,6 +25,7 @@ import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 import { CccdRecognitionResponseDto, CccdRecognitionErrorDto } from './dto/cccd-recognition.dto';
 import { Throttle } from '@nestjs/throttler';
+import { USER_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Controller('users')
 @ApiBearerAuth()
@@ -129,21 +130,19 @@ export class UserController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) {
-      throw new BadRequestException('No file uploaded');
+      throw new BadRequestException(USER_ERRORS.NO_FILE_UPLOADED);
     }
 
     // Validate file size (max 5MB)
     const maxSize = 5 * 1024 * 1024; // 5MB
     if (file.size > maxSize) {
-      throw new BadRequestException('File size too large. Maximum size is 5MB');
+      throw new BadRequestException(USER_ERRORS.FILE_SIZE_TOO_LARGE);
     }
 
     // Validate file type
     const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
     if (!allowedMimeTypes.includes(file.mimetype)) {
-      throw new BadRequestException(
-        'Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed.',
-      );
+      throw new BadRequestException(USER_ERRORS.INVALID_FILE_TYPE);
     }
 
     return this.userService.uploadAvatar(
@@ -215,21 +214,19 @@ export class UserController {
     @CurrentUser() user: JwtUser,
   ) {
     if (!file) {
-      throw new BadRequestException('No image file uploaded');
+      throw new BadRequestException(USER_ERRORS.NO_IMAGE_UPLOADED);
     }
 
     // Validate file size (max 10MB for CCCD images)
     const maxSize = 10 * 1024 * 1024; // 10MB
     if (file.size > maxSize) {
-      throw new BadRequestException('File size too large. Maximum size is 10MB');
+      throw new BadRequestException(USER_ERRORS.FILE_SIZE_TOO_LARGE);
     }
 
     // Validate file type
     const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png'];
     if (!allowedMimeTypes.includes(file.mimetype)) {
-      throw new BadRequestException(
-        'Invalid file type. Only JPEG and PNG images are allowed for CCCD recognition.',
-      );
+      throw new BadRequestException(USER_ERRORS.INVALID_IMAGE_TYPE);
     }
 
     return this.userService.recognizeCccd(

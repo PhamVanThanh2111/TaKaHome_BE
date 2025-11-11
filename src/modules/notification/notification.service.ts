@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Notification } from './entities/notification.entity';
@@ -6,6 +6,7 @@ import { CreateNotificationDto } from './dto/create-notification.dto';
 import { UpdateNotificationDto } from './dto/update-notification.dto';
 import { StatusEnum } from '../common/enums/status.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
+import { NOTIFICATION_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class NotificationService {
@@ -53,7 +54,7 @@ export class NotificationService {
       relations: ['user'],
     });
     if (!notification) {
-      throw new Error(`Notification with id ${id} not found`);
+      throw new NotFoundException(NOTIFICATION_ERRORS.NOTIFICATION_NOT_FOUND);
     }
     return new ResponseCommon(200, 'SUCCESS', notification);
   }
@@ -76,7 +77,7 @@ export class NotificationService {
       where: { id: id },
     });
     if (!notification) {
-      throw new Error(`Notification with id ${id} not found`);
+      throw new NotFoundException(NOTIFICATION_ERRORS.NOTIFICATION_NOT_FOUND);
     }
 
     await this.notificationRepository.update(id, {

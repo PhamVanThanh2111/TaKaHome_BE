@@ -18,6 +18,7 @@ import { CreateTerminationRequestDto } from './dto/create-termination-request.dt
 import { RespondTerminationRequestDto } from './dto/respond-termination-request.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { ContractStatusEnum } from '../common/enums/contract-status.enum';
+import { CONTRACT_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class ContractTerminationRequestService {
@@ -47,7 +48,7 @@ export class ContractTerminationRequestService {
     });
 
     if (!contract) {
-      throw new NotFoundException('Không tìm thấy hợp đồng');
+      throw new NotFoundException(CONTRACT_ERRORS.CONTRACT_NOT_FOUND);
     }
 
     // 2. Kiểm tra người yêu cầu có phải là tenant hoặc landlord không
@@ -56,14 +57,14 @@ export class ContractTerminationRequestService {
 
     if (!isTenant && !isLandlord) {
       throw new ForbiddenException(
-        'Bạn không có quyền tạo yêu cầu hủy hợp đồng này',
+        CONTRACT_ERRORS.TERMINATION_FORBIDDEN_NOT_PARTY,
       );
     }
 
     // 3. Kiểm tra hợp đồng có đang hoạt động không
     if (contract.status !== ContractStatusEnum.ACTIVE) {
       throw new BadRequestException(
-        'Chỉ có thể hủy hợp đồng đang hoạt động',
+        CONTRACT_ERRORS.TERMINATION_CONTRACT_NOT_ACTIVE,
       );
     }
 
@@ -77,7 +78,7 @@ export class ContractTerminationRequestService {
 
     if (existingRequest) {
       throw new BadRequestException(
-        'Đã có yêu cầu hủy hợp đồng đang chờ xử lý',
+        CONTRACT_ERRORS.TERMINATION_REQUEST_ALREADY_PENDING,
       );
     }
 
@@ -133,7 +134,7 @@ export class ContractTerminationRequestService {
       requestedMonth > 12
     ) {
       throw new BadRequestException(
-        'requestedEndMonth không hợp lệ. Format: YYYY-MM (ví dụ: 2025-07)',
+        CONTRACT_ERRORS.TERMINATION_INVALID_END_MONTH_FORMAT,
       );
     }
 
@@ -147,8 +148,7 @@ export class ContractTerminationRequestService {
     // Kiểm tra requestedMonthStart không được vượt quá endDate của contract
     if (requestedMonthStart > contractEndDate) {
       throw new BadRequestException(
-        `Tháng kết thúc yêu cầu (${format(requestedMonthStart, 'MM/yyyy')}) không được vượt quá ` +
-          `ngày kết thúc hiện tại của hợp đồng (${format(contractEndDate, 'dd/MM/yyyy')}). `
+        CONTRACT_ERRORS.TERMINATION_END_MONTH_EXCEEDS_CONTRACT,
       );
     }
 
@@ -167,9 +167,7 @@ export class ContractTerminationRequestService {
       const minAllowedMonthFormatted = format(minAllowedMonth, 'MM/yyyy');
 
       throw new BadRequestException(
-        `Tháng kết thúc hợp đồng phải sau tháng hiện tại ít nhất 2 tháng. ` +
-          `Hiện tại là ${format(currentMonthStart, 'MM/yyyy')}, bạn chọn ${format(requestedMonthStart, 'MM/yyyy')}. ` +
-          `Vui lòng chọn tháng từ ${minAllowedMonthFormatted} trở đi.`,
+        CONTRACT_ERRORS.TERMINATION_MINIMUM_TWO_MONTHS_REQUIRED,
       );
     }
   }
@@ -192,13 +190,13 @@ export class ContractTerminationRequestService {
     });
 
     if (!request) {
-      throw new NotFoundException('Không tìm thấy yêu cầu hủy hợp đồng');
+      throw new NotFoundException(CONTRACT_ERRORS.TERMINATION_REQUEST_NOT_FOUND);
     }
 
     // 2. Kiểm tra trạng thái
     if (request.status !== TerminationRequestStatus.PENDING) {
       throw new BadRequestException(
-        'Yêu cầu hủy này đã được xử lý hoặc không còn hiệu lực',
+        CONTRACT_ERRORS.TERMINATION_REQUEST_ALREADY_PROCESSED,
       );
     }
 
@@ -208,7 +206,7 @@ export class ContractTerminationRequestService {
 
     if (!isTenant && !isLandlord) {
       throw new ForbiddenException(
-        'Bạn không có quyền phản hồi yêu cầu hủy này',
+        CONTRACT_ERRORS.TERMINATION_FORBIDDEN_NOT_OTHER_PARTY,
       );
     }
 
@@ -220,7 +218,7 @@ export class ContractTerminationRequestService {
       (!isRequestedByTenant && isLandlord)
     ) {
       throw new ForbiddenException(
-        'Bạn không thể phản hồi yêu cầu hủy do chính bạn tạo ra',
+        CONTRACT_ERRORS.TERMINATION_FORBIDDEN_CANNOT_RESPOND_OWN,
       );
     }
 
@@ -276,18 +274,18 @@ export class ContractTerminationRequestService {
     });
 
     if (!request) {
-      throw new NotFoundException('Không tìm thấy yêu cầu hủy hợp đồng');
+      throw new NotFoundException(CONTRACT_ERRORS.TERMINATION_REQUEST_NOT_FOUND);
     }
 
     if (request.requestedById !== userId) {
       throw new ForbiddenException(
-        'Bạn không có quyền hủy yêu cầu này',
+        CONTRACT_ERRORS.TERMINATION_CANCEL_FORBIDDEN_NOT_CREATOR,
       );
     }
 
     if (request.status !== TerminationRequestStatus.PENDING) {
       throw new BadRequestException(
-        'Chỉ có thể hủy yêu cầu đang chờ xử lý',
+        CONTRACT_ERRORS.TERMINATION_CANCEL_ONLY_PENDING,
       );
     }
 

@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Report } from './entities/report.entity';
 import { CreateReportDto } from './dto/create-report.dto';
 import { UpdateReportDto } from './dto/update-report.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
+import { REPORT_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class ReportService {
@@ -39,7 +40,7 @@ export class ReportService {
       relations: ['reporter', 'property'],
     });
     if (!report) {
-      throw new Error(`Report with id ${id} not found`);
+      throw new NotFoundException(REPORT_ERRORS.REPORT_NOT_FOUND);
     }
     return new ResponseCommon(200, 'SUCCESS', report);
   }

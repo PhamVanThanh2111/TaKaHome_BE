@@ -5,6 +5,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Injectable, CanActivate, ExecutionContext, BadRequestException, UnauthorizedException, createParamDecorator } from '@nestjs/common';
 import { BlockchainConfigService } from '../blockchain-config.service';
+import { BLOCKCHAIN_ERRORS } from 'src/common/constants/error-messages.constant';
 
 /**
  * Blockchain Auth Guard
@@ -25,11 +26,11 @@ export class BlockchainAuthGuard implements CanActivate {
 
     // Validate organization name
     if (!orgName) {
-      throw new BadRequestException('Missing required header: orgName or x-org-name');
+      throw new BadRequestException(BLOCKCHAIN_ERRORS.MISSING_ORG_HEADER);
     }
 
     if (!this.blockchainConfig.isValidOrganization(orgName)) {
-      throw new UnauthorizedException(`Invalid organization: ${orgName}. Supported organizations: ${Object.keys(this.blockchainConfig.getOrganizations())}`);
+      throw new UnauthorizedException(BLOCKCHAIN_ERRORS.INVALID_ORGANIZATION);
     }
 
     // Priority for userId:
@@ -46,7 +47,7 @@ export class BlockchainAuthGuard implements CanActivate {
       // Fallback to default admin user
       userId = this.blockchainConfig.getDefaultUserForOrg(orgName);
       if (!userId) {
-        throw new UnauthorizedException(`No default user configured for organization: ${orgName}`);
+        throw new UnauthorizedException(BLOCKCHAIN_ERRORS.NO_DEFAULT_USER);
       }
     }
 

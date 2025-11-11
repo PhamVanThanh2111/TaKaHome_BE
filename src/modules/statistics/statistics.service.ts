@@ -9,6 +9,7 @@ import { PropertyTypeEnum } from '../common/enums/property-type.enum';
 import { BookingStatus } from '../common/enums/booking-status.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { RoleEnum } from '../common/enums/role.enum';
+import { STATISTICS_ERRORS } from 'src/common/constants/error-messages.constant';
 
 export interface StatisticsOverview {
   totalProperties: number;
@@ -135,10 +136,10 @@ export class StatisticsService {
     });
 
     if (!landlord) {
-      throw new NotFoundException('Landlord not found');
+      throw new NotFoundException(STATISTICS_ERRORS.LANDLORD_NOT_FOUND);
     }
     if (!landlord.account || !landlord.account.roles.includes(RoleEnum.LANDLORD)) {
-      throw new NotFoundException('Landlord not found');
+      throw new NotFoundException(STATISTICS_ERRORS.LANDLORD_NOT_FOUND);
     }
 
     // Đếm tổng số properties của landlord

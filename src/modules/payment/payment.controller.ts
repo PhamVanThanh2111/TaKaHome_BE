@@ -19,6 +19,7 @@ import {
 import { PaymentService } from './payment.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
+import { PAYMENT_ERRORS } from 'src/common/constants/error-messages.constant';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -177,7 +178,7 @@ export class PaymentController {
       expireIn: expireIn ? Number(expireIn) : undefined,
     });
     if (!data) {
-      throw new BadRequestException('Không tạo được link thanh toán VNPay');
+      throw new BadRequestException(PAYMENT_ERRORS.PAYMENT_URL_GENERATION_FAILED);
     }
     const { paymentUrl, txnRef } = data;
 

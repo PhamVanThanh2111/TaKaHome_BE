@@ -14,6 +14,7 @@ import { PaymentPurpose } from '../common/enums/payment-purpose.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { vnNow } from '../../common/datetime';
 import { WalletService } from '../wallet/wallet.service';
+import { USER_ERRORS, ESCROW_ERRORS } from 'src/common/constants/error-messages.constant';
 import { WalletTxnType } from '../common/enums/wallet-txn-type.enum';
 
 type EscrowBalanceResponse = {
@@ -266,7 +267,7 @@ export class EscrowService {
       where: { id: userId },
     });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
     }
     const acc = await this.accountRepo
       .createQueryBuilder('ea')
@@ -286,7 +287,7 @@ export class EscrowService {
     // check user phải là tenant hoặc landlord của contract
     if (user.id !== acc.tenantId && user.id !== acc.contract?.landlord?.id) {
       throw new ForbiddenException(
-        'User is not authorized to access this escrow',
+        ESCROW_ERRORS.ESCROW_UNAUTHORIZED_ACCESS,
       );
     }
     return new ResponseCommon(200, 'SUCCESS', {
@@ -305,7 +306,7 @@ export class EscrowService {
       where: { id: userId },
     });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
     }
 
     // Query builder để lấy transactions

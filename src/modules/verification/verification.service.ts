@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Verification } from './entities/verification.entity';
@@ -6,6 +6,7 @@ import { CreateVerificationDto } from './dto/create-verification.dto';
 import { UpdateVerificationDto } from './dto/update-verification.dto';
 import { VerificationTypeEnum } from '../common/enums/verification-type.enum';
 import { ResponseCommon } from 'src/common/dto/response.dto';
+import { VERIFICATION_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class VerificationService {
@@ -41,7 +42,7 @@ export class VerificationService {
       relations: ['user', 'verifiedBy'],
     });
     if (!verification) {
-      throw new Error(`Verification with id ${id} not found`);
+      throw new NotFoundException(VERIFICATION_ERRORS.VERIFICATION_NOT_FOUND);
     }
     return new ResponseCommon(200, 'SUCCESS', verification);
   }

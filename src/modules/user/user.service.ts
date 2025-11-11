@@ -12,6 +12,7 @@ import { S3StorageService } from '../s3-storage/s3-storage.service';
 import { CccdRecognitionService } from './cccd-recognition.service';
 import { CccdRecognitionResponseDto } from './dto/cccd-recognition.dto';
 import { Account } from '../account/entities/account.entity';
+import { USER_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class UserService {
@@ -35,7 +36,7 @@ export class UserService {
       relations: ['account'],
     });
     if (!user) {
-      throw new NotFoundException(`User with id ${id} not found`);
+      throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
     }
     return new ResponseCommon(200, 'SUCCESS', user);
   }
@@ -46,7 +47,7 @@ export class UserService {
   ): Promise<ResponseCommon> {
     const existingUser = await this.userRepository.findOne({ where: { id } });
     if (!existingUser) {
-      throw new NotFoundException(`User with id ${id} not found`);
+      throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
     }
 
     await this.userRepository.update(id, updateUserDto);
@@ -57,7 +58,7 @@ export class UserService {
   async remove(id: string): Promise<ResponseCommon> {
     const existingUser = await this.userRepository.findOne({ where: { id } });
     if (!existingUser) {
-      throw new NotFoundException(`User with id ${id} not found`);
+      throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
     }
 
     await this.userRepository.delete(id);
@@ -77,7 +78,7 @@ export class UserService {
       // Validate user exists
       const user = await this.userRepository.findOne({ where: { id: userId } });
       if (!user) {
-        throw new NotFoundException(`User with id ${userId} not found`);
+        throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
       }
 
       // Delete old avatar if exists
@@ -132,9 +133,7 @@ export class UserService {
       }
 
       console.error('Failed to upload avatar:', error);
-      throw new BadRequestException(
-        `Failed to upload avatar: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
+      throw new BadRequestException(USER_ERRORS.INVALID_IMAGE_BUFFER);
     }
   }
 
@@ -158,7 +157,7 @@ export class UserService {
           relations: ['account'],
         });
         if (!user) {
-          throw new NotFoundException(`User with id ${userId} not found`);
+          throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
         }
 
         user.CCCD = result.id;
@@ -186,9 +185,7 @@ export class UserService {
       }
 
       console.error('Failed to recognize CCCD:', error);
-      throw new BadRequestException(
-        `Failed to recognize CCCD: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
+      throw new BadRequestException(USER_ERRORS.INVALID_IMAGE_BUFFER);
     }
   }
 }
