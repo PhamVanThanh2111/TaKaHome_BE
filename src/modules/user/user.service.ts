@@ -165,6 +165,7 @@ export class UserService {
         }
 
         user.CCCD = result.id;
+        user.fullName = result.name; // Update full name from CCCD
         user.isVerified = true;
 
         if (user.account) {
@@ -246,8 +247,9 @@ export class UserService {
           throw new NotFoundException(`User with id ${userId} not found`);
         }
 
-        // Update user CCCD and verification status
+        // Update user CCCD, full name, and verification status
         user.CCCD = cccdResult.id;
+        user.fullName = cccdResult.name; // Update full name from CCCD
         user.isVerified = true;
 
         if (user.account) {
@@ -261,7 +263,7 @@ export class UserService {
         }
 
         console.log(
-          `User ${userId} verified successfully with CCCD ${cccdResult.id}`,
+          `User ${userId} verified successfully with CCCD ${cccdResult.id}, Name: ${cccdResult.name}`,
         );
       }
 
