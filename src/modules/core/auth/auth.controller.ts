@@ -76,8 +76,11 @@ export class AuthController {
     try {
       const result = await this.authService.handleGoogleLogin(code);
 
+      // Encode toàn bộ object result thành base64 để truyền qua URL
+      const encodedResult = encodeURIComponent(Buffer.from(JSON.stringify(result)).toString('base64'));
+      
       return res.redirect(
-        `${process.env.FRONTEND_URL}/login-success?token=${result.accessToken}&refreshToken=${result.refreshToken}&status=${result.accountStatus}`
+        `${process.env.FRONTEND_URL}/login-success?data=${encodedResult}`
       );
     } catch (error) {
       console.error('Google OAuth callback error:', error);
