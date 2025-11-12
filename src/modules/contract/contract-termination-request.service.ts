@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { addMonths, differenceInMonths, format } from 'date-fns';
+import { differenceInMonths } from 'date-fns';
 import {
   ContractTerminationRequest,
   TerminationRequestedBy,
@@ -163,9 +163,6 @@ export class ContractTerminationRequestService {
     // => monthsDiff = 2 (hợp lệ, vì tháng 6 là tháng thanh toán cuối cùng)
     if (monthsDiff < 2) {
       // Tính tháng tối thiểu được phép (tháng hiện tại + 2)
-      const minAllowedMonth = addMonths(currentMonthStart, 2);
-      const minAllowedMonthFormatted = format(minAllowedMonth, 'MM/yyyy');
-
       throw new BadRequestException(
         CONTRACT_ERRORS.TERMINATION_MINIMUM_TWO_MONTHS_REQUIRED,
       );
@@ -234,14 +231,26 @@ export class ContractTerminationRequestService {
 
     // 5. Nếu được approve, cập nhật endDate của hợp đồng
     if (dto.status === TerminationRequestStatus.APPROVED) {
-      // Chuyển đổi requestedEndMonth (format: 'YYYY-MM') thành endDate (ngày đầu tiên của tháng đó)
-      // Ví dụ: '2025-07' -> 2025-07-01 00:00:00
+      // Chuyển đổi requestedEndMonth (format: 'YYYY-MM') thành endDate
+      // Giữ nguyên ngày (day) từ endDate hiện tại, chỉ thay đổi tháng/năm
+      // Nếu ngày không tồn tại trong tháng mới (ví dụ: 31/01 -> 28/02), lấy ngày cuối cùng của tháng đó
       const [yearStr, monthStr] = request.requestedEndMonth.split('-');
       const year = parseInt(yearStr, 10);
       const month = parseInt(monthStr, 10);
 
-      // Tạo Date object cho ngày đầu tiên của tháng (month-1 vì Date sử dụng 0-11)
-      const newEndDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+      // Lấy ngày từ endDate hiện tại
+      const currentEndDate = new Date(request.contract.endDate);
+      const dayOfMonth = currentEndDate.getUTCDate();
+
+      // Tính số ngày trong tháng được yêu cầu
+      // Tạo date cho ngày đầu tiên của tháng tiếp theo, rồi trừ 1 ngày để lấy ngày cuối cùng
+      const lastDayOfRequestedMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+      // Nếu ngày hiện tại vượt quá số ngày của tháng mới, lấy ngày cuối cùng của tháng đó
+      const finalDay = Math.min(dayOfMonth, lastDayOfRequestedMonth);
+
+      // Tạo Date object với ngày đã điều chỉnh
+      const newEndDate = new Date(Date.UTC(year, month - 1, finalDay, 0, 0, 0, 0));
 
       // Cập nhật endDate của contract
       request.contract.endDate = newEndDate;
