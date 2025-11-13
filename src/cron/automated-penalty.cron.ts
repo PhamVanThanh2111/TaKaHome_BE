@@ -49,7 +49,8 @@ export class AutomatedPenaltyCron {
   /**
    * Run every day at 8:00 AM to check for overdue handovers (landlord penalties)
    */
-  @Cron('*/20 * * * *', { // Demo
+  @Cron('*/20 * * * *', {
+    // Demo
     name: 'process-overdue-handovers',
     timeZone: 'Asia/Ho_Chi_Minh',
   })
@@ -92,7 +93,8 @@ export class AutomatedPenaltyCron {
   /**
    * Run every day at 08:00 AM to check for monthly payment overdue
    */
-  @Cron('0 8 * * *', { // 8:00 AM every day
+  @Cron('0 8 * * *', {
+    // 8:00 AM every day
     name: 'process-monthly-overdue-payments',
     timeZone: 'Asia/Ho_Chi_Minh',
   })
@@ -138,10 +140,7 @@ export class AutomatedPenaltyCron {
         `✅ Utility bill overdue processing completed in ${endTime - startTime}ms`,
       );
     } catch (error) {
-      this.logger.error(
-        '❌ Failed to process overdue utility bills:',
-        error,
-      );
+      this.logger.error('❌ Failed to process overdue utility bills:', error);
     }
   }
 
@@ -318,9 +317,7 @@ export class AutomatedPenaltyCron {
     error?: string;
   }> {
     try {
-      this.logger.log(
-        '🔧 Manual utility bill overdue processing triggered...',
-      );
+      this.logger.log('🔧 Manual utility bill overdue processing triggered...');
       await this.penaltyService.processOverdueUtilityBills();
       return { processed: true };
     } catch (error) {

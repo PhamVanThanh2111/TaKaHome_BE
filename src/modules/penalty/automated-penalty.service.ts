@@ -260,7 +260,7 @@ export class AutomatedPenaltyService {
         (vnNow().getTime() - booking.escrowDepositDueAt.getTime()) /
           (1000 * 60),
       ); //Demo: minutes
-      
+
       // Cancel if more than 24 hours late
       if (hoursLate > 1) {
         // Cancel booking
@@ -1781,7 +1781,9 @@ Có nguy cơ hợp đồng bị hủy nếu tenant thanh toán trễ và không 
         .leftJoinAndSelect('contract.landlord', 'landlord')
         .leftJoinAndSelect('contract.property', 'property')
         .leftJoinAndSelect('invoice.items', 'items')
-        .where('invoice.status = :status', { status: InvoiceStatusEnum.PENDING })
+        .where('invoice.status = :status', {
+          status: InvoiceStatusEnum.PENDING,
+        })
         .andWhere('invoice.dueDate < :now', { now })
         .getMany();
 
