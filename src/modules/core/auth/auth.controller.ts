@@ -81,10 +81,9 @@ export class AuthController {
     status: HttpStatus.BAD_REQUEST,
     description: 'Không có authorization code',
   })
-  async googleAuthCallback(@Query('code') code: string, @Res() res: Response) {
-    if (!code) {
-      // Xử lý lỗi: không có code
-      return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_code`);
+  async googleAuthCallback(@Query('code') code: string, @Query('error') error: string, @Res() res: Response) {
+    if (error || !code) {
+      return res.redirect(`${process.env.FRONTEND_URL}/signin?error=${error}`);
     }
 
     try {
@@ -103,7 +102,7 @@ export class AuthController {
       console.error('Google OAuth callback error:', error);
       // Xử lý lỗi OAuth
       return res.redirect(
-        `${process.env.FRONTEND_URL}/login?error=oauth_failed`,
+        `${process.env.FRONTEND_URL}/signin?error=oauth_failed`,
       );
     }
   }
