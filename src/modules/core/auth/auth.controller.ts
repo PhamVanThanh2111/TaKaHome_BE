@@ -1,8 +1,22 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Get, Query, Res } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  HttpStatus,
+  Get,
+  Query,
+  Res,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiOperation,
+  ApiResponse,
+  ApiQuery,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { RegisterResponseDto } from './dto/register-response.dto';
 import { LoginResponseDto } from './dto/login-response.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -67,22 +81,29 @@ export class AuthController {
     status: HttpStatus.BAD_REQUEST,
     description: 'Không có authorization code',
   })
-  async googleAuthCallback(@Query('code') code: string, @Res() res: Response) {
-    if (!code) {
-      // Xử lý lỗi: không có code
-      return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_code`);
+  async googleAuthCallback(@Query('code') code: string, @Query('error') error: string, @Res() res: Response) {
+    if (error || !code) {
+      return res.redirect(`${process.env.FRONTEND_URL}/signin?error=${error}`);
     }
 
     try {
       const result = await this.authService.handleGoogleLogin(code);
 
+      // Encode toàn bộ object result thành base64 để truyền qua URL
+      const encodedResult = Buffer.from(
+        JSON.stringify(result),
+        'utf-8', // Chỉ định encoding UTF-8 khi tạo Buffer
+      ).toString('base64');
+
       return res.redirect(
-        `${process.env.FRONTEND_URL}/login-success?token=${result.accessToken}&refreshToken=${result.refreshToken}&status=${result.accountStatus}`
+        `${process.env.FRONTEND_URL}/login-success?data=${encodedResult}`,
       );
     } catch (error) {
       console.error('Google OAuth callback error:', error);
       // Xử lý lỗi OAuth
-      return res.redirect(`${process.env.FRONTEND_URL}/login?error=oauth_failed`);
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/signin?error=oauth_failed`,
+      );
     }
   }
 
