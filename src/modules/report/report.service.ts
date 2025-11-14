@@ -16,8 +16,9 @@ export class ReportService {
 
   async create(
     createReportDto: CreateReportDto,
+    reporterId: string,
   ): Promise<ResponseCommon<Report>> {
-    const { propertyId, reporterId, content } = createReportDto;
+    const { propertyId, content } = createReportDto;
     const report = this.reportRepository.create({
       content,
       property: { id: propertyId },
