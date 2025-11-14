@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ResponseCommon } from 'src/common/dto/response.dto';
-import { In, Not, Repository } from 'typeorm';
+import { In, Not, Repository, SelectQueryBuilder } from 'typeorm';
 import { Booking } from '../booking/entities/booking.entity';
 import { BookingStatus } from '../common/enums/booking-status.enum';
 import { PropertyTypeEnum } from '../common/enums/property-type.enum';
@@ -341,243 +341,60 @@ export class PropertyService {
 
   /**
    * Filter combined results (properties and roomType entries) by provided criteria
+   * Optimized: Uses query builder instead of loading all data
    */
   async filter(
     filterDto: Partial<FilterPropertyDto>,
   ): Promise<ResponseCommon<any>> {
-    const all = (await this.findAll()).data || [];
+    const { page = 1, limit = 10, sortBy, sortOrder = 'asc', ...filters } = filterDto;
 
-    const filtered = all.filter((item) => {
-      // For Property (HOUSING/APARTMENT) shape
-      if (
-        (item as Property).type &&
-        (item as Property).type !== PropertyTypeEnum.BOARDING
-      ) {
-        const p = item as Property;
-        const price = p.price ?? 0;
-        const area = p.area ?? 0;
-        const bdr = p.bedrooms ?? 0;
-        const bath = p.bathrooms ?? 0;
-        const furn = p.furnishing ?? '';
-
-        if (filterDto.fromPrice && price < filterDto.fromPrice) {
-          return false;
-        }
-        if (filterDto.toPrice && price > filterDto.toPrice) {
-          return false;
-        }
-        if (filterDto.fromArea && area < filterDto.fromArea) {
-          return false;
-        }
-        if (filterDto.toArea && area > filterDto.toArea) {
-          return false;
-        }
-        if (filterDto.bedrooms && bdr !== filterDto.bedrooms) {
-          return false;
-        }
-        if (filterDto.bathrooms && bath !== filterDto.bathrooms) {
-          return false;
-        }
-        if (filterDto.furnishing && furn !== filterDto.furnishing) {
-          return false;
-        }
-
-        if (
-          typeof filterDto.isApproved === 'boolean' &&
-          p.isApproved !== filterDto.isApproved
-        ) {
-          return false;
-        }
-
-        if (filterDto.province && p.province !== filterDto.province) {
-          return false;
-        }
-
-        if (filterDto.ward && p.ward !== filterDto.ward) {
-          return false;
-        }
-
-        if (filterDto.type && p.type !== filterDto.type) {
-          return false;
-        }
-
-        if (filterDto.q) {
-          const searchTerm = filterDto.q.toLowerCase();
-          const title = (p.title || '').toLowerCase();
-          const description = (p.description || '').toLowerCase();
-          if (
-            !title.includes(searchTerm) &&
-            !description.includes(searchTerm)
-          ) {
-            return false;
-          }
-        }
-
-        return true;
-      }
-
-      // For RoomTypeEntry shape
-      const rt = item as RoomTypeEntry;
-      const price = rt.price ?? 0;
-      const area = rt.area ?? 0;
-      const bdr = rt.bedrooms ?? 0;
-      const bath = rt.bathrooms ?? 0;
-      const furn = rt.furnishing ?? '';
-
-      if (filterDto.fromPrice && price < filterDto.fromPrice) {
-        return false;
-      }
-      if (filterDto.toPrice && price > filterDto.toPrice) {
-        return false;
-      }
-      if (filterDto.fromArea && area < filterDto.fromArea) {
-        return false;
-      }
-      if (filterDto.toArea && area > filterDto.toArea) {
-        return false;
-      }
-      if (filterDto.bedrooms && bdr !== filterDto.bedrooms) {
-        return false;
-      }
-      if (filterDto.bathrooms && bath !== filterDto.bathrooms) {
-        return false;
-      }
-      if (filterDto.furnishing && furn !== filterDto.furnishing) {
-        return false;
-      }
-      if (
-        typeof filterDto.isApproved === 'boolean' &&
-        rt.property &&
-        rt.property.isApproved !== filterDto.isApproved
-      ) {
-        return false;
-      }
-
-      if (filterDto.province && rt.property?.province !== filterDto.province) {
-        return false;
-      }
-
-      if (filterDto.ward && rt.property?.ward !== filterDto.ward) {
-        return false;
-      }
-
-      if (filterDto.type && filterDto.type !== PropertyTypeEnum.BOARDING) {
-        return false;
-      }
-
-      if (filterDto.q) {
-        const searchTerm = filterDto.q.toLowerCase();
-        const name = (rt.name || '').toLowerCase();
-        const description = (rt.description || '').toLowerCase();
-        const propertyTitle = (rt.property?.title || '').toLowerCase();
-        const propertyDescription = (
-          rt.property?.description || ''
-        ).toLowerCase();
-        if (
-          !name.includes(searchTerm) &&
-          !description.includes(searchTerm) &&
-          !propertyTitle.includes(searchTerm) &&
-          !propertyDescription.includes(searchTerm)
-        ) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-
-    // Apply sorting if specified
-    const sortedData = [...filtered];
-    if (filterDto.sortBy) {
-      sortedData.sort((a, b) => {
-        let valueA: number | Date | undefined;
-        let valueB: number | Date | undefined;
-
-        // Get values based on sortBy field
-        if (filterDto.sortBy === 'price') {
-          if (
-            (a as Property).type &&
-            (a as Property).type !== PropertyTypeEnum.BOARDING
-          ) {
-            valueA = (a as Property).price ?? 0;
-          } else {
-            valueA = (a as RoomTypeEntry).price ?? 0;
-          }
-
-          if (
-            (b as Property).type &&
-            (b as Property).type !== PropertyTypeEnum.BOARDING
-          ) {
-            valueB = (b as Property).price ?? 0;
-          } else {
-            valueB = (b as RoomTypeEntry).price ?? 0;
-          }
-        } else if (filterDto.sortBy === 'area') {
-          if (
-            (a as Property).type &&
-            (a as Property).type !== PropertyTypeEnum.BOARDING
-          ) {
-            valueA = (a as Property).area ?? 0;
-          } else {
-            valueA = (a as RoomTypeEntry).area ?? 0;
-          }
-
-          if (
-            (b as Property).type &&
-            (b as Property).type !== PropertyTypeEnum.BOARDING
-          ) {
-            valueB = (b as Property).area ?? 0;
-          } else {
-            valueB = (b as RoomTypeEntry).area ?? 0;
-          }
-        } else if (filterDto.sortBy === 'createdAt') {
-          // For Property
-          if (
-            (a as Property).type &&
-            (a as Property).type !== PropertyTypeEnum.BOARDING
-          ) {
-            valueA = (a as Property).createdAt;
-          } else {
-            // For RoomTypeEntry - use property's createdAt
-            valueA = (a as RoomTypeEntry).property?.createdAt;
-          }
-
-          if (
-            (b as Property).type &&
-            (b as Property).type !== PropertyTypeEnum.BOARDING
-          ) {
-            valueB = (b as Property).createdAt;
-          } else {
-            valueB = (b as RoomTypeEntry).property?.createdAt;
-          }
-        }
-
-        // Convert to comparable values
-        const compareA =
-          valueA instanceof Date ? valueA.getTime() : (valueA ?? 0);
-        const compareB =
-          valueB instanceof Date ? valueB.getTime() : (valueB ?? 0);
-
-        // Apply sort order
-        const order = filterDto.sortOrder === 'desc' ? -1 : 1;
-
-        if (compareA < compareB) return -1 * order;
-        if (compareA > compareB) return 1 * order;
-        return 0;
+    // Query non-boarding properties (HOUSING, APARTMENT)
+    const nonBoardingQB = this.propertyRepository
+      .createQueryBuilder('property')
+      .leftJoinAndSelect('property.landlord', 'landlord')
+      .where('property.type != :boardingType', { 
+        boardingType: PropertyTypeEnum.BOARDING 
       });
-    }
+
+    // Apply filters for non-boarding properties
+    this.applyPropertyFilters(nonBoardingQB, filters);
+
+    // Query boarding properties (will be transformed to RoomTypeEntry)
+    const boardingQB = this.propertyRepository
+      .createQueryBuilder('property')
+      .leftJoinAndSelect('property.rooms', 'rooms')
+      .leftJoinAndSelect('rooms.roomType', 'roomType')
+      .leftJoinAndSelect('property.landlord', 'landlord')
+      .where('property.type = :boardingType', { 
+        boardingType: PropertyTypeEnum.BOARDING 
+      });
+
+    // Apply filters for boarding properties (RoomType level)
+    this.applyBoardingFilters(boardingQB, filters);
+
+    // Execute queries in parallel
+    const [nonBoardingProps, boardingProps] = await Promise.all([
+      nonBoardingQB.getMany(),
+      boardingQB.getMany(),
+    ]);
+
+    // Transform boarding properties to RoomTypeEntry format
+    const roomTypeEntries = this.transformBoardingToRoomTypes(boardingProps, filters);
+
+    // Combine results
+    let combined: Array<Property | RoomTypeEntry> = [
+      ...nonBoardingProps,
+      ...roomTypeEntries,
+    ];
+
+    // Apply sorting
+    combined = this.applySorting(combined, sortBy, sortOrder);
 
     // Apply pagination
-    const page = filterDto.page || 1;
-    const limit = filterDto.limit || 10;
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-
-    const paginatedData = sortedData.slice(startIndex, endIndex);
-
-    // Prepare pagination metadata
-    const totalItems = sortedData.length;
+    const totalItems = combined.length;
     const totalPages = Math.ceil(totalItems / limit);
+    const startIndex = (page - 1) * limit;
+    const paginatedData = combined.slice(startIndex, startIndex + limit);
 
     const result = {
       data: paginatedData,
@@ -1016,225 +833,61 @@ export class PropertyService {
 
   /**
    * Filter properties with URL for Gemini chatbot
+   * Optimized: Uses query builder instead of loading all data
    */
   async filterWithUrl(
     filterDto: Partial<FilterPropertyWithUrlDto>,
   ): Promise<ResponseCommon<any>> {
-    const all = (await this.findAll()).data || [];
+    const { limit = 10, sortBy, sortOrder = 'asc', ...filters } = filterDto;
     const frontendUrl = this.configService.get<string>('frontend.url');
 
-    const filtered = all.filter((item) => {
-      // For Property (HOUSING/APARTMENT) shape
-      if (
-        (item as Property).type &&
-        (item as Property).type !== PropertyTypeEnum.BOARDING
-      ) {
-        const p = item as Property;
-        const price = p.price ?? 0;
-        const area = p.area ?? 0;
-        const bdr = p.bedrooms ?? 0;
-        const bath = p.bathrooms ?? 0;
-        const furn = p.furnishing ?? '';
+    // Query non-boarding properties (HOUSING, APARTMENT) - only approved and visible
+    const nonBoardingQB = this.propertyRepository
+      .createQueryBuilder('property')
+      .leftJoinAndSelect('property.landlord', 'landlord')
+      .where('property.type != :boardingType', { 
+        boardingType: PropertyTypeEnum.BOARDING 
+      })
+      .andWhere('property.isApproved = :isApproved', { isApproved: true })
+      .andWhere('property.isVisible = :isVisible', { isVisible: true });
 
-        if (filterDto.fromPrice && price < filterDto.fromPrice) {
-          return false;
-        }
-        if (filterDto.toPrice && price > filterDto.toPrice) {
-          return false;
-        }
-        if (filterDto.fromArea && area < filterDto.fromArea) {
-          return false;
-        }
-        if (filterDto.toArea && area > filterDto.toArea) {
-          return false;
-        }
-        if (filterDto.bedrooms && bdr !== filterDto.bedrooms) {
-          return false;
-        }
-        if (filterDto.bathrooms && bath !== filterDto.bathrooms) {
-          return false;
-        }
-        if (filterDto.furnishing && furn !== filterDto.furnishing) {
-          return false;
-        }
+    // Apply filters for non-boarding properties
+    this.applyPropertyFilters(nonBoardingQB, filters);
 
-        // Only show approved properties for public API
-        if (p.isApproved !== true || p.isVisible !== true) {
-          return false;
-        }
+    // Query boarding properties (will be transformed to RoomTypeEntry) - only approved
+    const boardingQB = this.propertyRepository
+      .createQueryBuilder('property')
+      .leftJoinAndSelect('property.rooms', 'rooms')
+      .leftJoinAndSelect('rooms.roomType', 'roomType')
+      .leftJoinAndSelect('property.landlord', 'landlord')
+      .where('property.type = :boardingType', { 
+        boardingType: PropertyTypeEnum.BOARDING 
+      })
+      .andWhere('property.isApproved = :isApproved', { isApproved: true });
 
-        if (filterDto.province && p.province !== filterDto.province) {
-          return false;
-        }
+    // Apply filters for boarding properties (RoomType level)
+    this.applyBoardingFilters(boardingQB, filters);
 
-        if (filterDto.ward && p.ward !== filterDto.ward) {
-          return false;
-        }
+    // Execute queries in parallel
+    const [nonBoardingProps, boardingProps] = await Promise.all([
+      nonBoardingQB.getMany(),
+      boardingQB.getMany(),
+    ]);
 
-        if (filterDto.type && p.type !== filterDto.type) {
-          return false;
-        }
+    // Transform boarding properties to RoomTypeEntry format
+    const roomTypeEntries = this.transformBoardingToRoomTypes(boardingProps, filters);
 
-        if (filterDto.q) {
-          const searchTerm = filterDto.q.toLowerCase();
-          const title = (p.title || '').toLowerCase();
-          const description = (p.description || '').toLowerCase();
-          if (
-            !title.includes(searchTerm) &&
-            !description.includes(searchTerm)
-          ) {
-            return false;
-          }
-        }
+    // Combine results
+    let combined: Array<Property | RoomTypeEntry> = [
+      ...nonBoardingProps,
+      ...roomTypeEntries,
+    ];
 
-        return true;
-      }
-
-      // For RoomTypeEntry shape
-      const rt = item as RoomTypeEntry;
-      const price = rt.price ?? 0;
-      const area = rt.area ?? 0;
-      const bdr = rt.bedrooms ?? 0;
-      const bath = rt.bathrooms ?? 0;
-      const furn = rt.furnishing ?? '';
-
-      if (filterDto.fromPrice && price < filterDto.fromPrice) {
-        return false;
-      }
-      if (filterDto.toPrice && price > filterDto.toPrice) {
-        return false;
-      }
-      if (filterDto.fromArea && area < filterDto.fromArea) {
-        return false;
-      }
-      if (filterDto.toArea && area > filterDto.toArea) {
-        return false;
-      }
-      if (filterDto.bedrooms && bdr !== filterDto.bedrooms) {
-        return false;
-      }
-      if (filterDto.bathrooms && bath !== filterDto.bathrooms) {
-        return false;
-      }
-      if (filterDto.furnishing && furn !== filterDto.furnishing) {
-        return false;
-      }
-
-      // Only show approved properties for public API
-      if (rt.property && rt.property.isApproved !== true) {
-        return false;
-      }
-
-      if (filterDto.province && rt.property?.province !== filterDto.province) {
-        return false;
-      }
-
-      if (filterDto.ward && rt.property?.ward !== filterDto.ward) {
-        return false;
-      }
-
-      if (filterDto.type && filterDto.type !== PropertyTypeEnum.BOARDING) {
-        return false;
-      }
-
-      if (filterDto.q) {
-        const searchTerm = filterDto.q.toLowerCase();
-        const name = (rt.name || '').toLowerCase();
-        const description = (rt.description || '').toLowerCase();
-        const propertyTitle = (rt.property?.title || '').toLowerCase();
-        const propertyDescription = (
-          rt.property?.description || ''
-        ).toLowerCase();
-        if (
-          !name.includes(searchTerm) &&
-          !description.includes(searchTerm) &&
-          !propertyTitle.includes(searchTerm) &&
-          !propertyDescription.includes(searchTerm)
-        ) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-
-    // Apply sorting if specified
-    const sortedData = [...filtered];
-    if (filterDto.sortBy) {
-      sortedData.sort((a, b) => {
-        let valueA: number | Date | undefined;
-        let valueB: number | Date | undefined;
-
-        // Get values based on sortBy field
-        if (filterDto.sortBy === 'price') {
-          if (
-            (a as Property).type &&
-            (a as Property).type !== PropertyTypeEnum.BOARDING
-          ) {
-            valueA = (a as Property).price ?? 0;
-          } else {
-            valueA = (a as RoomTypeEntry).price ?? 0;
-          }
-
-          if (
-            (b as Property).type &&
-            (b as Property).type !== PropertyTypeEnum.BOARDING
-          ) {
-            valueB = (b as Property).price ?? 0;
-          } else {
-            valueB = (b as RoomTypeEntry).price ?? 0;
-          }
-        } else if (filterDto.sortBy === 'area') {
-          if (
-            (a as Property).type &&
-            (a as Property).type !== PropertyTypeEnum.BOARDING
-          ) {
-            valueA = (a as Property).area ?? 0;
-          } else {
-            valueA = (a as RoomTypeEntry).area ?? 0;
-          }
-
-          if (
-            (b as Property).type &&
-            (b as Property).type !== PropertyTypeEnum.BOARDING
-          ) {
-            valueB = (b as Property).area ?? 0;
-          } else {
-            valueB = (b as RoomTypeEntry).area ?? 0;
-          }
-        } else if (filterDto.sortBy === 'createdAt') {
-          // For Property
-          if (
-            (a as Property).type &&
-            (a as Property).type !== PropertyTypeEnum.BOARDING
-          ) {
-            valueA = (a as Property).createdAt;
-          } else {
-            valueA = (a as RoomTypeEntry).property?.createdAt;
-          }
-
-          if (
-            (b as Property).type &&
-            (b as Property).type !== PropertyTypeEnum.BOARDING
-          ) {
-            valueB = (b as Property).createdAt;
-          } else {
-            valueB = (b as RoomTypeEntry).property?.createdAt;
-          }
-        }
-
-        if (valueA === undefined && valueB === undefined) return 0;
-        if (valueA === undefined) return 1;
-        if (valueB === undefined) return -1;
-
-        const comparison = valueA < valueB ? -1 : valueA > valueB ? 1 : 0;
-        return filterDto.sortOrder === 'desc' ? -comparison : comparison;
-      });
-    }
+    // Apply sorting
+    combined = this.applySorting(combined, sortBy, sortOrder);
 
     // Apply limit
-    const limit = filterDto.limit || 10;
-    const limitedData = sortedData.slice(0, limit);
+    const limitedData = combined.slice(0, limit);
 
     // Add URL to each item
     const dataWithUrl: PropertyOrRoomTypeWithUrl[] = limitedData.map((item) => {
@@ -1270,6 +923,247 @@ export class PropertyService {
     };
 
     return new ResponseCommon(200, 'SUCCESS', result);
+  }
+
+  /**
+   * Apply filters for non-boarding properties (HOUSING, APARTMENT)
+   */
+  private applyPropertyFilters(
+    qb: SelectQueryBuilder<Property>,
+    filters: Partial<FilterPropertyDto | FilterPropertyWithUrlDto>,
+  ): void {
+    if (filters.fromPrice !== undefined) {
+      qb.andWhere('property.price >= :fromPrice', { fromPrice: filters.fromPrice });
+    }
+    if (filters.toPrice !== undefined) {
+      qb.andWhere('property.price <= :toPrice', { toPrice: filters.toPrice });
+    }
+    if (filters.fromArea !== undefined) {
+      qb.andWhere('property.area >= :fromArea', { fromArea: filters.fromArea });
+    }
+    if (filters.toArea !== undefined) {
+      qb.andWhere('property.area <= :toArea', { toArea: filters.toArea });
+    }
+    if (filters.bedrooms !== undefined) {
+      qb.andWhere('property.bedrooms = :bedrooms', { bedrooms: filters.bedrooms });
+    }
+    if (filters.bathrooms !== undefined) {
+      qb.andWhere('property.bathrooms = :bathrooms', { bathrooms: filters.bathrooms });
+    }
+    if (filters.furnishing) {
+      qb.andWhere('property.furnishing = :furnishing', { furnishing: filters.furnishing });
+    }
+    if (filters.province) {
+      qb.andWhere('property.province = :province', { province: filters.province });
+    }
+    if (filters.ward) {
+      qb.andWhere('property.ward = :ward', { ward: filters.ward });
+    }
+    if (filters.type) {
+      qb.andWhere('property.type = :type', { type: filters.type });
+    }
+    if ('isApproved' in filters && typeof filters.isApproved === 'boolean') {
+      qb.andWhere('property.isApproved = :isApproved', { isApproved: filters.isApproved });
+    }
+    if (filters.q) {
+      qb.andWhere(
+        '(LOWER(property.title) LIKE :search OR LOWER(property.description) LIKE :search)',
+        { search: `%${filters.q.toLowerCase()}%` },
+      );
+    }
+  }
+
+  /**
+   * Apply filters for boarding properties (at RoomType level)
+   */
+  private applyBoardingFilters(
+    qb: SelectQueryBuilder<Property>,
+    filters: Partial<FilterPropertyDto | FilterPropertyWithUrlDto>,
+  ): void {
+    if (filters.fromPrice !== undefined) {
+      qb.andWhere('roomType.price >= :fromPrice', { fromPrice: filters.fromPrice });
+    }
+    if (filters.toPrice !== undefined) {
+      qb.andWhere('roomType.price <= :toPrice', { toPrice: filters.toPrice });
+    }
+    if (filters.fromArea !== undefined) {
+      qb.andWhere('roomType.area >= :fromArea', { fromArea: filters.fromArea });
+    }
+    if (filters.toArea !== undefined) {
+      qb.andWhere('roomType.area <= :toArea', { toArea: filters.toArea });
+    }
+    if (filters.bedrooms !== undefined) {
+      qb.andWhere('roomType.bedrooms = :bedrooms', { bedrooms: filters.bedrooms });
+    }
+    if (filters.bathrooms !== undefined) {
+      qb.andWhere('roomType.bathrooms = :bathrooms', { bathrooms: filters.bathrooms });
+    }
+    if (filters.furnishing) {
+      qb.andWhere('roomType.furnishing = :furnishing', { furnishing: filters.furnishing });
+    }
+    if (filters.province) {
+      qb.andWhere('property.province = :province', { province: filters.province });
+    }
+    if (filters.ward) {
+      qb.andWhere('property.ward = :ward', { ward: filters.ward });
+    }
+    if ('isApproved' in filters && typeof filters.isApproved === 'boolean') {
+      qb.andWhere('property.isApproved = :isApproved', { isApproved: filters.isApproved });
+    }
+    if (filters.q) {
+      qb.andWhere(
+        '(LOWER(roomType.name) LIKE :search OR LOWER(roomType.description) LIKE :search OR LOWER(property.title) LIKE :search OR LOWER(property.description) LIKE :search)',
+        { search: `%${filters.q.toLowerCase()}%` },
+      );
+    }
+  }
+
+  /**
+   * Transform boarding properties to RoomTypeEntry format
+   * Applies additional memory-based filters that can't be done at DB level
+   */
+  private transformBoardingToRoomTypes(
+    boardingProps: Property[],
+    filters: Partial<FilterPropertyDto | FilterPropertyWithUrlDto>,
+  ): RoomTypeEntry[] {
+    const roomTypeEntries: RoomTypeEntry[] = [];
+
+    for (const prop of boardingProps) {
+      if (!prop.rooms || prop.rooms.length === 0) continue;
+
+      // Group rooms by their roomType id
+      const grouped: Record<string, { roomType: RoomType; rooms: Room[] }> = {};
+      for (const room of prop.rooms) {
+        if (!room.roomType) continue;
+        const rtId = room.roomType.id;
+        if (!grouped[rtId]) {
+          grouped[rtId] = { roomType: room.roomType, rooms: [] };
+        }
+        grouped[rtId].rooms.push(room);
+      }
+
+      // Build RoomTypeEntry for each group
+      for (const rtId of Object.keys(grouped)) {
+        const { roomType, rooms } = grouped[rtId];
+
+        // Additional filters (already filtered by DB query builder, but double-check for edge cases)
+        const price = Number(roomType.price) || 0;
+        const area = Number(roomType.area) || 0;
+
+        if (filters.fromPrice !== undefined && price < filters.fromPrice) continue;
+        if (filters.toPrice !== undefined && price > filters.toPrice) continue;
+        if (filters.fromArea !== undefined && area < filters.fromArea) continue;
+        if (filters.toArea !== undefined && area > filters.toArea) continue;
+        if (filters.bedrooms !== undefined && roomType.bedrooms !== filters.bedrooms) continue;
+        if (filters.bathrooms !== undefined && roomType.bathrooms !== filters.bathrooms) continue;
+        if (filters.furnishing && roomType.furnishing !== filters.furnishing) continue;
+
+        const entry: RoomTypeEntry = {
+          id: roomType.id,
+          name: roomType.name,
+          bedrooms: roomType.bedrooms,
+          bathrooms: roomType.bathrooms,
+          area: Number(roomType.area),
+          price: Number(roomType.price),
+          deposit: Number(roomType.deposit),
+          furnishing: roomType.furnishing,
+          images: roomType.images,
+          description: roomType.description,
+          heroImage: roomType.heroImage,
+          rooms: rooms.map((r) => ({
+            id: r.id,
+            name: r.name,
+            floor: r.floor,
+            isVisible: r.isVisible,
+          })),
+          property: {
+            id: prop.id,
+            title: prop.title,
+            description: prop.description,
+            province: prop.province,
+            ward: prop.ward,
+            address: prop.address,
+            isApproved: prop.isApproved,
+            createdAt: prop.createdAt,
+            landlord: prop.landlord
+              ? {
+                  id: prop.landlord.id,
+                  name: prop.landlord.fullName,
+                  email: prop.landlord.email,
+                  phone: prop.landlord.phone,
+                  isVerified: prop.landlord.isVerified,
+                  avatarUrl: prop.landlord.avatarUrl,
+                  status: prop.landlord.status,
+                  CCCD: prop.landlord.CCCD,
+                  createdAt: prop.landlord.createdAt,
+                  updatedAt: prop.landlord.updatedAt,
+                }
+              : undefined,
+          },
+        };
+
+        roomTypeEntries.push(entry);
+      }
+    }
+
+    return roomTypeEntries;
+  }
+
+  /**
+   * Apply sorting to combined data (Property and RoomTypeEntry)
+   */
+  private applySorting(
+    data: Array<Property | RoomTypeEntry>,
+    sortBy?: 'price' | 'area' | 'createdAt',
+    sortOrder: 'asc' | 'desc' = 'asc',
+  ): Array<Property | RoomTypeEntry> {
+    if (!sortBy) return data;
+
+    return [...data].sort((a, b) => {
+      let valueA: number | Date | undefined;
+      let valueB: number | Date | undefined;
+
+      // Get values based on sortBy field
+      if (sortBy === 'price') {
+        valueA =
+          (a as Property).type && (a as Property).type !== PropertyTypeEnum.BOARDING
+            ? (a as Property).price ?? 0
+            : (a as RoomTypeEntry).price ?? 0;
+        valueB =
+          (b as Property).type && (b as Property).type !== PropertyTypeEnum.BOARDING
+            ? (b as Property).price ?? 0
+            : (b as RoomTypeEntry).price ?? 0;
+      } else if (sortBy === 'area') {
+        valueA =
+          (a as Property).type && (a as Property).type !== PropertyTypeEnum.BOARDING
+            ? (a as Property).area ?? 0
+            : (a as RoomTypeEntry).area ?? 0;
+        valueB =
+          (b as Property).type && (b as Property).type !== PropertyTypeEnum.BOARDING
+            ? (b as Property).area ?? 0
+            : (b as RoomTypeEntry).area ?? 0;
+      } else if (sortBy === 'createdAt') {
+        valueA =
+          (a as Property).type && (a as Property).type !== PropertyTypeEnum.BOARDING
+            ? (a as Property).createdAt
+            : (a as RoomTypeEntry).property?.createdAt;
+        valueB =
+          (b as Property).type && (b as Property).type !== PropertyTypeEnum.BOARDING
+            ? (b as Property).createdAt
+            : (b as RoomTypeEntry).property?.createdAt;
+      }
+
+      // Convert to comparable values
+      const compareA = valueA instanceof Date ? valueA.getTime() : (valueA ?? 0);
+      const compareB = valueB instanceof Date ? valueB.getTime() : (valueB ?? 0);
+
+      // Apply sort order
+      const order = sortOrder === 'desc' ? -1 : 1;
+
+      if (compareA < compareB) return -1 * order;
+      if (compareA > compareB) return 1 * order;
+      return 0;
+    });
   }
 
   /**
