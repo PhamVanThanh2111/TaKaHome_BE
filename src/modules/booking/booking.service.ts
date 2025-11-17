@@ -34,7 +34,7 @@ import { Room } from '../property/entities/room.entity';
 import { User } from '../user/entities/user.entity';
 import { RoleEnum } from '../common/enums/role.enum';
 import { ServiceTypeEnum } from '../common/enums/service-type.enum';
-import { BOOKING_ERRORS } from 'src/common/constants/error-messages.constant';
+import { BOOKING_ERRORS, USER_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class BookingService {
@@ -61,6 +61,21 @@ export class BookingService {
     dto: CreateBookingDto,
     tenantId: string,
   ): Promise<ResponseCommon<Booking>> {
+    // Validate user is verified (updated CCCD information)
+    const tenant = await this.userRepository.findOne({
+      where: { id: tenantId },
+    });
+
+    if (!tenant) {
+      throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
+    }
+
+    if (!tenant.isVerified) {
+      throw new BadRequestException(
+        USER_ERRORS.USER_NOT_VERIFIED_FOR_ACTION,
+      );
+    }
+
     // Validate input: either propertyId or roomId must be provided
     if (!dto.propertyId && !dto.roomId) {
       throw new BadRequestException(BOOKING_ERRORS.PROPERTY_ID_OR_ROOM_ID_REQUIRED);
@@ -132,6 +147,21 @@ export class BookingService {
     userId: string,
     signingOption?: string,
   ): Promise<ResponseCommon<Booking>> {
+    // Validate landlord is verified (updated CCCD information)
+    const landlord = await this.userRepository.findOne({
+      where: { id: userId },
+    });
+
+    if (!landlord) {
+      throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
+    }
+
+    if (!landlord.isVerified) {
+      throw new BadRequestException(
+        USER_ERRORS.USER_NOT_VERIFIED_FOR_ACTION,
+      );
+    }
+
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.PENDING_LANDLORD]);
 
@@ -275,6 +305,21 @@ export class BookingService {
     signingOption?: string,
     depositDeadlineHours = 24,
   ): Promise<ResponseCommon<Booking>> {
+    // Validate tenant is verified (updated CCCD information)
+    const tenant = await this.userRepository.findOne({
+      where: { id: userId },
+    });
+
+    if (!tenant) {
+      throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
+    }
+
+    if (!tenant.isVerified) {
+      throw new BadRequestException(
+        USER_ERRORS.USER_NOT_VERIFIED_FOR_ACTION,
+      );
+    }
+
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.PENDING_SIGNATURE]);
 
@@ -460,7 +505,22 @@ export class BookingService {
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
 
-  async handover(id: string): Promise<ResponseCommon<Booking>> {
+  async handover(id: string, userId: string): Promise<ResponseCommon<Booking>> {
+    // Validate landlord is verified (updated CCCD information)
+    const landlord = await this.userRepository.findOne({
+      where: { id: userId },
+    });
+
+    if (!landlord) {
+      throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
+    }
+
+    if (!landlord.isVerified) {
+      throw new BadRequestException(
+        USER_ERRORS.USER_NOT_VERIFIED_FOR_ACTION,
+      );
+    }
+
     const booking = await this.loadBookingOrThrow(id);
     this.ensureStatus(booking, [BookingStatus.READY_FOR_HANDOVER]);
     booking.status = BookingStatus.ACTIVE;
