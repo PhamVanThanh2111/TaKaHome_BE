@@ -375,6 +375,12 @@ export const GENERIC_ERRORS = {
   VALIDATION_ERROR: 'VALIDATION_ERROR',
 } as const;
 
+// ============= FAVORITE ERRORS =============
+export const FAVORITE_ERRORS = {
+  FAVORITE_NOT_FOUND: 'FAVORITE_NOT_FOUND',
+  JUST_ONE_OF_PROPERTY_ROOMTYPE_REQUIRED: 'JUST_ONE_OF_PROPERTY_ROOMTYPE_REQUIRED',
+} as const;
+
 // Export all error constants
 export const ERROR_MESSAGES = {
   ...AUTH_ERRORS,
@@ -399,6 +405,7 @@ export const ERROR_MESSAGES = {
   ...PENALTY_ERRORS,
   ...MAINTENANCE_ERRORS,
   ...GENERIC_ERRORS,
+  ...FAVORITE_ERRORS,
 } as const;
 
 // Type for all error messages

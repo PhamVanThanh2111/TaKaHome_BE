@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsOptional } from 'class-validator';
 
-export class CreateFavoriteDto {
+export class RemoveFavoriteDto {
   @IsOptional()
   @ApiProperty({
     example: 'e320aa67-b53b-4c4a-bd50-31e8b312defa',

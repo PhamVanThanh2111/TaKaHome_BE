@@ -3,7 +3,6 @@ import {
   Get,
   Post,
   Body,
-  Patch,
   Param,
   Delete,
   HttpCode,
@@ -12,10 +11,12 @@ import {
 } from '@nestjs/common';
 import { FavoriteService } from './favorite.service';
 import { CreateFavoriteDto } from './dto/create-favorite.dto';
-import { UpdateFavoriteDto } from './dto/update-favorite.dto';
 import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { FavoriteResponseDto } from './dto/favorite-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { JwtUser } from '../core/auth/strategies/jwt.strategy';
+import { RemoveFavoriteDto } from './dto/remove-favorite.dto';
 
 @Controller('favorites')
 @ApiBearerAuth()
@@ -35,8 +36,8 @@ export class FavoriteController {
     status: HttpStatus.BAD_REQUEST,
     description: 'Request không hợp lệ',
   })
-  create(@Body() createFavoriteDto: CreateFavoriteDto) {
-    return this.favoriteService.create(createFavoriteDto);
+  create(@Body() createFavoriteDto: CreateFavoriteDto, @CurrentUser() user: JwtUser) {
+    return this.favoriteService.create(createFavoriteDto, user.id);
   }
 
   @Get()
@@ -57,24 +58,14 @@ export class FavoriteController {
     return this.favoriteService.findOne(id);
   }
 
-  @Patch(':id')
-  @ApiOperation({ summary: 'Cập nhật favorite' })
-  @ApiResponse({ status: HttpStatus.OK, type: FavoriteResponseDto })
-  update(
-    @Param('id') id: string,
-    @Body() updateFavoriteDto: UpdateFavoriteDto,
-  ) {
-    return this.favoriteService.update(id, updateFavoriteDto);
-  }
-
   @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Xóa favorite' })
   @ApiResponse({
-    status: HttpStatus.NO_CONTENT,
+    status: HttpStatus.OK,
     description: 'Xóa favorite thành công',
   })
-  remove(@Param('id') id: string) {
-    return this.favoriteService.remove(id);
+  remove(@Body() removeFavoriteDto: RemoveFavoriteDto, @CurrentUser() user: JwtUser) {
+    return this.favoriteService.remove(removeFavoriteDto, user.id);
   }
 }
