@@ -313,7 +313,24 @@ export class ContractTerminationRequestService {
    */
   async getTerminationRequestsByContract(
     contractId: string,
+    userId: string,
   ): Promise<ResponseCommon<ContractTerminationRequest[]>> {
+    const contract = await this.contractRepository.findOne({
+      where: { id: contractId },
+      relations: ['tenant', 'landlord'],
+    });
+
+    if (!contract) {
+      throw new NotFoundException(CONTRACT_ERRORS.CONTRACT_NOT_FOUND);
+    }
+
+    if (
+      contract.tenant.id !== userId &&
+      contract.landlord.id !== userId
+    ) {
+      throw new ForbiddenException(CONTRACT_ERRORS.CONTRACT_ACCESS_FORBIDDEN);
+    }
+
     const requests = await this.terminationRequestRepository.find({
       where: { contractId },
       relations: ['requestedBy', 'approvedBy'],
@@ -358,7 +375,24 @@ export class ContractTerminationRequestService {
    */
   async getPendingTerminationRequest(
     contractId: string,
+    userId: string,
   ): Promise<ResponseCommon<ContractTerminationRequest | null>> {
+    const contract = await this.contractRepository.findOne({
+      where: { id: contractId },
+      relations: ['tenant', 'landlord'],
+    });
+
+    if (!contract) {
+      throw new NotFoundException(CONTRACT_ERRORS.CONTRACT_NOT_FOUND);
+    }
+
+    if (
+      contract.tenant.id !== userId &&
+      contract.landlord.id !== userId
+    ) {
+      throw new ForbiddenException(CONTRACT_ERRORS.CONTRACT_ACCESS_FORBIDDEN);
+    }
+    
     const request = await this.terminationRequestRepository.findOne({
       where: {
         contractId,

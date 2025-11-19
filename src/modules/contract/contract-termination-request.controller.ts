@@ -143,9 +143,10 @@ export class ContractTerminationRequestController {
     status: HttpStatus.OK,
     description: 'Lấy danh sách thành công',
   })
-  getTerminationRequestsByContract(@Param('contractId') contractId: string) {
+  getTerminationRequestsByContract(@Param('contractId') contractId: string, @CurrentUser() user: JwtUser) {
     return this.terminationRequestService.getTerminationRequestsByContract(
       contractId,
+      user.id,
     );
   }
 
@@ -158,9 +159,10 @@ export class ContractTerminationRequestController {
     status: HttpStatus.OK,
     description: 'Lấy yêu cầu thành công',
   })
-  getPendingTerminationRequest(@Param('contractId') contractId: string) {
+  getPendingTerminationRequest(@Param('contractId') contractId: string, @CurrentUser() user: JwtUser) {
     return this.terminationRequestService.getPendingTerminationRequest(
       contractId,
+      user.id,
     );
   }
 }
