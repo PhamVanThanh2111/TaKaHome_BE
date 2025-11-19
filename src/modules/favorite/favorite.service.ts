@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Favorite } from './entities/favorite.entity';
@@ -7,6 +7,8 @@ import { ResponseCommon } from 'src/common/dto/response.dto';
 import { User } from '../user/entities/user.entity';
 import { Property } from '../property/entities/property.entity';
 import { RoomType } from '../property/entities/room-type.entity';
+import { RemoveFavoriteDto } from './dto/remove-favorite.dto';
+import { FAVORITE_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class FavoriteService {
@@ -31,6 +33,17 @@ export class FavoriteService {
       favoriteData.roomType = { id: createFavoriteDto.roomTypeId } as RoomType;
     }
 
+    const duplicate = await this.favoriteRepository.findOne({
+      where: {
+        user: { id: userId },
+        property: { id: createFavoriteDto.propertyId },
+        roomType: { id: createFavoriteDto.roomTypeId },
+      },
+    });
+    if (duplicate) {
+      return new ResponseCommon(200, 'SUCCESS', duplicate);
+    }
+
     const favorite = this.favoriteRepository.create(favoriteData);
     const saved = await this.favoriteRepository.save(favorite);
     return new ResponseCommon(200, 'SUCCESS', saved);
@@ -49,8 +62,19 @@ export class FavoriteService {
     return new ResponseCommon(200, 'SUCCESS', favorite);
   }
 
-  async remove(id: string): Promise<ResponseCommon<null>> {
-    await this.favoriteRepository.delete(id);
+  async remove(removeFavoriteDto: RemoveFavoriteDto, userId: string): Promise<ResponseCommon<null>> {
+    const deleteFavorite = await this.favoriteRepository.findOne({
+      where: {
+        user: { id: userId },
+        property: { id: removeFavoriteDto.propertyId },
+        roomType: { id: removeFavoriteDto.roomTypeId },
+      },
+    });
+    if (!deleteFavorite) {
+      throw new NotFoundException(FAVORITE_ERRORS.FAVORITE_NOT_FOUND);
+    }
+    await this.favoriteRepository.remove(deleteFavorite);
     return new ResponseCommon(200, 'SUCCESS', null);
   }
+  
 }

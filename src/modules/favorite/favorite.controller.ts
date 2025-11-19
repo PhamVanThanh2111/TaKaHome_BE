@@ -16,6 +16,7 @@ import { FavoriteResponseDto } from './dto/favorite-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { JwtUser } from '../core/auth/strategies/jwt.strategy';
+import { RemoveFavoriteDto } from './dto/remove-favorite.dto';
 
 @Controller('favorites')
 @ApiBearerAuth()
@@ -58,13 +59,13 @@ export class FavoriteController {
   }
 
   @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Xóa favorite' })
   @ApiResponse({
-    status: HttpStatus.NO_CONTENT,
+    status: HttpStatus.OK,
     description: 'Xóa favorite thành công',
   })
-  remove(@Param('id') id: string) {
-    return this.favoriteService.remove(id);
+  remove(@Body() removeFavoriteDto: RemoveFavoriteDto, @CurrentUser() user: JwtUser) {
+    return this.favoriteService.remove(removeFavoriteDto, user.id);
   }
 }
