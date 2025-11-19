@@ -378,6 +378,7 @@ export const GENERIC_ERRORS = {
 // ============= FAVORITE ERRORS =============
 export const FAVORITE_ERRORS = {
   FAVORITE_NOT_FOUND: 'FAVORITE_NOT_FOUND',
+  JUST_ONE_OF_PROPERTY_ROOMTYPE_REQUIRED: 'JUST_ONE_OF_PROPERTY_ROOMTYPE_REQUIRED',
 } as const;
 
 // Export all error constants

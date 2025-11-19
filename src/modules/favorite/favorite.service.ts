@@ -21,6 +21,9 @@ export class FavoriteService {
     createFavoriteDto: CreateFavoriteDto,
     userId: string,
   ): Promise<ResponseCommon<Favorite>> {
+    if (!createFavoriteDto.propertyId && !createFavoriteDto.roomTypeId) {
+      throw new Error(FAVORITE_ERRORS.JUST_ONE_OF_PROPERTY_ROOMTYPE_REQUIRED);
+    }
     const favoriteData: Partial<Favorite> = {
       user: { id: userId } as User,
     };
@@ -63,6 +66,9 @@ export class FavoriteService {
   }
 
   async remove(removeFavoriteDto: RemoveFavoriteDto, userId: string): Promise<ResponseCommon<null>> {
+    if (!removeFavoriteDto.propertyId && !removeFavoriteDto.roomTypeId) {
+      throw new Error(FAVORITE_ERRORS.JUST_ONE_OF_PROPERTY_ROOMTYPE_REQUIRED);
+    }
     const deleteFavorite = await this.favoriteRepository.findOne({
       where: {
         user: { id: userId },
