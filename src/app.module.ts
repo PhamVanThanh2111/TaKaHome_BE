@@ -1,7 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { APP_GUARD } from '@nestjs/core';
-import { ThrottlerGuard } from '@nestjs/throttler';
+// import { APP_GUARD } from '@nestjs/core';
+// import { ThrottlerGuard } from '@nestjs/throttler';
 
 // Import all module classes
 import { UserModule } from './modules/user/user.module';
@@ -79,8 +79,8 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
     ThrottlerModule.forRoot([
       {
         name: 'default',
-        ttl: 60000, // 60 giây (1 phút)
-        limit: 500, // Giới hạn 500 requests mỗi phút cho các API thông thường
+        ttl: 60000000, // 60 giây (1 phút)
+        limit: 9999999900, // Giới hạn 500 requests mỗi phút cho các API thông thường
       },
       {
         name: 'auth',
@@ -132,10 +132,10 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
     StatisticsModule,
   ],
   providers: [
-    {
-      provide: APP_GUARD,
-      useClass: ThrottlerGuard,
-    },
+    // {
+    //   provide: APP_GUARD,
+    //   useClass: ThrottlerGuard,
+    // },
   ],
 })
 export class AppModule implements NestModule {
