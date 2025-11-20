@@ -50,9 +50,10 @@ export class FavoriteService {
     const favorite = this.favoriteRepository.create(favoriteData);
     const saved = await this.favoriteRepository.save(favorite);
     return new ResponseCommon(200, 'SUCCESS', saved);
-  }  async findAll(): Promise<ResponseCommon<Favorite[]>> {
+  }  async findAll(userId: string): Promise<ResponseCommon<Favorite[]>> {
     const favorites = await this.favoriteRepository.find({
-      relations: ['user', 'property'],
+      where: { user: { id: userId } },
+      relations: ['property', 'roomType'],
     });
     return new ResponseCommon(200, 'SUCCESS', favorites);
   }
