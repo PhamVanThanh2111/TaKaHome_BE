@@ -41,10 +41,10 @@ export class FavoriteController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Lấy danh sách favorites' })
+  @ApiOperation({ summary: 'Lấy danh sách favorites theo user đang đăng nhập' })
   @ApiResponse({ status: HttpStatus.OK, type: [FavoriteResponseDto] })
-  findAll() {
-    return this.favoriteService.findAll();
+  findAll(@CurrentUser() user: JwtUser) {
+    return this.favoriteService.findAll(user.id);
   }
 
   @Get(':id')
