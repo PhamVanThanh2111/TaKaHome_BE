@@ -7,7 +7,6 @@ import { ResponseCommon } from 'src/common/dto/response.dto';
 import { User } from '../user/entities/user.entity';
 import { Property } from '../property/entities/property.entity';
 import { RoomType } from '../property/entities/room-type.entity';
-import { RemoveFavoriteDto } from './dto/remove-favorite.dto';
 import { FAVORITE_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
@@ -50,7 +49,8 @@ export class FavoriteService {
     const favorite = this.favoriteRepository.create(favoriteData);
     const saved = await this.favoriteRepository.save(favorite);
     return new ResponseCommon(200, 'SUCCESS', saved);
-  }  async findAll(userId: string): Promise<ResponseCommon<Favorite[]>> {
+  }
+  async findAll(userId: string): Promise<ResponseCommon<Favorite[]>> {
     const favorites = await this.favoriteRepository.find({
       where: { user: { id: userId } },
       relations: ['property', 'roomType'],
@@ -66,22 +66,31 @@ export class FavoriteService {
     return new ResponseCommon(200, 'SUCCESS', favorite);
   }
 
-  async remove(removeFavoriteDto: RemoveFavoriteDto, userId: string): Promise<ResponseCommon<null>> {
-    if (!removeFavoriteDto.propertyId && !removeFavoriteDto.roomTypeId) {
+  async remove(id: string, userId: string): Promise<ResponseCommon<null>> {
+    if (!id) {
       throw new Error(FAVORITE_ERRORS.JUST_ONE_OF_PROPERTY_ROOMTYPE_REQUIRED);
     }
-    const deleteFavorite = await this.favoriteRepository.findOne({
+    const deleteFavoriteProperty = await this.favoriteRepository.findOne({
       where: {
         user: { id: userId },
-        property: { id: removeFavoriteDto.propertyId },
-        roomType: { id: removeFavoriteDto.roomTypeId },
+        property: { id: id },
       },
     });
-    if (!deleteFavorite) {
+    const deleteFavoriteRoomType = await this.favoriteRepository.findOne({
+      where: {
+        user: { id: userId },
+        roomType: { id: id },
+      },
+    });
+    if (!deleteFavoriteProperty && !deleteFavoriteRoomType) {
       throw new NotFoundException(FAVORITE_ERRORS.FAVORITE_NOT_FOUND);
     }
-    await this.favoriteRepository.remove(deleteFavorite);
+    if (deleteFavoriteProperty) {
+      await this.favoriteRepository.delete(deleteFavoriteProperty.id);
+    }
+    if (deleteFavoriteRoomType) {
+      await this.favoriteRepository.delete(deleteFavoriteRoomType.id);
+    }
     return new ResponseCommon(200, 'SUCCESS', null);
   }
-  
 }

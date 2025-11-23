@@ -169,6 +169,8 @@ export const REVIEW_ERRORS = {
 // ============= REPORT ERRORS =============
 export const REPORT_ERRORS = {
   REPORT_NOT_FOUND: 'REPORT_NOT_FOUND',
+  REPORTER_NO_RENTED_PROPERTY: 'REPORTER_NO_RENTED_PROPERTY',
+  REPORT_ALREADY_EXISTS: 'REPORT_ALREADY_EXISTS',
 } as const;
 
 // ============= PROPERTY ERRORS =============
