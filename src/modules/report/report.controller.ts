@@ -27,6 +27,7 @@ export class ReportController {
   constructor(private readonly reportService: ReportService) {}
 
   @Post()
+  @Roles('USER', 'ADMIN')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo báo cáo mới' })
   @ApiResponse({

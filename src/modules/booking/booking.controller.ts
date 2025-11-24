@@ -41,6 +41,7 @@ export class BookingController {
     status: HttpStatus.BAD_REQUEST,
     description: 'Request không hợp lệ',
   })
+  @Roles(RoleEnum.TENANT, RoleEnum.ADMIN)
   create(
     @Body() createBookingDto: CreateBookingDto,
     @CurrentUser() user: JwtUser,

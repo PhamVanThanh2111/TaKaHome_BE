@@ -341,60 +341,69 @@ export class PropertyService {
 
   /**
    * Filter combined results (properties and roomType entries) by provided criteria
-   * Optimized: Uses query builder instead of loading all data
+   * Optimized: Uses query builder based on type filter
    */
   async filter(
     filterDto: Partial<FilterPropertyDto>,
   ): Promise<ResponseCommon<any>> {
     const { page = 1, limit = 10, sortBy, sortOrder = 'asc', ...filters } = filterDto;
 
-    // Query non-boarding properties (HOUSING, APARTMENT)
-    const nonBoardingQB = this.propertyRepository
-      .createQueryBuilder('property')
-      .leftJoinAndSelect('property.landlord', 'landlord')
-      .where('property.type != :boardingType', { 
-        boardingType: PropertyTypeEnum.BOARDING 
-      });
+    let nonBoardingProps: Property[] = [];
+    let boardingProps: Property[] = [];
 
-    // Apply filters for non-boarding properties
-    this.applyPropertyFilters(nonBoardingQB, filters);
+    // Determine which query to execute based on filters.type
+    if (!filters.type || filters.type === PropertyTypeEnum.BOARDING) {
+      // Query boarding properties (will be transformed to RoomTypeEntry)
+      const boardingQB = this.propertyRepository
+        .createQueryBuilder('property')
+        .leftJoinAndSelect('property.rooms', 'rooms')
+        .leftJoinAndSelect('rooms.roomType', 'roomType')
+        .leftJoinAndSelect('property.landlord', 'landlord')
+        .where('property.type = :boardingType', { 
+          boardingType: PropertyTypeEnum.BOARDING 
+        });
 
-    // Query boarding properties (will be transformed to RoomTypeEntry)
-    const boardingQB = this.propertyRepository
-      .createQueryBuilder('property')
-      .leftJoinAndSelect('property.rooms', 'rooms')
-      .leftJoinAndSelect('rooms.roomType', 'roomType')
-      .leftJoinAndSelect('property.landlord', 'landlord')
-      .where('property.type = :boardingType', { 
-        boardingType: PropertyTypeEnum.BOARDING 
-      });
+      // Apply filters for boarding properties (RoomType level)
+      this.applyBoardingFilters(boardingQB, filters);
 
-    // Apply filters for boarding properties (RoomType level)
-    this.applyBoardingFilters(boardingQB, filters);
+      boardingProps = await boardingQB.getMany();
+    }
 
-    // Execute queries in parallel
-    const [nonBoardingProps, boardingProps] = await Promise.all([
-      nonBoardingQB.getMany(),
-      boardingQB.getMany(),
-    ]);
+    if (!filters.type || filters.type !== PropertyTypeEnum.BOARDING) {
+      // Query non-boarding properties (HOUSING, APARTMENT)
+      const nonBoardingQB = this.propertyRepository
+        .createQueryBuilder('property')
+        .leftJoinAndSelect('property.landlord', 'landlord')
+        .where('property.type != :boardingType', { 
+          boardingType: PropertyTypeEnum.BOARDING 
+        });
 
-    // Transform boarding properties to RoomTypeEntry format
-    const roomTypeEntries = this.transformBoardingToRoomTypes(boardingProps, filters);
+      // Apply filters for non-boarding properties
+      this.applyPropertyFilters(nonBoardingQB, filters);
 
-    // Combine results
-    let combined: Array<Property | RoomTypeEntry> = [
-      ...nonBoardingProps,
-      ...roomTypeEntries,
-    ];
+      nonBoardingProps = await nonBoardingQB.getMany();
+    }
+
+    // Determine which data to use based on type
+    let dataToProcess: Array<Property | RoomTypeEntry>;
+    
+    if (filters.type === PropertyTypeEnum.BOARDING) {
+      // For BOARDING
+      const roomTypeEntries = this.transformBoardingToRoomTypes(boardingProps, filters);
+      dataToProcess = roomTypeEntries;
+    } else {
+      // For HOUSING/APARTMENT 
+      dataToProcess = nonBoardingProps;
+    }
 
     // Apply sorting
-    combined = this.applySorting(combined, sortBy, sortOrder);
+    dataToProcess = this.applySorting(dataToProcess, sortBy, sortOrder);
 
     // Apply pagination
-    const totalItems = combined.length;
+    const totalItems = dataToProcess.length;
     const totalPages = Math.ceil(totalItems / limit);
     const startIndex = (page - 1) * limit;
-    const paginatedData = combined.slice(startIndex, startIndex + limit);
+    const paginatedData = dataToProcess.slice(startIndex, startIndex + limit);
 
     const result = {
       data: paginatedData,

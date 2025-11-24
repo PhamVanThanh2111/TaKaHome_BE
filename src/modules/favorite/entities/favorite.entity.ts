@@ -6,6 +6,7 @@ import {
 } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { Property } from '../../property/entities/property.entity';
+import { RoomType } from 'src/modules/property/entities/room-type.entity';
 
 @Entity()
 export class Favorite {
@@ -17,6 +18,9 @@ export class Favorite {
 
   @ManyToOne(() => Property, (property) => property.favorites)
   property: Property;
+
+  @ManyToOne(() => RoomType, (roomType) => roomType.favorites)
+  roomType: RoomType;
 
   @CreateDateColumn({
     type: 'timestamptz',
