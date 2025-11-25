@@ -41,6 +41,7 @@ export class BookingController {
     status: HttpStatus.BAD_REQUEST,
     description: 'Request không hợp lệ',
   })
+  @Roles(RoleEnum.TENANT, RoleEnum.ADMIN)
   create(
     @Body() createBookingDto: CreateBookingDto,
     @CurrentUser() user: JwtUser,
@@ -142,8 +143,8 @@ export class BookingController {
   @ApiOperation({ summary: 'Chủ nhà bàn giao tài sản' })
   @Roles(RoleEnum.LANDLORD, RoleEnum.ADMIN)
   @ApiResponse({ status: HttpStatus.OK, type: BookingResponseDto })
-  handover(@Param('id') id: string) {
-    return this.bookingService.handover(id);
+  handover(@Param('id') id: string, @CurrentUser() user: JwtUser) {
+    return this.bookingService.handover(id, user.id);
   }
 
   @Post(':id/settlement/start')

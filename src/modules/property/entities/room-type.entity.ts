@@ -7,6 +7,8 @@ import {
   OneToMany,
 } from 'typeorm';
 import { Room } from './room.entity';
+import { Favorite } from 'src/modules/favorite/entities/favorite.entity';
+import { Review } from 'src/modules/review/entities/review.entity';
 
 @Entity()
 export class RoomType {
@@ -45,6 +47,12 @@ export class RoomType {
 
   @Column({ nullable: true })
   heroImage?: string;
+
+  @OneToMany(() => Favorite, (favorite) => favorite.roomType)
+  favorites?: Favorite[];
+
+  @OneToMany(() => Review, (review) => review.roomType)
+  reviews: Review[];
 
   @CreateDateColumn({
     type: 'timestamptz',

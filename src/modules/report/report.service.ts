@@ -6,18 +6,34 @@ import { CreateReportDto } from './dto/create-report.dto';
 import { UpdateReportDto } from './dto/update-report.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { REPORT_ERRORS } from 'src/common/constants/error-messages.constant';
+import { Contract } from '../contract/entities/contract.entity';
 
 @Injectable()
 export class ReportService {
   constructor(
     @InjectRepository(Report)
     private reportRepository: Repository<Report>,
+    @InjectRepository(Contract)
+    private contractRepository: Repository<Contract>,
   ) {}
 
   async create(
     createReportDto: CreateReportDto,
+    reporterId: string,
   ): Promise<ResponseCommon<Report>> {
-    const { propertyId, reporterId, content } = createReportDto;
+    const { propertyId, content } = createReportDto;
+    const contract = await this.contractRepository.findOne({
+      where: { property: { id: propertyId }, tenant: { id: reporterId } },
+    });
+    if (!contract) {
+      throw new NotFoundException(REPORT_ERRORS.REPORTER_NO_RENTED_PROPERTY);
+    }
+    const reportExists = await this.reportRepository.findOne({
+      where: { reporter: { id: reporterId }, property: { id: propertyId } },
+    });
+    if (reportExists) {
+      throw new Error(REPORT_ERRORS.REPORT_ALREADY_EXISTS);
+    }
     const report = this.reportRepository.create({
       content,
       property: { id: propertyId },

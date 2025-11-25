@@ -8,6 +8,7 @@ import { BlockchainService } from '../blockchain/blockchain.service';
 import { Contract } from '../contract/entities/contract.entity';
 import { InvoiceService } from './invoice.service';
 import { ServiceTypeEnum } from '../common/enums/service-type.enum';
+import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 
 @Injectable()
 export class InvoiceCronService {
@@ -134,6 +135,14 @@ export class InvoiceCronService {
             if (!contract) {
               this.logger.warn(
                 `Contract not found for contractId: ${payment.contractId}`,
+              );
+              continue;
+            }
+
+            // ✅ CHECK: Only create invoices for ACTIVE contracts
+            if (contract.status !== ContractStatusEnum.ACTIVE) {
+              this.logger.debug(
+                `⏭️ Skipping invoice creation for contract ${contract.contractCode} - Status: ${contract.status} (only ACTIVE contracts allowed)`,
               );
               continue;
             }

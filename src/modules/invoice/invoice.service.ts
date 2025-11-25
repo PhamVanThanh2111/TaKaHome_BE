@@ -92,21 +92,26 @@ export class InvoiceService {
   }
 
   async create(dto: CreateInvoiceDto): Promise<ResponseCommon<Invoice>> {
+    // Lấy thông tin hợp đồng để kiểm tra endDate
+    const contract = await this.contractRepository.findOne({
+      where: { id: dto.contractId },
+    });
+
+    if (!contract) {
+      throw new BadRequestException(INVOICE_ERRORS.CONTRACT_NOT_FOUND);
+    }
+    if (vnNow() < contract.startDate) {
+      throw new BadRequestException(INVOICE_ERRORS.CONTRACT_NOT_ACTIVE);
+    }
+    if (vnNow() > contract.endDate) {
+      throw new BadRequestException(INVOICE_ERRORS.CONTRACT_EXPIRED);
+    }
     // Validate DAMAGE_COMPENSATION serviceType: chỉ cho phép tạo trong 7 ngày cuối hợp đồng
     const hasDamageCompensation = dto.items.some(
       (item) => item.serviceType === ServiceTypeEnum.DAMAGE_COMPENSATION,
     );
 
     if (hasDamageCompensation) {
-      // Lấy thông tin hợp đồng để kiểm tra endDate
-      const contract = await this.contractRepository.findOne({
-        where: { id: dto.contractId },
-      });
-
-      if (!contract) {
-        throw new BadRequestException(INVOICE_ERRORS.CONTRACT_NOT_FOUND);
-      }
-
       // Tính số giờ còn lại đến khi hợp đồng kết thúc
       // Demo: 1 giờ = 1 ngày => 7 ngày = 7 giờ
       const now = vnNow();
@@ -157,21 +162,29 @@ export class InvoiceService {
       );
     }
 
+    // Lấy thông tin hợp đồng để kiểm tra startDate và endDate 
+    const contractForValidation = await this.contractRepository.findOne({
+      where: { id: dto.contractId },
+    });
+
+    if (!contractForValidation) {
+      throw new BadRequestException(INVOICE_ERRORS.CONTRACT_NOT_FOUND);
+    }
+
+    if (vnNow() < contractForValidation.startDate) {
+      throw new BadRequestException(INVOICE_ERRORS.CONTRACT_NOT_ACTIVE);
+    }
+
+    if (vnNow() > contractForValidation.endDate) {
+      throw new BadRequestException(INVOICE_ERRORS.CONTRACT_EXPIRED);
+    }
+
     // Validate DAMAGE_COMPENSATION: chỉ cho phép tạo trong 7 ngày cuối hợp đồng
     const hasDamageCompensation = dto.services.some(
       (s) => s.serviceType === ServiceTypeEnum.DAMAGE_COMPENSATION,
     );
 
     if (hasDamageCompensation) {
-      // Lấy thông tin hợp đồng để kiểm tra endDate
-      const contractForValidation = await this.contractRepository.findOne({
-        where: { id: dto.contractId },
-      });
-
-      if (!contractForValidation) {
-        throw new BadRequestException(INVOICE_ERRORS.CONTRACT_NOT_FOUND);
-      }
-
       // Tính số giờ còn lại đến khi hợp đồng kết thúc
       // Demo: 1 giờ = 1 ngày => 7 ngày = 7 giờ
       const now = vnNow();

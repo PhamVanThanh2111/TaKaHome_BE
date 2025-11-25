@@ -17,6 +17,8 @@ import { ReportResponseDto } from './dto/report-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
+import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { JwtUser } from '../core/auth/strategies/jwt.strategy';
 
 @Controller('reports')
 @ApiBearerAuth()
@@ -25,6 +27,7 @@ export class ReportController {
   constructor(private readonly reportService: ReportService) {}
 
   @Post()
+  @Roles('USER', 'ADMIN')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo báo cáo mới' })
   @ApiResponse({
@@ -36,8 +39,8 @@ export class ReportController {
     status: HttpStatus.BAD_REQUEST,
     description: 'Request không hợp lệ',
   })
-  create(@Body() createReportDto: CreateReportDto) {
-    return this.reportService.create(createReportDto);
+  create(@Body() createReportDto: CreateReportDto, @CurrentUser() user: JwtUser) {
+    return this.reportService.create(createReportDto, user.id);
   }
 
   @Get()

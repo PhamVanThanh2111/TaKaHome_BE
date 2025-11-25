@@ -26,11 +26,21 @@ export class PenaltyRecord {
   tenantId: string;
 
   @Column({ type: 'varchar', length: 50 })
-  penaltyType: 'OVERDUE_PAYMENT' | 'MONTHLY_PAYMENT' | 'LATE_DEPOSIT' | 'HANDOVER_OVERDUE' | 'OTHER';
+  penaltyType:
+    | 'OVERDUE_PAYMENT'
+    | 'MONTHLY_PAYMENT'
+    | 'LATE_DEPOSIT'
+    | 'HANDOVER_OVERDUE'
+    | 'UTILITY_BILL_OVERDUE'
+    | 'OTHER';
 
   @Column({ type: 'varchar', length: 20, nullable: true })
   @Index()
   period?: string; // For monthly payments: "2", "3", "4"
+
+  @Column({ type: 'uuid', nullable: true })
+  @Index()
+  invoiceId?: string; // For utility bill penalties
 
   @Column({ type: 'date' })
   @Index()

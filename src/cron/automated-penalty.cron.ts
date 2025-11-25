@@ -49,7 +49,8 @@ export class AutomatedPenaltyCron {
   /**
    * Run every day at 8:00 AM to check for overdue handovers (landlord penalties)
    */
-  @Cron('*/20 * * * *', { // Demo
+  @Cron('*/20 * * * *', {
+    // Demo
     name: 'process-overdue-handovers',
     timeZone: 'Asia/Ho_Chi_Minh',
   })
@@ -92,7 +93,8 @@ export class AutomatedPenaltyCron {
   /**
    * Run every day at 08:00 AM to check for monthly payment overdue
    */
-  @Cron('0 8 * * *', { // 8:00 AM every day
+  @Cron('0 8 * * *', {
+    // 8:00 AM every day
     name: 'process-monthly-overdue-payments',
     timeZone: 'Asia/Ho_Chi_Minh',
   })
@@ -114,6 +116,31 @@ export class AutomatedPenaltyCron {
         error,
       );
       this.logger.error('Error stack:', error);
+    }
+  }
+
+  /**
+   * Run every day at 09:00 AM to check for overdue utility bills
+   * Process PENDING invoices past their due date and apply 3% daily penalty
+   */
+  @Cron('0 9 * * *', {
+    name: 'process-overdue-utility-bills',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
+  async processOverdueUtilityBills(): Promise<void> {
+    this.logger.log(
+      '🔍 Starting overdue utility bill processing every day at 09:00 AM',
+    );
+
+    try {
+      const startTime = Date.now();
+      await this.penaltyService.processOverdueUtilityBills();
+      const endTime = Date.now();
+      this.logger.log(
+        `✅ Utility bill overdue processing completed in ${endTime - startTime}ms`,
+      );
+    } catch (error) {
+      this.logger.error('❌ Failed to process overdue utility bills:', error);
     }
   }
 
@@ -275,6 +302,29 @@ export class AutomatedPenaltyCron {
       return { processed: true };
     } catch (error) {
       this.logger.error('❌ Manual low balance check failed:', error);
+      return {
+        processed: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Manual trigger for utility bill overdue processing (can be called via API if needed)
+   */
+  async triggerUtilityBillOverdueProcessing(): Promise<{
+    processed: boolean;
+    error?: string;
+  }> {
+    try {
+      this.logger.log('🔧 Manual utility bill overdue processing triggered...');
+      await this.penaltyService.processOverdueUtilityBills();
+      return { processed: true };
+    } catch (error) {
+      this.logger.error(
+        '❌ Manual utility bill overdue processing failed:',
+        error,
+      );
       return {
         processed: false,
         error: error instanceof Error ? error.message : 'Unknown error',

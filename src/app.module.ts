@@ -14,7 +14,6 @@ import { ReportModule } from './modules/report/report.module';
 import { FavoriteModule } from './modules/favorite/favorite.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { AdminActionModule } from './modules/admin-action/admin-action.module';
-import { VerificationModule } from './modules/verification/verification.module';
 import { ChatRoomModule } from './modules/chatroom/chatroom.module';
 import { ChatMessageModule } from './modules/chatmessage/chatmessage.module';
 import { ChatModule } from './modules/chat/chat.module';
@@ -120,7 +119,6 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
     FavoriteModule,
     NotificationModule,
     AdminActionModule,
-    VerificationModule,
     ChatRoomModule,
     ChatMessageModule,
     ChatModule,

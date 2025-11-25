@@ -13,6 +13,8 @@ import { NotificationTypeEnum } from '../common/enums/notification-type.enum';
 import { EscrowService } from '../escrow/escrow.service';
 import { PenaltyRecord } from './entities/penalty-record.entity';
 import { ContractTerminationService } from '../contract/contract-termination.service';
+import { Invoice } from '../invoice/entities/invoice.entity';
+import { InvoiceStatusEnum } from '../common/enums/invoice-status.enum';
 
 export interface PenaltyApplication {
   contractId: string;
@@ -40,6 +42,8 @@ export class AutomatedPenaltyService {
     private contractRepository: Repository<Contract>,
     @InjectRepository(PenaltyRecord)
     private penaltyRecordRepository: Repository<PenaltyRecord>,
+    @InjectRepository(Invoice)
+    private invoiceRepository: Repository<Invoice>,
 
     private blockchainService: BlockchainService,
     private notificationService: NotificationService,
@@ -256,7 +260,7 @@ export class AutomatedPenaltyService {
         (vnNow().getTime() - booking.escrowDepositDueAt.getTime()) /
           (1000 * 60),
       ); //Demo: minutes
-      
+
       // Cancel if more than 24 hours late
       if (hoursLate > 1) {
         // Cancel booking
@@ -1114,8 +1118,10 @@ export class AutomatedPenaltyService {
       | 'MONTHLY_PAYMENT'
       | 'LATE_DEPOSIT'
       | 'HANDOVER_OVERDUE'
+      | 'UTILITY_BILL_OVERDUE'
       | 'OTHER';
     period?: string;
+    invoiceId?: string;
     overdueDate: Date;
     daysPastDue: number;
     originalAmount: number;
@@ -1130,6 +1136,7 @@ export class AutomatedPenaltyService {
         tenantId: data.tenantId,
         penaltyType: data.penaltyType,
         period: data.period,
+        invoiceId: data.invoiceId,
         overdueDate: data.overdueDate,
         daysPastDue: data.daysPastDue,
         originalAmount: data.originalAmount,
@@ -1752,6 +1759,340 @@ Có nguy cơ hợp đồng bị hủy nếu tenant thanh toán trễ và không 
     } catch (error) {
       this.logger.error(
         '❌ Failed to send low balance warning notifications:',
+        error,
+      );
+    }
+  }
+
+  /**
+   * Process overdue utility bill invoices and apply penalties
+   * Check for PENDING invoices past their due date and apply 3% daily penalty
+   */
+  async processOverdueUtilityBills(): Promise<void> {
+    try {
+      this.logger.log('🔍 Processing overdue utility bill invoices...');
+
+      // Find all PENDING invoices that are past their due date
+      const now = vnNow();
+      const overdueInvoices = await this.invoiceRepository
+        .createQueryBuilder('invoice')
+        .leftJoinAndSelect('invoice.contract', 'contract')
+        .leftJoinAndSelect('contract.tenant', 'tenant')
+        .leftJoinAndSelect('contract.landlord', 'landlord')
+        .leftJoinAndSelect('contract.property', 'property')
+        .leftJoinAndSelect('invoice.items', 'items')
+        .where('invoice.status = :status', {
+          status: InvoiceStatusEnum.PENDING,
+        })
+        .andWhere('invoice.dueDate < :now', { now })
+        .getMany();
+
+      if (overdueInvoices.length === 0) {
+        this.logger.log('✅ No overdue utility bills found');
+        return;
+      }
+
+      this.logger.log(
+        `📋 Found ${overdueInvoices.length} overdue utility bill(s)`,
+      );
+
+      let penaltiesApplied = 0;
+
+      for (const invoice of overdueInvoices) {
+        try {
+          // Calculate days overdue
+          const dueDate = new Date(invoice.dueDate);
+          const daysPastDue = Math.floor(
+            (now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24),
+          );
+
+          if (daysPastDue <= 0) {
+            continue;
+          }
+
+          // Check if penalty already applied TODAY to avoid multiple penalties per day
+          const today = vnNow();
+          const startOfToday = new Date(
+            today.getFullYear(),
+            today.getMonth(),
+            today.getDate(),
+          );
+          const endOfToday = new Date(
+            today.getFullYear(),
+            today.getMonth(),
+            today.getDate() + 1,
+          );
+
+          const existingTodayPenalty = await this.penaltyRecordRepository
+            .createQueryBuilder('penalty')
+            .where('penalty.invoiceId = :invoiceId', {
+              invoiceId: invoice.id,
+            })
+            .andWhere('penalty.penaltyType = :penaltyType', {
+              penaltyType: 'UTILITY_BILL_OVERDUE',
+            })
+            .andWhere('penalty.appliedAt >= :startOfToday', { startOfToday })
+            .andWhere('penalty.appliedAt < :endOfToday', { endOfToday })
+            .getOne();
+
+          if (existingTodayPenalty) {
+            this.logger.log(
+              `⏭️ Daily penalty already applied today for invoice ${invoice.invoiceCode}, skipping...`,
+            );
+            continue;
+          }
+
+          // Check if this is the FIRST penalty for this invoice
+          const existingPenaltyForInvoice =
+            await this.penaltyRecordRepository.findOne({
+              where: {
+                invoiceId: invoice.id,
+                penaltyType: 'UTILITY_BILL_OVERDUE',
+              },
+            });
+
+          const isFirstPenalty = !existingPenaltyForInvoice;
+
+          // Mark invoice as OVERDUE on first penalty
+          if (isFirstPenalty) {
+            invoice.status = InvoiceStatusEnum.OVERDUE;
+            await this.invoiceRepository.save(invoice);
+            this.logger.log(
+              `📌 Marked invoice ${invoice.invoiceCode} as OVERDUE`,
+            );
+          }
+
+          // Apply penalty
+          const penalty = await this.applyUtilityBillOverduePenalty(
+            invoice,
+            daysPastDue,
+            isFirstPenalty,
+          );
+
+          if (penalty) {
+            penaltiesApplied++;
+          }
+        } catch (error) {
+          this.logger.error(
+            `❌ Failed to process overdue invoice ${invoice.invoiceCode}:`,
+            error,
+          );
+        }
+      }
+
+      this.logger.log(
+        `✅ Processed overdue utility bills: ${penaltiesApplied} penalties applied`,
+      );
+    } catch (error) {
+      this.logger.error('❌ Failed to process overdue utility bills:', error);
+    }
+  }
+
+  /**
+   * Apply penalty for overdue utility bill invoice
+   * - 3% per day penalty on invoice total amount
+   * - Deduct from tenant's escrow balance
+   * - Terminate contract if escrow insufficient
+   */
+  async applyUtilityBillOverduePenalty(
+    invoice: any,
+    daysPastDue: number,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    isFirstPenalty: boolean = false,
+  ): Promise<PenaltyApplication | null> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+      const contract = invoice.contract;
+      if (!contract) {
+        this.logger.warn(
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          `Cannot apply penalty: missing contract for invoice ${invoice.id}`,
+        );
+        return null;
+      }
+
+      // Calculate penalty: 3% per day
+      const penaltyInfo = this.calculateOverduePenalty(
+        daysPastDue,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
+        invoice.totalAmount,
+      );
+
+      this.logger.log(
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        `💰 Applying ${penaltyInfo.rate}% penalty for invoice ${invoice.invoiceCode} (${daysPastDue} days overdue)`,
+      );
+
+      // Check escrow balance before applying penalty
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
+      const escrowBalance = await this.checkEscrowBalance(contract.id);
+
+      if (!escrowBalance) {
+        this.logger.error('Failed to retrieve escrow balance');
+        return null;
+      }
+
+      // Determine actual penalty amount to deduct and whether to terminate
+      const actualPenaltyAmount = Math.min(
+        penaltyInfo.amount,
+        escrowBalance.tenantBalance,
+      );
+      const shouldTerminate = actualPenaltyAmount < penaltyInfo.amount;
+
+      let terminationReason: string | null = null;
+      if (shouldTerminate) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        terminationReason = `Không đủ tiền cọc để trả phạt hóa đơn ${invoice.invoiceCode}. Penalty yêu cầu: ${penaltyInfo.amount.toLocaleString('vi-VN')} VND, Số dư khả dụng: ${escrowBalance.tenantBalance.toLocaleString('vi-VN')} VND. Đã trừ hết số dư.`;
+
+        this.logger.warn(
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          `⚠️ Penalty (${penaltyInfo.amount.toLocaleString('vi-VN')} VND) exceeds escrow balance (${escrowBalance.tenantBalance.toLocaleString('vi-VN')} VND) for invoice ${invoice.invoiceCode}. Will deduct available balance and terminate.`,
+        );
+      }
+
+      // Record penalty on blockchain with actual amount
+      if (actualPenaltyAmount > 0) {
+        await this.recordPenaltyOnBlockchain(
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
+          contract.contractCode || contract.id,
+          'tenant',
+          actualPenaltyAmount,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          `Utility bill ${invoice.invoiceCode} overdue by ${daysPastDue} days - Deducted: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND`,
+        );
+
+        // Deduct penalty from tenant's escrow balance
+        await this.deductFromEscrow(
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
+          contract.id,
+          actualPenaltyAmount,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          `Phạt hóa đơn dịch vụ ${invoice.invoiceCode} quá hạn ${daysPastDue} ngày`,
+        );
+
+        this.logger.log(
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          `💸 Deducted penalty ${actualPenaltyAmount.toLocaleString('vi-VN')} VND from escrow for invoice ${invoice.invoiceCode}`,
+        );
+      }
+
+      // Terminate contract if needed (after deducting available funds)
+      if (shouldTerminate) {
+        this.logger.warn(
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          `⚠️ Terminating contract ${contract.contractCode} after deducting available funds for invoice ${invoice.invoiceCode}.`,
+        );
+
+        await this.terminateContractForInsufficientFunds(
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
+          contract.id,
+          terminationReason!,
+          'UTILITY_BILL_OVERDUE',
+        );
+      }
+
+      // Send notifications
+      await this.sendUtilityBillPenaltyNotifications(
+        contract,
+        invoice,
+        actualPenaltyAmount,
+        daysPastDue,
+      );
+
+      // Record penalty in database
+      await this.recordPenaltyInDatabase({
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        contractId: contract.id,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        tenantId: contract.tenant.id,
+        penaltyType: 'UTILITY_BILL_OVERDUE',
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        invoiceId: invoice.id,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        overdueDate: invoice.dueDate,
+        daysPastDue,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        originalAmount: invoice.totalAmount,
+        penaltyAmount: actualPenaltyAmount,
+        penaltyRate: penaltyInfo.rate,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        reason: `Utility bill ${invoice.invoiceCode} overdue by ${daysPastDue} days - Deducted: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND${actualPenaltyAmount < penaltyInfo.amount ? ' (Insufficient balance)' : ''}`,
+        appliedBy: 'system',
+      });
+
+      const penaltyApplication: PenaltyApplication = {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        contractId: contract.id,
+        bookingId: '', // Utility bills don't have booking reference
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        tenantId: contract.tenant.id,
+        daysPastDue,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        originalAmount: invoice.totalAmount,
+        penaltyAmount: actualPenaltyAmount,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        reason: `Utility bill ${invoice.invoiceCode} overdue by ${daysPastDue} days - Deducted: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND${actualPenaltyAmount < penaltyInfo.amount ? ' (Insufficient balance)' : ''}`,
+        appliedAt: vnNow(),
+      };
+
+      this.logger.log(
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        `✅ Successfully applied penalty for invoice ${invoice.invoiceCode} - Amount: ${actualPenaltyAmount.toLocaleString('vi-VN')} VND`,
+      );
+      return penaltyApplication;
+    } catch (error) {
+      this.logger.error(
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        `❌ Failed to apply penalty for invoice ${invoice.id}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Send penalty notifications for utility bill overdue
+   */
+  private async sendUtilityBillPenaltyNotifications(
+    contract: any,
+    invoice: any,
+    penaltyAmount: number,
+    daysPastDue: number,
+  ): Promise<void> {
+    try {
+      // Get service types from invoice items
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+      const serviceTypes = invoice.items
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access
+        .map((item: any) => item.serviceType || 'UNKNOWN')
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        .join(', ');
+
+      await this.notificationService.create({
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        userId: contract.tenant.id,
+        type: NotificationTypeEnum.PAYMENT,
+        title: 'Phí phạt hóa đơn dịch vụ quá hạn',
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        content: `Do thanh toán muộn ${daysPastDue} ngày cho hóa đơn dịch vụ ${invoice.invoiceCode} (${serviceTypes}) của căn hộ ${contract.property.title}, bạn đã bị áp dụng phí phạt ${penaltyAmount.toLocaleString('vi-VN')} VND. Vui lòng thanh toán sớm để tránh thêm phí phạt.`,
+      });
+
+      await this.notificationService.create({
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        userId: contract.landlord.id,
+        type: NotificationTypeEnum.PAYMENT,
+        title: 'Phí phạt hóa đơn dịch vụ',
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        content: `Tenant ${contract.tenant.fullName} đã bị áp dụng phí phạt ${penaltyAmount.toLocaleString('vi-VN')} VND do thanh toán muộn hóa đơn dịch vụ ${invoice.invoiceCode} (${serviceTypes}) cho căn hộ ${contract.property.title}.`,
+      });
+
+      this.logger.log(
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        `📨 Sent penalty notifications for invoice ${invoice.invoiceCode}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        '❌ Failed to send utility bill penalty notifications:',
         error,
       );
     }
