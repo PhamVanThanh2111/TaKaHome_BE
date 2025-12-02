@@ -6,39 +6,55 @@ import { CreateReportDto } from './dto/create-report.dto';
 import { UpdateReportDto } from './dto/update-report.dto';
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { REPORT_ERRORS } from 'src/common/constants/error-messages.constant';
-import { Contract } from '../contract/entities/contract.entity';
+import { User } from '../user/entities/user.entity';
+import { Property } from '../property/entities/property.entity';
+import { Room } from '../property/entities/room.entity';
 
 @Injectable()
 export class ReportService {
   constructor(
     @InjectRepository(Report)
     private reportRepository: Repository<Report>,
-    @InjectRepository(Contract)
-    private contractRepository: Repository<Contract>,
   ) {}
 
   async create(
     createReportDto: CreateReportDto,
     reporterId: string,
   ): Promise<ResponseCommon<Report>> {
-    const { propertyId, content } = createReportDto;
-    const contract = await this.contractRepository.findOne({
-      where: { property: { id: propertyId }, tenant: { id: reporterId } },
-    });
-    if (!contract) {
-      throw new NotFoundException(REPORT_ERRORS.REPORTER_NO_RENTED_PROPERTY);
+    const { propertyId, roomId, content } = createReportDto;
+   
+    // Validate: chỉ có 1 trong 2 là propertyId hoặc roomId
+    if ((propertyId && roomId) || (!propertyId && !roomId)) {
+      throw new Error('Phải cung cấp propertyId hoặc roomId, không được cả hai hoặc không có gì');
     }
-    const reportExists = await this.reportRepository.findOne({
-      where: { reporter: { id: reporterId }, property: { id: propertyId } },
-    });
+
+    // Check report exists
+    const reportExists = propertyId
+      ? await this.reportRepository.findOne({
+          where: { reporter: { id: reporterId }, property: { id: propertyId } },
+        })
+      : await this.reportRepository.findOne({
+          where: { reporter: { id: reporterId }, room: { id: roomId as string } },
+        });
+    
     if (reportExists) {
       throw new Error(REPORT_ERRORS.REPORT_ALREADY_EXISTS);
     }
-    const report = this.reportRepository.create({
+
+    // Create report
+    const reportPayload: Partial<Report> = {
       content,
-      property: { id: propertyId },
-      reporter: { id: reporterId },
-    });
+      reporter: { id: reporterId } as User,
+    };
+
+    if (propertyId) {
+      reportPayload.property = { id: propertyId } as Property;
+    }
+    if (roomId) {
+      reportPayload.room = { id: roomId } as Room;
+    }
+
+    const report = this.reportRepository.create(reportPayload);
     const saved = await this.reportRepository.save(report);
     return new ResponseCommon(200, 'SUCCESS', saved);
   }
