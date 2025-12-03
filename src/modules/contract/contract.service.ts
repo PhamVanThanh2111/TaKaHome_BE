@@ -358,7 +358,6 @@ export class ContractService {
     this.ensureStatus(contract, [
       ContractStatusEnum.DRAFT,
       ContractStatusEnum.PENDING_SIGNATURE,
-      ContractStatusEnum.SIGNED,
     ]);
     contract.status = ContractStatusEnum.CANCELLED;
     const saved = await this.contractRepository.save(contract);

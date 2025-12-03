@@ -839,7 +839,6 @@ export class BookingService {
     return [
       ContractStatusEnum.DRAFT,
       ContractStatusEnum.PENDING_SIGNATURE,
-      ContractStatusEnum.SIGNED,
     ].includes(contract.status);
   }
 
