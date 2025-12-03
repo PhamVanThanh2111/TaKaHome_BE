@@ -7,6 +7,7 @@ import {
 } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { Property } from '../../property/entities/property.entity';
+import { RoomType } from 'src/modules/property/entities/room-type.entity';
 
 @Entity()
 export class Review {
@@ -18,6 +19,9 @@ export class Review {
 
   @ManyToOne(() => Property, (property) => property.reviews)
   property: Property;
+
+  @ManyToOne(() => RoomType, (roomType) => roomType.reviews)
+  roomType: RoomType;
 
   @Column({ type: 'text' })
   comment: string;

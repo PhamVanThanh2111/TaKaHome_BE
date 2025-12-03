@@ -9,6 +9,7 @@ import {
   JoinColumn,
   ManyToOne,
   OneToMany,
+  OneToOne,
   PrimaryGeneratedColumn,
   Unique,
   UpdateDateColumn,
@@ -24,7 +25,7 @@ export class Escrow {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => Contract, { onDelete: 'CASCADE' })
+  @OneToOne(() => Contract, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'contractId' })
   contract: Contract;
 

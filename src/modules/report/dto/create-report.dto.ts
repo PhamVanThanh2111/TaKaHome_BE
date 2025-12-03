@@ -1,13 +1,18 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsOptional, IsString } from 'class-validator';
 
 export class CreateReportDto {
-  @IsNotEmpty()
+  @IsOptional()
   @ApiProperty({
-    example: '7c28a830-2341-4f0d-98ea-fb9b3b1f67c9',
     description: 'ID bất động sản',
   })
-  propertyId: string;
+  propertyId?: string;
+
+  @IsOptional()
+  @ApiProperty({
+    description: 'ID phòng',
+  })
+  roomId?: string;
 
   @IsString()
   @ApiProperty({

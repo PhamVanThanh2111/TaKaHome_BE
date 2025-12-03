@@ -11,8 +11,6 @@ import { Property } from './property.entity';
 import { RoomType } from './room-type.entity';
 import { Booking } from 'src/modules/booking/entities/booking.entity';
 import { Contract } from 'src/modules/contract/entities/contract.entity';
-import { Favorite } from 'src/modules/favorite/entities/favorite.entity';
-import { Review } from 'src/modules/review/entities/review.entity';
 import { Report } from 'src/modules/report/entities/report.entity';
 
 @Entity()
@@ -34,12 +32,6 @@ export class Room {
 
   @OneToMany(() => Contract, (contract) => contract.room)
   contracts: Contract[];
-
-  @OneToMany(() => Review, (review) => review.property)
-  reviews: Review[];
-
-  @OneToMany(() => Favorite, (favorite) => favorite.property)
-  favorites: Favorite[];
 
   @OneToMany(() => Report, (report) => report.room)
   reports: Report[];
