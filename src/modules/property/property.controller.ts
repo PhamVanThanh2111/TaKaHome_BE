@@ -226,6 +226,66 @@ export class PropertyController {
     );
   }
 
+  @Post(':id/legal-document')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('LANDLORD', 'ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Upload legal document (sổ hồng/sổ đỏ) for property',
+    description: 'Upload hình ảnh giấy tờ pháp lý của bất động sản lên S3 và lưu URL vào database',
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK,
+    description: 'Upload legal document thành công',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 200 },
+        message: { type: 'string', example: 'Legal document uploaded successfully' },
+        data: {
+          type: 'object',
+          properties: {
+            legalUrl: { type: 'string', example: 'https://s3.amazonaws.com/bucket/properties/xxx/legal/document.jpg' },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Không có file hoặc property không tồn tại',
+  })
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'legalDocument', maxCount: 1 },
+    ]),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        legalDocument: { 
+          type: 'string', 
+          format: 'binary',
+          description: 'Hình ảnh giấy tờ pháp lý (sổ hồng, sổ đỏ)',
+        },
+      },
+      required: ['legalDocument'],
+    },
+  })
+  uploadLegalDocument(
+    @Param('id') id: string,
+    @UploadedFiles()
+    files: {
+      legalDocument?: Express.Multer.File[];
+    },
+  ): Promise<ResponseCommon<{ legalUrl: string }>> {
+    const legalDocument = files?.legalDocument?.[0];
+    return this.propertyService.uploadLegalDocument(id, legalDocument);
+  }
+
   @Get('me')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)

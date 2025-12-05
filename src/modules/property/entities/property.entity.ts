@@ -53,6 +53,9 @@ export class Property {
   legalDoc?: string;
 
   @Column({ nullable: true })
+  legalUrl?: string;
+
+  @Column({ nullable: true })
   price?: number;
 
   @Column({ nullable: true })

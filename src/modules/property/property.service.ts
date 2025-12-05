@@ -39,6 +39,49 @@ export class PropertyService {
   ) {}
 
   /**
+   * Upload legal document for a Property
+   */
+  async uploadLegalDocument(
+    propertyId: string,
+    legalFile: Express.Multer.File | undefined,
+  ): Promise<ResponseCommon<{ legalUrl: string }>> {
+    // Validate legal file is provided first
+    if (!legalFile) {
+      throw new BadRequestException('Legal document file is required');
+    }
+
+    // Validate property exists
+    if (!propertyId) {
+      throw new BadRequestException(PROPERTY_ERRORS.PROPERTY_NOT_FOUND);
+    }
+
+    const property = await this.propertyRepository.findOne({
+      where: { id: propertyId },
+    });
+
+    if (!property) {
+      throw new NotFoundException(PROPERTY_ERRORS.PROPERTY_NOT_FOUND);
+    }
+
+    // Upload to S3
+    const ext = legalFile.originalname.split('.').pop() || 'jpg';
+    const key = `properties/${propertyId}/legal/${Date.now()}_legal.${ext}`;
+    const res: UploadResult = await this.s3.uploadFile(
+      legalFile.buffer,
+      key,
+      legalFile.mimetype,
+    );
+
+    // Update property with legal URL
+    property.legalUrl = res.url;
+    await this.propertyRepository.save(property);
+
+    return new ResponseCommon(200, 'Legal document uploaded successfully', {
+      legalUrl: res.url,
+    });
+  }
+
+  /**
    * Upload heroImage and images for a Property or RoomType
    * entityType: BOARDING -> roomtypes/<entityId>/..., otherwise properties/<entityId>/...
    */
