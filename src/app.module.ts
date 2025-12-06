@@ -79,7 +79,7 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
       {
         name: 'default',
         ttl: 60000, // 60 giây (1 phút)
-        limit: 500, // Giới hạn 500 requests mỗi phút cho các API thông thường
+        limit: 1000, // Giới hạn 1000 requests mỗi phút cho các API thông thường
       },
       {
         name: 'auth',
