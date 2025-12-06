@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import './polyfill';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
@@ -92,9 +93,15 @@ async function bootstrap() {
 
   await app.listen(port, host);
 
-  const url = await app.getUrl();
-  console.log(`App is running on ${url}`);
-  console.log(`Swagger is running on ${url.replace(/\/$/, '')}/api-docs`);
+  // Sử dụng Railway URL nếu có, fallback về app.getUrl()
+  const railwayUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : process.env.RAILWAY_STATIC_URL || (await app.getUrl());
+
+  console.log(`App is running on ${railwayUrl}`);
+  console.log(
+    `Swagger is running on ${railwayUrl.replace(/\/$/, '')}/api-docs`,
+  );
 }
 
 bootstrap().catch((err) => {

@@ -260,17 +260,18 @@ export class BookingService {
       throw new BadRequestException(BOOKING_ERRORS.PDF_UPLOAD_FAILED);
     }
 
-    // Update contract status to PENDING_SIGNATURE and integrate with blockchain
+    // BLOCKCHAIN FIRST: Update contract status to PENDING_SIGNATURE and integrate with blockchain
     try {
       await this.contractService.markPendingSignatureWithBlockchain(contract.id, keyUrl);
     } catch (error) {
-      console.error('[LandlordApprove] ❌ Failed to mark contract as pending signature:', error);
-      // Still continue with the process even if blockchain integration fails
-      contract.contractFileUrl = keyUrl;
-      await this.contractRepository.save(contract);
+      console.error('[LandlordApprove] Failed to mark contract as pending signature:', error);
+      // If blockchain fails, throw error to prevent database save
+      throw new BadRequestException(
+        `Blockchain integration failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
     }
 
-    // After successful signing, update booking status
+    // After successful blockchain integration, update booking status
     booking.status = BookingStatus.PENDING_SIGNATURE;
     const saved = await this.bookingRepository.save(booking);
     await this.updateVisibilityAfterApproval(booking);
@@ -419,7 +420,12 @@ export class BookingService {
       );
     }
 
-    // After successful tenant signing, update booking status
+    // BLOCKCHAIN FIRST: Mark contract as signed on blockchain before database save
+    if (contract) {
+      await this.markContractSigned(contract.id);
+    }
+
+    // After successful blockchain integration, update booking status
     booking.status = BookingStatus.AWAITING_DEPOSIT;
     const signedAt = vnNow();
     booking.signedAt = signedAt;
@@ -436,9 +442,6 @@ export class BookingService {
     }
 
     const saved = await this.bookingRepository.save(booking);
-    if (contract) {
-      await this.markContractSigned(contract.id);
-    }
     const refreshed = await this.loadBookingOrThrow(saved.id);
 
     // Return response with presigned URL to fully-signed PDF
@@ -839,7 +842,6 @@ export class BookingService {
     return [
       ContractStatusEnum.DRAFT,
       ContractStatusEnum.PENDING_SIGNATURE,
-      ContractStatusEnum.SIGNED,
     ].includes(contract.status);
   }
 
@@ -907,6 +909,7 @@ export class BookingService {
         { contractId },
         error,
       );
+      throw error;
     }
   }
 
