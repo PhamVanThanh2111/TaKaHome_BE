@@ -88,7 +88,7 @@ export class UserController {
     return this.userService.remove(id);
   }
 
-  @Throttle({ upload: {} })
+  @Throttle({ default: { limit: 30, ttl: 60000 } }) // 30 uploads/phút
   @Post('upload-avatar')
   @UseInterceptors(FileInterceptor('avatar'))
   @ApiOperation({
