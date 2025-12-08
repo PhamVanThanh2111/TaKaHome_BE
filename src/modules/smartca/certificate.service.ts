@@ -139,8 +139,13 @@ export class CertificateService {
       this.logger.warn('[signPdfWithUserKey] missing userId');
       throw new BadRequestException(CERTIFICATE_ERRORS.USER_ID_REQUIRED);
     }
-
+    const user = await this.userService.findOne(userId);
     let rec = await this.certRepo.findOne({ where: { userId } });
+    
+    // nếu chưa có chứng thư số và tài khoản cũng chưa verify (chưa cập nhật thông tin CCCD) thì thông báo lỗi người dùng phải xác thực CCCD thì mới có thể thực hiện chức năng này
+    if (!rec && user.data && !(user.data as any).isVerified) {
+      throw new BadRequestException(CERTIFICATE_ERRORS.USER_NOT_VERIFIED_CCCD);
+    }
     if (!rec) {
       this.logger.warn(
         `[signPdfWithUserKey] no certificate record for user=${userId}, generating new certificate...`,
