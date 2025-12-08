@@ -663,4 +663,78 @@ export class SmartCAController {
       });
     }
   }
+
+  @UseInterceptors(FileInterceptor('pdf'))
+  @Post('verify-self-ca-signature')
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Xác minh chữ ký số SELF_CA trong PDF',
+    description:
+      'API kiểm tra và xác minh chữ ký số được ký bằng chứng thư số do hệ thống tự cấp (SELF_CA). ' +
+      'Trả về kết quả xác minh bao gồm thông tin người ký, thời gian ký và trạng thái hợp lệ.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['pdf'],
+      properties: {
+        pdf: {
+          type: 'string',
+          format: 'binary',
+          description: 'File PDF đã được ký bằng SELF_CA cần kiểm tra',
+        },
+        signatureIndex: {
+          type: 'string',
+          example: '0',
+          description:
+            'Chỉ số chữ ký cần kiểm tra (0: chữ ký đầu tiên, 1: chữ ký thứ hai)',
+          default: '0',
+        },
+      },
+    },
+  })
+  verifySelfCASignature(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: { signatureIndex?: string },
+  ) {
+    try {
+      if (!file?.buffer?.length) {
+        throw new BadRequestException(SMARTCA_ERRORS.MISSING_PDF_FILE);
+      }
+
+      const signatureIndex = body.signatureIndex
+        ? parseInt(body.signatureIndex, 10)
+        : 0;
+
+      if (signatureIndex < 0 || signatureIndex > 1) {
+        throw new BadRequestException(
+          'signatureIndex must be 0 (first signature) or 1 (second signature)',
+        );
+      }
+
+      const result = this.smartcaService.verifySelfCASignature(
+        file.buffer,
+        signatureIndex,
+      );
+
+      return {
+        success: true,
+        message: result.isValid
+          ? 'Signature verification successful'
+          : 'Signature verification failed',
+        data: result,
+      };
+    } catch (error) {
+      this.logger.error(
+        '[verifySelfCASignature] Error:',
+        error instanceof Error ? error.message : error,
+      );
+
+      return {
+        success: false,
+        message: 'VERIFICATION_ERROR',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
 }
