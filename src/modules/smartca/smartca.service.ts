@@ -5,8 +5,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import { BadRequestException, Inject, Injectable, forwardRef } from '@nestjs/common';
-import * as fs from 'fs';
-import * as path from 'path';
 import { ConfigType } from '@nestjs/config';
 import { plainAddPlaceholder } from '@signpdf/placeholder-plain';
 import { randomUUID } from 'crypto';
@@ -23,7 +21,6 @@ import {
 } from './types/smartca.types';
 
 import { CertificateService } from './certificate.service';
-import { UserService } from '../user/user.service';
 import { SMARTCA_ERRORS } from 'src/common/constants/error-messages.constant';
 
 const OID_SHA256 = forge.pki.oids.sha256 as string;
@@ -1717,7 +1714,7 @@ export class SmartCAService {
   }
 
   /** Ghi /ByteRange mới vào CHÍNH từ điển chữ ký (giữ nguyên độ dài placeholder) */
-  private writeByteRangeInSigDict(
+  public writeByteRangeInSigDict(
     pdf: Buffer,
     signatureIndex: number,
     arr: [number, number, number, number],
@@ -1771,5 +1768,429 @@ export class SmartCAService {
       s.slice(0, absStart) + newBR + s.slice(absEnd),
       'latin1',
     );
+  }
+
+  /**
+   * Verify SELF_CA signature in PDF
+   * Extracts CMS from PDF and verifies it against Root CA
+   */
+  public verifySelfCASignature(
+    pdfBuffer: Buffer,
+    signatureIndex: number,
+  ): {
+    isValid: boolean;
+    signerInfo?: {
+      commonName?: string;
+      email?: string;
+      serialNumber?: string;
+      issuedBy?: string;
+      validFrom?: string;
+      validTo?: string;
+    };
+    signatureInfo?: {
+      signedAt?: string;
+      byteRange?: number[];
+      contentDigest?: string;
+    };
+    error?: string;
+  } {
+    try {
+      if (!this.certificateService) {
+        return {
+          isValid: false,
+          error: 'Certificate service not available',
+        };
+      }
+
+      // 1. Extract ByteRange from PDF
+      const byteRange = this.readByteRangeInSigDict(pdfBuffer, signatureIndex);
+      
+      if (!byteRange || byteRange.length !== 4) {
+        return {
+          isValid: false,
+          error: 'Cannot read ByteRange from signature dictionary',
+        };
+      }
+
+      const [a, b, c, d] = byteRange;
+
+      // 2. Extract CMS (hex) from /Contents <...>
+      const s = pdfBuffer.toString('latin1');
+      const reContents = /\/Contents\s*<([\s\S]*?)>/g;
+      const hits = Array.from(s.matchAll(reContents));
+      
+      if (signatureIndex < 0 || signatureIndex >= hits.length) {
+        return {
+          isValid: false,
+          error: `Cannot find signature at index ${signatureIndex}`,
+        };
+      }
+
+      const m = hits[signatureIndex];
+      const cmsHex = (m[1] || '').replace(/\s+/g, '');
+      
+      if (!cmsHex || cmsHex.length === 0) {
+        return {
+          isValid: false,
+          error: 'Empty signature content',
+        };
+      }
+
+      // Remove trailing zeros to get actual CMS
+      const cmsHexTrimmed = cmsHex.replace(/0+$/, '');
+
+      // 3. Compute PDF digest from ByteRange
+      const pdfDigest = this.hashTwoRanges(pdfBuffer, b, c);
+
+      // 4. Parse CMS and verify using node-forge
+      const cmsBuffer = Buffer.from(cmsHexTrimmed, 'hex');
+      
+      const cmsDer = forge.util.createBuffer(cmsBuffer.toString('binary'));
+
+      let asn1;
+      try {
+        asn1 = forge.asn1.fromDer(cmsDer);
+      } catch (asn1Error) {
+        console.error(`[verifySelfCASignature] ✗ ASN.1 parsing failed:`, asn1Error);
+        return {
+          isValid: false,
+          error: `ASN.1 parsing error: ${String((asn1Error as Error).message || asn1Error)}`,
+        };
+      }
+
+      let p7;
+      try {
+        p7 = forge.pkcs7.messageFromAsn1(asn1);
+        
+      } catch (p7Error) {
+        console.error(`[verifySelfCASignature] ✗ PKCS#7 parsing failed:`, p7Error);
+        return {
+          isValid: false,
+          error: `PKCS#7 parsing error: ${String((p7Error as Error).message || p7Error)}`,
+        };
+      }
+
+      // 5. Get Root CA certificate for verification
+      const rootCertPem = this.certificateService.getRootCertPem();
+      const rootCert = forge.pki.certificateFromPem(rootCertPem);
+
+      // Set the content that was signed (empty buffer for detached signature)
+      p7.content = forge.util.createBuffer('');
+
+      // Get signer certificate from CMS
+      if (!p7.certificates || p7.certificates.length === 0) {
+        return {
+          isValid: false,
+          error: 'No certificate found in signature',
+        };
+      }
+
+      const signerCert = p7.certificates[0];
+
+      // Extract signer info
+      const signerInfo: any = {};
+      const subject = signerCert.subject;
+      if (subject) {
+        const cnAttr = subject.getField('CN');
+        const emailAttr = subject.getField('emailAddress');
+        if (cnAttr) signerInfo.commonName = cnAttr.value;
+        if (emailAttr) signerInfo.email = emailAttr.value;
+      }
+
+      signerInfo.serialNumber = signerCert.serialNumber;
+
+      const issuer = signerCert.issuer;
+      if (issuer) {
+        const issuerCN = issuer.getField('CN');
+        if (issuerCN) signerInfo.issuedBy = issuerCN.value;
+      }
+
+      signerInfo.validFrom = signerCert.validity.notBefore.toISOString();
+      signerInfo.validTo = signerCert.validity.notAfter.toISOString();
+
+      // Get signature info
+      const signatureInfo: any = {};
+      signatureInfo.byteRange = byteRange;
+      signatureInfo.contentDigest = pdfDigest;
+
+      // Extract signing time from authenticated attributes
+      if (p7.signers && p7.signers.length > 0) {
+        const signer = p7.signers[0];
+        if (signer.authenticatedAttributes) {
+          for (const attr of signer.authenticatedAttributes) {
+            if (attr.type === forge.pki.oids.signingTime && attr.value) {
+              signatureInfo.signedAt = new Date(
+                attr.value,
+              ).toISOString();
+              break;
+            }
+          }
+        }
+      }
+
+      // 7. Verify certificate chain (signer cert must be signed by Root CA)
+      try {
+        const caStore = forge.pki.createCaStore([rootCert]);
+        forge.pki.verifyCertificateChain(caStore, [signerCert]);
+      } catch (chainError) {
+        console.error(`[verifySelfCASignature] ✗ Certificate chain verification failed:`, chainError);
+        return {
+          isValid: false,
+          signerInfo,
+          signatureInfo,
+          error: `Certificate chain verification failed: ${String((chainError as Error).message || chainError)}`,
+        };
+      }
+
+      // 8. Verify the actual signature (checks that the digest matches)
+      let isSignatureValid = false;
+      try {
+        // Check if forge parsed signers correctly
+        if (!p7.signers || p7.signers.length === 0) {
+          
+          // Manually extract signerInfo from rawCapture
+          if (p7.rawCapture && p7.rawCapture.signerInfos && p7.rawCapture.signerInfos.length > 0) {
+            
+            const rawSignerInfo = p7.rawCapture.signerInfos[0];
+            // Parse signerInfo manually
+            // SignerInfo ::= SEQUENCE {
+            //   version CMSVersion,
+            //   sid SignerIdentifier,
+            //   digestAlgorithm DigestAlgorithmIdentifier,
+            //   signedAttrs [0] IMPLICIT SignedAttributes OPTIONAL,
+            //   signatureAlgorithm SignatureAlgorithmIdentifier,
+            //   signature SignatureValue,
+            //   unsignedAttrs [1] IMPLICIT UnsignedAttributes OPTIONAL
+            // }
+            
+            if (rawSignerInfo.value && Array.isArray(rawSignerInfo.value)) {
+              let version, sid, digestAlgorithm, signedAttrs, signatureAlgorithm, signature;
+              let signedAttrsRaw;
+              
+              for (let i = 0; i < rawSignerInfo.value.length; i++) {
+                const elem = rawSignerInfo.value[i];
+                if (i === 0 && elem.type === 2) { // INTEGER - version
+                  version = elem;
+                }
+                else if (elem.type === 16 && elem.constructed) { // SEQUENCE - sid or algorithms
+                  if (!sid) {
+                    sid = elem;
+                  } else if (!digestAlgorithm) {
+                    digestAlgorithm = elem;
+                  } else if (!signatureAlgorithm) {
+                    signatureAlgorithm = elem;
+                  }
+                }
+                else if (elem.tagClass === 128 && elem.type === 0) { // [0] - signedAttrs
+                  signedAttrs = elem;
+                  signedAttrsRaw = elem;
+                }
+                else if (elem.type === 4) { // OCTET STRING - signature
+                  signature = elem;
+                }
+              }
+              
+              if (signedAttrs && signature) {
+                
+                // Extract messageDigest from signedAttrs
+                let messageDigestHex = '';
+                if (signedAttrs.value && Array.isArray(signedAttrs.value)) {
+                  for (const attr of signedAttrs.value) {
+                    if (attr.value && Array.isArray(attr.value) && attr.value.length >= 2) {
+                      const oid = attr.value[0];
+                      const attrValue = attr.value[1];
+                      
+                      // Check if this is messageDigest attribute (OID 1.2.840.113549.1.9.4)
+                      if (oid.type === 6) { // OID type
+                        const oidBytes = oid.value;
+                        const oidStr = forge.asn1.derToOid(oidBytes);
+                        
+                        if (oidStr === forge.pki.oids.messageDigest) {
+                          
+                          // The value is a SET containing OCTET STRING
+                          if (attrValue.value && Array.isArray(attrValue.value) && attrValue.value[0]) {
+                            const digestOctet = attrValue.value[0];
+                            if (digestOctet.type === 4) { // OCTET STRING
+                              messageDigestHex = forge.util.bytesToHex(digestOctet.value);
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                
+                if (messageDigestHex) {
+                  if (messageDigestHex.toLowerCase() === pdfDigest.toLowerCase()) {
+                    // Verify signature
+                    const publicKey = signerCert.publicKey;
+                    const md = forge.md.sha256.create();
+                    
+                    // For signature verification, we need to hash the DER encoding of signedAttrs
+                    // but with tag 0x31 (SET) instead of 0xA0 (context-specific [0])
+                    const signedAttrsForSigning = forge.asn1.create(
+                      forge.asn1.Class.UNIVERSAL,
+                      forge.asn1.Type.SET,
+                      true,
+                      signedAttrs.value
+                    );
+                    
+                    const bytes = forge.asn1.toDer(signedAttrsForSigning).getBytes();
+                    md.update(bytes);
+                    
+                    const authAttrDigest = md.digest().bytes();
+                    
+                    // Verify signature
+                    isSignatureValid = publicKey.verify(
+                      authAttrDigest,
+                      signature.value
+                    );
+                  } else {
+                    console.error(`[verifySelfCASignature] ✗ PDF digest mismatch`);
+                    return {
+                      isValid: false,
+                      signerInfo,
+                      signatureInfo,
+                      error: `PDF content digest mismatch. Expected: ${pdfDigest}, Got: ${messageDigestHex}`,
+                    };
+                  }
+                } else {
+                  console.error(`[verifySelfCASignature] ✗ Could not extract messageDigest from signedAttrs`);
+                  return {
+                    isValid: false,
+                    signerInfo,
+                    signatureInfo,
+                    error: 'Could not extract messageDigest from signature',
+                  };
+                }
+              } else {
+                console.error(`[verifySelfCASignature] ✗ Missing signedAttrs or signature in SignerInfo`);
+                return {
+                  isValid: false,
+                  signerInfo,
+                  signatureInfo,
+                  error: 'Missing signedAttrs or signature in SignerInfo structure',
+                };
+              }
+            }
+          } else {
+            console.error(`[verifySelfCASignature] ✗ No rawCapture signerInfos available`);
+            return {
+              isValid: false,
+              signerInfo,
+              signatureInfo,
+              error: 'No signer information found in PKCS#7 structure',
+            };
+          }
+        } else {
+          // Get the messageDigest from authenticated attributes
+          if (p7.signers && p7.signers.length > 0) {
+            const signer = p7.signers[0];
+            let messageDigestHex = '';
+
+            if (signer.authenticatedAttributes) {
+              for (const attr of signer.authenticatedAttributes) {
+                if (attr.type === forge.pki.oids.messageDigest) {
+                  const digestValue = attr.value;
+                  messageDigestHex = forge.util.bytesToHex(digestValue);
+                  break;
+                }
+              }
+            }
+
+            // Compare the messageDigest in CMS with computed PDF digest
+            if (messageDigestHex.toLowerCase() === pdfDigest.toLowerCase()) {
+              // Now verify the signature on the authenticated attributes
+              const publicKey = signerCert.publicKey;
+              const md = forge.md.sha256.create();
+
+              // Reconstruct the signed data (DER encoding of authenticated attributes)
+              const authenticatedAttributesAsn1 = forge.asn1.create(
+                forge.asn1.Class.UNIVERSAL,
+                forge.asn1.Type.SET,
+                true,
+                signer.authenticatedAttributes.map((attr: any) =>
+                  forge.asn1.create(
+                    forge.asn1.Class.UNIVERSAL,
+                    forge.asn1.Type.SEQUENCE,
+                    true,
+                    [
+                      forge.asn1.create(
+                        forge.asn1.Class.UNIVERSAL,
+                        forge.asn1.Type.OID,
+                        false,
+                        forge.asn1.oidToDer(attr.type).getBytes(),
+                      ),
+                      forge.asn1.create(
+                        forge.asn1.Class.UNIVERSAL,
+                        forge.asn1.Type.SET,
+                        true,
+                        [attr.value],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+
+              const bytes = forge.asn1.toDer(authenticatedAttributesAsn1).getBytes();
+              md.update(bytes);
+
+              const authAttrDigest = md.digest().bytes();
+              // Verify signature
+              isSignatureValid = publicKey.verify(
+                authAttrDigest,
+                signer.signature,
+              );
+            } else {
+              console.error(`[verifySelfCASignature] ✗ PDF digest mismatch`);
+              return {
+                isValid: false,
+                signerInfo,
+                signatureInfo,
+                error: `PDF content digest mismatch. Expected: ${pdfDigest}, Got: ${messageDigestHex}`,
+              };
+            }
+          }
+        }
+      } catch (verifyError) {
+        console.error(`[verifySelfCASignature] ✗ Signature verification error:`, verifyError);
+        return {
+          isValid: false,
+          signerInfo,
+          signatureInfo,
+          error: `Signature verification failed: ${String((verifyError as Error).message || verifyError)}`,
+        };
+      }
+
+      // 9. Check certificate validity period
+      const now = new Date();
+      if (
+        now < signerCert.validity.notBefore ||
+        now > signerCert.validity.notAfter
+      ) {
+        console.error(`[verifySelfCASignature] ✗ Certificate expired or not yet valid`);
+        return {
+          isValid: false,
+          signerInfo,
+          signatureInfo,
+          error: 'Certificate is expired or not yet valid',
+        };
+      }
+
+      // 10. Return result
+      return {
+        isValid: isSignatureValid,
+        signerInfo,
+        signatureInfo,
+        error: isSignatureValid ? undefined : 'Signature verification failed',
+      };
+    } catch (error) {
+      console.error(`[verifySelfCASignature] ✗✗✗ FATAL ERROR ✗✗✗`, error);
+      console.error(`[verifySelfCASignature] Error stack:`, (error as Error).stack);
+      return {
+        isValid: false,
+        error: `Verification error: ${String((error as Error).message || error)}`,
+      };
+    }
   }
 }
