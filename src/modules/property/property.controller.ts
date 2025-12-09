@@ -13,6 +13,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
@@ -41,6 +42,7 @@ import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
 import { PropertyService } from './property.service';
 
 @Controller('properties')
+@Throttle({ default: { limit: 1000, ttl: 60000 } })
 export class PropertyController {
   constructor(private readonly propertyService: PropertyService) {}
 
@@ -171,6 +173,7 @@ export class PropertyController {
     return this.propertyService.filterWithUrl(query);
   }
 
+  @Throttle({ default: { limit: 30, ttl: 60000 } }) // 30 uploads/phút
   @Post(':id/images')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -226,6 +229,7 @@ export class PropertyController {
     );
   }
 
+  @Throttle({ default: { limit: 30, ttl: 60000 } }) // 30 uploads/phút
   @Post(':id/legal-document')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)

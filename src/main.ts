@@ -13,9 +13,10 @@ class CustomSocketIOAdapter extends IoAdapter {
     const server = super.createIOServer(port, {
       ...options,
       cors: {
-        origin: process.env.FRONTEND_URL || [
+        origin: [
           'http://localhost:3000',
           'http://localhost:3001',
+          '*',
         ],
         credentials: true,
         methods: ['GET', 'POST'],
@@ -33,9 +34,10 @@ async function bootstrap() {
 
   // Bật CORS (cho phép frontend kết nối)
   app.enableCors({
-    origin: process.env.FRONTEND_URL || [
+    origin: [
       'http://localhost:3000',
       'http://localhost:3001',
+      '*',
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

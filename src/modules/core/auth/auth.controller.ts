@@ -32,11 +32,11 @@ import { UseGuards } from '@nestjs/common';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { JwtUser } from './strategies/jwt.strategy';
 
+@Throttle({ default: { limit: 15, ttl: 60000 } }) // 15 requests/phút cho tất cả auth endpoints
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Throttle({ auth: {} })
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Đăng ký tài khoản mới' })
@@ -53,7 +53,6 @@ export class AuthController {
     return await this.authService.register(dto);
   }
 
-  @Throttle({ auth: {} })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Đăng nhập' })
@@ -107,7 +106,7 @@ export class AuthController {
     }
   }
 
-  @Throttle({ password: {} })
+  @Throttle({ default: { limit: 9, ttl: 300000 } }) // 9 requests/5 phút
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset mật khẩu sau xác thực OTP Firebase' })
@@ -128,7 +127,7 @@ export class AuthController {
     return this.authService.resetPassword(dto.idToken, dto.newPassword);
   }
 
-  @Throttle({ password: {} })
+  @Throttle({ default: { limit: 9, ttl: 300000 } }) // 9 requests/5 phút
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Gửi email reset mật khẩu' })
@@ -141,7 +140,7 @@ export class AuthController {
     return this.authService.sendForgotPasswordEmail(dto.email);
   }
 
-  @Throttle({ password: {} })
+  @Throttle({ default: { limit: 9, ttl: 300000 } }) // 9 requests/5 phút
   @Post('reset-password-email')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset mật khẩu bằng token từ email' })
@@ -158,7 +157,6 @@ export class AuthController {
     return this.authService.resetPasswordWithToken(dto.token, dto.newPassword);
   }
 
-  @Throttle({ auth: {} })
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Làm mới access token bằng refresh token' })
@@ -175,7 +173,6 @@ export class AuthController {
     return this.authService.refreshAccessToken(dto.refreshToken);
   }
 
-  @Throttle({ auth: {} })
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
