@@ -44,6 +44,7 @@ interface PaymentState {
   timestamp: number;
 }
 
+@Throttle({ default: { limit: 30, ttl: 60000 } }) // 30 requests/phút
 @Controller('payments')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -54,7 +55,6 @@ export class PaymentController {
     private readonly frontend: ConfigType<typeof frontendConfig>,
   ) {}
 
-  @Throttle({ payment: {} })
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo payment' })
@@ -82,7 +82,6 @@ export class PaymentController {
     });
   }
 
-  @Throttle({ payment: {} })
   @Post('invoice/:invoiceId')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo payment từ hóa đơn' })
@@ -146,7 +145,6 @@ export class PaymentController {
     return this.paymentService.update(id, updatePaymentDto);
   }
 
-  @Throttle({ payment: {} })
   @Get('vnpay/create')
   async createVnpay(
     @Query('contractId') contractId: string,

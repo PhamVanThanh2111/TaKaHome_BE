@@ -131,21 +131,17 @@ export class CertificateService {
     pdf: Buffer,
     signatureIndex = 0,
   ) {
-    this.logger.debug(
-      `[signPdfWithUserKey] start userId=${userId} signatureIndex=${signatureIndex}`,
-    );
-
     if (!userId) {
-      this.logger.warn('[signPdfWithUserKey] missing userId');
       throw new BadRequestException(CERTIFICATE_ERRORS.USER_ID_REQUIRED);
     }
-
+    const user = await this.userService.findOne(userId);
     let rec = await this.certRepo.findOne({ where: { userId } });
+    
+    // nếu chưa có chứng thư số và tài khoản cũng chưa verify (chưa cập nhật thông tin CCCD) thì thông báo lỗi người dùng phải xác thực CCCD thì mới có thể thực hiện chức năng này
+    if (!rec && user.data && !(user.data as any).isVerified) {
+      throw new BadRequestException(CERTIFICATE_ERRORS.USER_NOT_VERIFIED_CCCD);
+    }
     if (!rec) {
-      this.logger.warn(
-        `[signPdfWithUserKey] no certificate record for user=${userId}, generating new certificate...`,
-      );
-      
       // Tự động tạo chứng thư số cho người dùng
       try {
         const userResponse = await this.userService.findOne(userId);
@@ -159,10 +155,6 @@ export class CertificateService {
           throw new BadRequestException(CERTIFICATE_ERRORS.USER_NOT_FOUND);
         }
 
-        this.logger.debug(
-          `[signPdfWithUserKey] generating certificate for user: ${user.fullName || user.email}`,
-        );
-
         // Tạo chứng thư số mới
         await this.generateUserKeyAndCert(userId, {
           fullName: user.fullName,
@@ -175,10 +167,6 @@ export class CertificateService {
         if (!rec) {
           throw new BadRequestException(CERTIFICATE_ERRORS.GENERATE_CERTIFICATE_FAILED);
         }
-
-        this.logger.debug(
-          `[signPdfWithUserKey] certificate generated successfully for user=${userId}`,
-        );
       } catch (error) {
         this.logger.error(
           `[signPdfWithUserKey] failed to generate certificate: ${String((error as Error).message || error)}`,
@@ -193,33 +181,51 @@ export class CertificateService {
     if (!systemKey)
       throw new BadRequestException(CERTIFICATE_ERRORS.SYSTEM_ENC_KEY_NOT_CONFIGURED);
     try {
-      this.logger.debug('[signPdfWithUserKey] decrypting private key');
-      const t0 = Date.now();
       const { decryptPrivateKey } = await Promise.resolve(
         require('./crypto.util'),
       );
       const userPrivPem = decryptPrivateKey(rec.privateKeyEncrypted, systemKey);
-      this.logger.debug(
-        `[signPdfWithUserKey] decrypt done in ${Date.now() - t0}ms`,
-      );
 
       // Build PKCS7 detached using node-forge
-      this.logger.debug('[signPdfWithUserKey] building PKCS7');
       const forge = require('node-forge');
+      
+      // CRITICAL STEP 1: Calculate ByteRange values from /Contents position
+      let pdfStr = pdf.toString('latin1');
+      
+      // Find /Contents <...> position for the specified signature index
+      const reContents = /\/Contents\s*<([\s\S]*?)>/g;
+      const hits = Array.from(pdfStr.matchAll(reContents));
+      if (signatureIndex < 0 || signatureIndex >= hits.length) {
+        throw new BadRequestException(`Cannot find signature at index ${signatureIndex}`);
+      }
+      
+      const m = hits[signatureIndex];
+      const full = m[0];
+      const before = pdfStr.slice(0, m.index);
+      const ltPos = before.length + full.indexOf('<'); // '<'
+      const gtPos = before.length + full.lastIndexOf('>'); // '>'
+      
+      const a = 0;
+      const b = ltPos;
+      const c = gtPos + 1;
+      const d = pdf.length - c;
+      
+      // CRITICAL STEP 2: Write ByteRange into PDF BEFORE calculating digest
+      // This ensures digest is calculated on the same content that will be in the final PDF
+      pdf = this.smartCAService.writeByteRangeInSigDict(pdf, signatureIndex, [a, b, c, d]);
+      pdfStr = pdf.toString('latin1');
+      
+      // CRITICAL STEP 3: Create content buffer from the two PDF ranges
       const p7 = forge.pkcs7.createSignedData();
-      // detached
-      p7.content = forge.util.createBuffer('');
+      const contentBuffer = forge.util.createBuffer();
+      contentBuffer.putBytes(pdf.subarray(a, a + b).toString('binary'));
+      contentBuffer.putBytes(pdf.subarray(c, c + d).toString('binary'));
+      
+      p7.content = contentBuffer;
       p7.detached = true;
 
       // Validate certificate PEM and private key PEM before attempting to sign
       try {
-        this.logger.debug(
-          `[signPdfWithUserKey] certificatePem length=${String(rec.certificatePem?.length ?? 0)}`,
-        );
-        this.logger.debug(
-          `[signPdfWithUserKey] privatePem length=${String(userPrivPem?.length ?? 0)}`,
-        );
-
         if (
           !rec.certificatePem ||
           !rec.certificatePem.includes('-----BEGIN CERTIFICATE-----')
@@ -236,10 +242,7 @@ export class CertificateService {
         // Sanity-check certificate and private key by converting to ASN.1/DER
         try {
           const certAsn1 = forge.pki.certificateToAsn1(cert);
-          const certDer = forge.asn1.toDer(certAsn1).getBytes();
-          this.logger.debug(
-            `[signPdfWithUserKey] certificate DER length=${String((certDer || '').length)}`,
-          );
+          forge.asn1.toDer(certAsn1).getBytes();
         } catch (cErr) {
           this.logger.error(
             '[signPdfWithUserKey] failed to convert certificate to DER: ' +
@@ -255,10 +258,7 @@ export class CertificateService {
         try {
           // For private key, attempt to ensure it's parseable
           const pkAsn1 = forge.pki.privateKeyToAsn1(privateKey);
-          const pkDer = forge.asn1.toDer(pkAsn1).getBytes();
-          this.logger.debug(
-            `[signPdfWithUserKey] privateKey DER length=${String((pkDer || '').length)}`,
-          );
+          forge.asn1.toDer(pkAsn1).getBytes();
         } catch (kErr) {
           this.logger.error(
             '[signPdfWithUserKey] failed to convert private key to DER: ' +
@@ -272,6 +272,13 @@ export class CertificateService {
         }
 
         p7.addCertificate(cert);
+        
+        // Calculate messageDigest manually - hash the content buffer (PDF ranges)
+        const md2 = forge.md.sha256.create();
+        md2.update(contentBuffer.bytes());
+        const contentDigest = md2.digest();
+        
+        // Add signer with manual messageDigest
         p7.addSigner({
           key: privateKey,
           certificate: cert,
@@ -283,6 +290,7 @@ export class CertificateService {
             },
             {
               type: forge.pki.oids.messageDigest,
+              value: contentDigest,
             },
             {
               type: forge.pki.oids.signingTime,
@@ -291,11 +299,7 @@ export class CertificateService {
           ],
         });
 
-        const t1 = Date.now();
         p7.sign({ detached: true });
-        this.logger.debug(
-          `[signPdfWithUserKey] p7.sign completed in ${Date.now() - t1}ms`,
-        );
 
         // Convert to DER and base64
         try {
@@ -336,29 +340,14 @@ export class CertificateService {
 
           const cmsB64 = Buffer.from(der, 'binary').toString('base64');
 
-          // success
-          this.logger.debug(
-            `[signPdfWithUserKey] CMS size (base64)=${cmsB64.length}`,
-          );
-
           // embed into pdf via SmartCAService.embedCmsAtIndex if available, otherwise return cms
           if (
             this.smartCAService &&
             typeof this.smartCAService.embedCmsAtIndex === 'function'
           ) {
-            this.logger.debug('[signPdfWithUserKey] embedding CMS into PDF');
             this.smartCAService.embedCmsAtIndex(pdf, cmsB64, signatureIndex);
-            this.logger.debug('[signPdfWithUserKey] embedding done');
-            // Return CMS only
-            this.logger.debug(
-              '[signPdfWithUserKey] returning CMS base64 only (not signedPdf)',
-            );
             return { success: true, cmsBase64: cmsB64 };
           }
-
-          this.logger.debug(
-            '[signPdfWithUserKey] returning CMS base64 (no embedding available)',
-          );
           return { success: true, cmsBase64: cmsB64 };
         } catch (derErr) {
           this.logger.error(
@@ -401,5 +390,12 @@ export class CertificateService {
       .replace(/Đ/g, 'D');
 
     return str.replace(/\s/g, '');
+  }
+
+  /**
+   * Get Root CA certificate PEM (for signature verification)
+   */
+  public getRootCertPem(): string {
+    return this.rootCA.getRootCertPem();
   }
 }

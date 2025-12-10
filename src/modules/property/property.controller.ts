@@ -13,6 +13,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
@@ -41,6 +42,7 @@ import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
 import { PropertyService } from './property.service';
 
 @Controller('properties')
+@Throttle({ default: { limit: 1000, ttl: 60000 } })
 export class PropertyController {
   constructor(private readonly propertyService: PropertyService) {}
 
@@ -171,6 +173,7 @@ export class PropertyController {
     return this.propertyService.filterWithUrl(query);
   }
 
+  @Throttle({ default: { limit: 30, ttl: 60000 } }) // 30 uploads/phút
   @Post(':id/images')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -224,6 +227,67 @@ export class PropertyController {
       heroImage,
       images,
     );
+  }
+
+  @Throttle({ default: { limit: 30, ttl: 60000 } }) // 30 uploads/phút
+  @Post(':id/legal-document')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('LANDLORD', 'ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Upload legal document (sổ hồng/sổ đỏ) for property',
+    description: 'Upload hình ảnh giấy tờ pháp lý của bất động sản lên S3 và lưu URL vào database',
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK,
+    description: 'Upload legal document thành công',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 200 },
+        message: { type: 'string', example: 'Legal document uploaded successfully' },
+        data: {
+          type: 'object',
+          properties: {
+            legalUrl: { type: 'string', example: 'https://s3.amazonaws.com/bucket/properties/xxx/legal/document.jpg' },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Không có file hoặc property không tồn tại',
+  })
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'legalDocument', maxCount: 1 },
+    ]),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        legalDocument: { 
+          type: 'string', 
+          format: 'binary',
+          description: 'Hình ảnh giấy tờ pháp lý (sổ hồng, sổ đỏ)',
+        },
+      },
+      required: ['legalDocument'],
+    },
+  })
+  uploadLegalDocument(
+    @Param('id') id: string,
+    @UploadedFiles()
+    files: {
+      legalDocument?: Express.Multer.File[];
+    },
+  ): Promise<ResponseCommon<{ legalUrl: string }>> {
+    const legalDocument = files?.legalDocument?.[0];
+    return this.propertyService.uploadLegalDocument(id, legalDocument);
   }
 
   @Get('me')

@@ -14,6 +14,7 @@ import { Throttle } from '@nestjs/throttler';
 import { CustomThrottlerGuard } from './guards/custom-throttler.guard';
 
 @ApiTags('Chatbot')
+@Throttle({ default: { limit: 1000, ttl: 60000 } }) // 1000 requests/phút
 @Controller('chatbot')
 @UseGuards(CustomThrottlerGuard)
 export class ChatbotController {
@@ -21,7 +22,6 @@ export class ChatbotController {
 
   @Post('message')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 5, ttl: 60000 } }) // 5 requests per minute for chatbot
   @ApiOperation({
     summary: 'Gửi tin nhắn cho Gemini chatbot',
     description:
@@ -81,7 +81,6 @@ export class ChatbotController {
 
   @Post('reset')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 resets per minute
   @ApiOperation({
     summary: 'Khởi tạo lại cuộc trò chuyện',
     description: 'Reset lại cuộc trò chuyện với chatbot',
