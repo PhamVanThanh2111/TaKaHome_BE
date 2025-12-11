@@ -186,24 +186,30 @@ export class ContractTerminationService {
         ),
       );
 
-      // NEW LOGIC: Deduct unpaid invoices from tenant's escrow balance
-      let refundToTenant = tenantBalance - unpaidInvoicesTotal;
-      let refundToLandlord = landlordBalance;
+      // The unpaid invoices will be transferred from tenant to landlord within escrow
+      const actualUnpaidDeduction = Math.min(
+        unpaidInvoicesTotal,
+        tenantBalance,
+      );
 
-      // If tenant balance is not enough to cover unpaid invoices
-      if (refundToTenant < 0) {
-        // Transfer the shortfall from landlord's balance
-        const shortfall = Math.abs(refundToTenant);
+      const refundToTenant = tenantBalance - actualUnpaidDeduction;
+      const refundToLandlord = landlordBalance + actualUnpaidDeduction;
+
+      // Log the calculation
+      this.logger.log(
+        `📊 Termination calculation:
+        - Tenant escrow balance: ${tenantBalance.toLocaleString('vi-VN')} VND
+        - Landlord escrow balance: ${landlordBalance.toLocaleString('vi-VN')} VND
+        - Unpaid invoices total: ${unpaidInvoicesTotal.toLocaleString('vi-VN')} VND
+        - Amount transferred from tenant to landlord: ${actualUnpaidDeduction.toLocaleString('vi-VN')} VND
+        - Final refund to tenant: ${refundToTenant.toLocaleString('vi-VN')} VND
+        - Final refund to landlord: ${refundToLandlord.toLocaleString('vi-VN')} VND`,
+      );
+
+      if (actualUnpaidDeduction < unpaidInvoicesTotal) {
         this.logger.warn(
-          `⚠️ Tenant balance insufficient! Shortfall: ${shortfall.toLocaleString('vi-VN')} VND`,
+          `⚠️ Tenant balance insufficient to cover all unpaid invoices! Shortfall: ${(unpaidInvoicesTotal - actualUnpaidDeduction).toLocaleString('vi-VN')} VND`,
         );
-
-        // Landlord gets tenant's full balance + unpaid amount from their own balance
-        refundToLandlord = landlordBalance + unpaidInvoicesTotal;
-        refundToTenant = 0;
-      } else {
-        // Tenant balance is sufficient - transfer unpaid amount to landlord
-        refundToLandlord = landlordBalance + unpaidInvoicesTotal;
       }
 
       const penaltyAmount = 0; // No penalties, just return deposits
@@ -335,7 +341,33 @@ export class ContractTerminationService {
         return;
       }
 
-      // Refund tenant deposit using EscrowService
+      // Step 1: Transfer unpaid invoices amount from tenant to landlord WITHIN escrow (if any)
+      if (calculation.unpaidInvoicesTotal > 0) {
+        const actualTransferAmount = Math.min(
+          calculation.unpaidInvoicesTotal,
+          calculation.escrowBalance.tenant,
+        );
+
+        if (actualTransferAmount > 0) {
+          this.logger.log(
+            `💸 Transferring ${actualTransferAmount.toLocaleString('vi-VN')} VND from tenant escrow to landlord escrow for unpaid invoices`,
+          );
+
+          // Deduct from tenant escrow and credit landlord escrow
+          await this.escrowService.deduct(
+            escrow.id,
+            actualTransferAmount,
+            'TENANT',
+            `Unpaid invoices settlement for contract termination - ${contract.contractCode}`,
+          );
+
+          this.logger.log(
+            `✅ Transferred ${actualTransferAmount.toLocaleString('vi-VN')} VND for unpaid invoices`,
+          );
+        }
+      }
+
+      // Step 2: Refund remaining tenant balance (after unpaid invoice deduction)
       if (calculation.refundToTenant > 0) {
         await this.escrowService.refund(
           escrow.id,
@@ -345,11 +377,11 @@ export class ContractTerminationService {
         );
 
         this.logger.log(
-          `💰 Refunded ${calculation.refundToTenant} VND to tenant ${contract.tenant.id} via escrow`,
+          `💰 Refunded ${calculation.refundToTenant.toLocaleString('vi-VN')} VND to tenant ${contract.tenant.id} via escrow`,
         );
       }
 
-      // Refund landlord deposit using EscrowService
+      // Step 3: Refund landlord balance (now includes the transferred unpaid amount)
       if (calculation.refundToLandlord > 0) {
         await this.escrowService.refund(
           escrow.id,
@@ -359,7 +391,7 @@ export class ContractTerminationService {
         );
 
         this.logger.log(
-          `💰 Settled ${calculation.refundToLandlord} VND to landlord ${contract.landlord.id} via escrow`,
+          `💰 Settled ${calculation.refundToLandlord.toLocaleString('vi-VN')} VND to landlord ${contract.landlord.id} via escrow`,
         );
       }
     } catch (error) {
