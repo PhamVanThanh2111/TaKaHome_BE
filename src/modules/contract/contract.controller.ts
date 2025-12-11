@@ -129,7 +129,7 @@ export class ContractController {
   }
 
   @Get(':id/file-url')
-  @ApiOperation({ summary: 'Lấy URL truy cập file hợp đồng.' })
+  @ApiOperation({ summary: 'Lấy URL truy cập file hợp đồng' })
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Trả về presigned URL để truy cập file hợp đồng',
