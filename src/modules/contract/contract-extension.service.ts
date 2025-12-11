@@ -518,8 +518,10 @@ export class ContractExtensionService {
     // Nếu tenant đồng ý, chuyển sang trạng thái chờ ký hợp đồng
     if (dto.status === ExtensionStatus.AWAITING_SIGNATURES) {
       extension.status = ExtensionStatus.AWAITING_SIGNATURES;
-    } else {
+    } else if (dto.status === ExtensionStatus.REJECTED) {
       extension.status = ExtensionStatus.REJECTED;
+    } else {
+      throw new BadRequestException('Invalid extension status from tenant');
     }
 
     const saved = await this.extensionRepository.save(extension);
