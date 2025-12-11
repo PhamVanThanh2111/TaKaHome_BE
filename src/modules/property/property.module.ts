@@ -7,10 +7,11 @@ import { Booking } from '../booking/entities/booking.entity';
 import { PropertyService } from './property.service';
 import { PropertyController } from './property.controller';
 import { S3StorageModule } from '../s3-storage/s3-storage.module';
+import { User } from '../user/entities/user.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Property, Room, RoomType, Booking]),
+    TypeOrmModule.forFeature([Property, Room, RoomType, Booking, User]),
     S3StorageModule,
   ],
   controllers: [PropertyController],
