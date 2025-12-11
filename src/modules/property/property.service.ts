@@ -21,7 +21,7 @@ import { RoomType } from './entities/room-type.entity';
 import { Room } from './entities/room.entity';
 import { PropertyOrRoomTypeWithUrl } from './interfaces/property-with-url.interface';
 import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
-import { PROPERTY_ERRORS } from 'src/common/constants/error-messages.constant';
+import { PROPERTY_ERRORS, USER_ERRORS } from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class PropertyService {
@@ -34,6 +34,8 @@ export class PropertyService {
     private roomTypeRepository: Repository<RoomType>,
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
     private s3: S3StorageService,
     private configService: ConfigService,
   ) {}
@@ -160,6 +162,16 @@ export class PropertyService {
   ): Promise<ResponseCommon<Property>> {
     try {
       const { roomTypes, type, ...basePropertyData } = createPropertyDto;
+
+      const landlord = await this.userRepository.findOne({
+        where: { id: landlordId },
+      });
+      if (!landlord) {
+        throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
+      }
+      if (landlord.isVerified === false) {
+        throw new BadRequestException(PROPERTY_ERRORS.LANDLORD_NOT_VERIFIED);
+      }
 
       // Step 1: Filter fields based on property type and create Property
       const propertyToSave = this.filterPropertyFieldsByType(
