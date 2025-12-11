@@ -22,7 +22,12 @@ import { RespondContractExtensionDto } from './dto/respond-contract-extension.dt
 import { TenantRespondExtensionDto } from './dto/tenant-respond-extension.dto';
 import { GetContractExtensionsDto } from './dto/get-contract-extensions.dto';
 import { ContractExtensionResponseDto } from './dto/contract-extension-response.dto';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { ContractResponseDto } from './dto/contract-response.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
@@ -116,7 +121,11 @@ export class ContractController {
   @ApiResponse({ status: HttpStatus.OK, type: ContractResponseDto })
   @Roles('ADMIN')
   terminate(@Param('id') id: string) {
-    return this.contractService.terminate(id);
+    return this.contractService.terminateContract(
+      id,
+      'Admin manually terminated contract',
+      'ADMIN',
+    );
   }
 
   @Get(':id/file-url')
@@ -344,7 +353,10 @@ export class ContractController {
         data: {
           type: 'object',
           properties: {
-            templateType: { type: 'string', example: 'HopDongChoThueNhaNguyenCan' },
+            templateType: {
+              type: 'string',
+              example: 'HopDongChoThueNhaNguyenCan',
+            },
             fields: {
               type: 'array',
               items: { type: 'string' },
@@ -364,16 +376,20 @@ export class ContractController {
     // Validate templateType
     const validTypes = Object.values(PdfTemplateType);
     if (!validTypes.includes(templateType as PdfTemplateType)) {
-      throw new Error(`Invalid template type. Valid types: ${validTypes.join(', ')}`);
+      throw new Error(
+        `Invalid template type. Valid types: ${validTypes.join(', ')}`,
+      );
     }
 
-    const fields = await this.pdfFillService.getTemplateFields(templateType as PdfTemplateType);
+    const fields = await this.pdfFillService.getTemplateFields(
+      templateType as PdfTemplateType,
+    );
     return {
       statusCode: 200,
       message: 'SUCCESS',
-      data: { 
+      data: {
         templateType,
-        fields 
+        fields,
       },
     };
   }
@@ -425,8 +441,8 @@ export class ContractController {
 
     // Điền thông tin vào PDF với template được chỉ định
     const pdfBuffer = await this.pdfFillService.fillPdfTemplate(
-      fieldValues, 
-      dto.templateType
+      fieldValues,
+      dto.templateType,
     );
 
     // Tạo tên file dựa trên template type
