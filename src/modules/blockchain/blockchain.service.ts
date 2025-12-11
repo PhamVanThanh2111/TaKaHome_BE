@@ -50,14 +50,20 @@ import * as crypto from 'crypto';
 @Injectable()
 export class BlockchainService implements OnModuleInit {
   private readonly logger = new Logger(BlockchainService.name);
-  private gateway: Gateway;
+  private gateway: Gateway | null = null;
   private wallet: any;
-  private contract: Contract;
-  private network: Network;
+  private contract: Contract | null = null;
+  private network: Network | null = null;
   private isInitialized = false;
   private currentOrgName: string | null = null;
   private currentUserId: string | null = null;
   private eventListenersStarted = false;
+
+  // Connection management
+  private connectionLock: Promise<void> | null = null;
+  private pendingOperations: Map<string, Promise<any>> = new Map();
+  private connectionLastUsed: number = 0;
+  private readonly CONNECTION_TIMEOUT = 300000; // 5 minutes
 
   constructor(
     private blockchainConfig: BlockchainConfigService,
@@ -133,19 +139,31 @@ export class BlockchainService implements OnModuleInit {
   }
 
   /**
-   * Initialize connection to Fabric network
+   * Initialize connection to Fabric network with improved error handling
    */
   private async initializeFabricConnection(
     orgName: string,
     userId?: string,
   ): Promise<boolean> {
     try {
+      this.logger.log(
+        `🔌 Initializing Fabric connection (org: ${orgName}, user: ${userId || 'admin'})...`,
+      );
+
       const connectionProfile = path.join(
         process.cwd(),
         'assets',
         'blockchain',
         'connection-profile.json',
       );
+
+      if (!fs.existsSync(connectionProfile)) {
+        this.logger.error(
+          `❌ Connection profile not found: ${connectionProfile}`,
+        );
+        return false;
+      }
+
       const ccp = JSON.parse(fs.readFileSync(connectionProfile, 'utf8'));
 
       const walletPath = path.join(
@@ -154,6 +172,12 @@ export class BlockchainService implements OnModuleInit {
         'blockchain',
         'wallet',
       );
+
+      if (!fs.existsSync(walletPath)) {
+        this.logger.error(`❌ Wallet path not found: ${walletPath}`);
+        return false;
+      }
+
       this.wallet = await Wallets.newFileSystemWallet(walletPath);
 
       // Determine which identity to use
@@ -164,10 +188,10 @@ export class BlockchainService implements OnModuleInit {
         const directIdentity = await this.loadUserIdentityDirectly(userId);
         if (directIdentity) {
           identityLabel = userId;
-          this.logger.log(`Using user identity: ${userId}`);
+          this.logger.log(`✅ Using user identity: ${userId}`);
         } else {
           this.logger.warn(
-            `Could not load user identity ${userId}, falling back to admin`,
+            `⚠️ Could not load user identity ${userId}, falling back to admin`,
           );
           identityLabel = this.getDefaultUser(orgName);
         }
@@ -181,12 +205,24 @@ export class BlockchainService implements OnModuleInit {
         return false;
       }
 
+      // Create new gateway instance
       this.gateway = new Gateway();
-      await this.gateway.connect(ccp, {
+
+      // Configure connection options with timeout and retry settings
+      const connectionOptions = {
         wallet: this.wallet,
         identity: identityLabel,
-        discovery: { enabled: false, asLocalhost: false },
-      });
+        discovery: {
+          enabled: false,
+          asLocalhost: false,
+        },
+        eventHandlerOptions: {
+          commitTimeout: 300,
+          strategy: null, // Use default strategy
+        },
+      };
+
+      await this.gateway.connect(ccp, connectionOptions);
 
       const fabricConfig = this.blockchainConfig.getFabricConfig();
       const channelName = fabricConfig.channelName;
@@ -204,12 +240,26 @@ export class BlockchainService implements OnModuleInit {
         this.eventListenersStarted = true;
       }
 
-      this.logger.log(`Connected to Fabric network as ${identityLabel}`);
+      this.logger.log(`✅ Connected to Fabric network as ${identityLabel}`);
       return true;
     } catch (error) {
       this.logger.error(
-        `Failed to initialize Fabric connection: ${error.message}`,
+        `❌ Failed to initialize Fabric connection: ${error.message}`,
+        error.stack,
       );
+
+      // Clean up on failure
+      if (this.gateway) {
+        try {
+          this.gateway.disconnect();
+        } catch {
+          // Ignore disconnect errors
+        }
+        this.gateway = null;
+        this.network = null;
+        this.contract = null;
+      }
+
       return false;
     }
   }
@@ -236,36 +286,123 @@ export class BlockchainService implements OnModuleInit {
   }
 
   /**
-   * Ensure connection is ready
+   * Ensure connection is ready with mutex lock to prevent race conditions
    */
   private async ensureConnection(
     orgName: string = 'OrgProp',
     userId?: string,
   ): Promise<void> {
-    // If not initialized or organization changed or user changed, reinitialize connection
-    if (
-      !this.isInitialized ||
-      this.currentOrgName !== orgName ||
-      this.currentUserId !== userId
-    ) {
-      // Disconnect existing connection if exists
-      if (this.gateway) {
-        this.gateway.disconnect();
-        this.isInitialized = false;
-        this.currentOrgName = null;
-        this.currentUserId = null;
-        // Note: Keep event listeners running if they were started
-        // They will be reinitialized with the new connection
-      }
+    // Wait for any pending connection operation to complete
+    if (this.connectionLock) {
+      this.logger.log(
+        '⏳ Waiting for existing connection operation to complete...',
+      );
+      await this.connectionLock;
+    }
 
-      const success = await this.initializeFabricConnection(orgName, userId);
-      if (success) {
-        this.isInitialized = true;
-        this.currentOrgName = orgName;
-        this.currentUserId = userId || null;
-      } else {
-        throw new Error('Failed to initialize blockchain connection');
+    // Check if we need to reconnect
+    const needsReconnect = this.shouldReconnect(orgName, userId);
+
+    if (!needsReconnect) {
+      // Connection is good, just update last used timestamp
+      this.connectionLastUsed = Date.now();
+      return;
+    }
+
+    // Create a new connection lock
+    this.connectionLock = this.reconnect(orgName, userId);
+
+    try {
+      await this.connectionLock;
+      this.connectionLastUsed = Date.now();
+    } finally {
+      // Release the lock
+      this.connectionLock = null;
+    }
+  }
+
+  /**
+   * Check if reconnection is needed
+   */
+  private shouldReconnect(orgName: string, userId?: string): boolean {
+    // Not initialized
+    if (!this.isInitialized) {
+      this.logger.log('🔄 Reconnect needed: Not initialized');
+      return true;
+    }
+
+    // Organization changed
+    if (this.currentOrgName !== orgName) {
+      this.logger.log(
+        `🔄 Reconnect needed: Org changed (${this.currentOrgName} -> ${orgName})`,
+      );
+      return true;
+    }
+
+    // User changed
+    if (this.currentUserId !== userId) {
+      this.logger.log(
+        `🔄 Reconnect needed: User changed (${this.currentUserId} -> ${userId})`,
+      );
+      return true;
+    }
+
+    // Connection timeout (optional - prevents stale connections)
+    const timeSinceLastUse = Date.now() - this.connectionLastUsed;
+    if (timeSinceLastUse > this.CONNECTION_TIMEOUT) {
+      this.logger.log('🔄 Reconnect needed: Connection timeout');
+      return true;
+    }
+
+    // Gateway is disconnected
+    if (!this.gateway || !this.contract) {
+      this.logger.log('🔄 Reconnect needed: Gateway or contract is null');
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Get contract instance with null safety check
+   */
+  private getContractInstance(): Contract {
+    if (!this.contract) {
+      throw new Error(
+        'Contract is not initialized. Connection may have failed.',
+      );
+    }
+    return this.contract;
+  }
+
+  /**
+   * Perform reconnection with proper cleanup
+   */
+  private async reconnect(orgName: string, userId?: string): Promise<void> {
+    this.logger.log(
+      `🔌 Reconnecting to blockchain (org: ${orgName}, user: ${userId || 'admin'})...`,
+    );
+
+    // Disconnect existing connection if exists
+    if (this.gateway) {
+      try {
+        this.gateway.disconnect();
+      } catch (error) {
+        this.logger.warn('Error disconnecting gateway:', error.message);
       }
+      this.isInitialized = false;
+      this.currentOrgName = null;
+      this.currentUserId = null;
+    }
+
+    const success = await this.initializeFabricConnection(orgName, userId);
+    if (success) {
+      this.isInitialized = true;
+      this.currentOrgName = orgName;
+      this.currentUserId = userId || null;
+      this.logger.log(`✅ Reconnection successful`);
+    } else {
+      throw new Error('Failed to initialize blockchain connection');
     }
   }
 
@@ -636,23 +773,31 @@ export class BlockchainService implements OnModuleInit {
   }
 
   /**
-   * Create a wrapper for blockchain operations with error handling
+   * Create a wrapper for blockchain operations with error handling and retry logic
    */
   private async executeBlockchainOperation<T>(
     operation: () => Promise<T>,
     operationName: string,
     orgName: string = 'OrgProp',
     userId?: string,
+    retryCount: number = 0,
   ): Promise<BlockchainResponse<T>> {
+    const maxRetries = 3;
+    const retryDelay = 1000; // 1 second
+
     try {
+      // Ensure connection is ready (with mutex lock)
       await this.ensureConnection(orgName, userId);
 
       const startTime = Date.now();
+
+      // Execute the operation
       const result = await operation();
+
       const duration = Date.now() - startTime;
 
       this.logger.log(
-        `Blockchain operation [${operationName}] completed in ${duration}ms for user ${userId || 'admin'}`,
+        `✅ Blockchain operation [${operationName}] completed in ${duration}ms for user ${userId || 'admin'}`,
       );
 
       return {
@@ -661,16 +806,64 @@ export class BlockchainService implements OnModuleInit {
         message: `Operation ${operationName} completed successfully`,
       };
     } catch (error) {
+      const errorMessage = error.message || 'Unknown error occurred';
+
+      // Check if error is retryable
+      const isRetryable = this.isRetryableError(errorMessage);
+
+      if (isRetryable && retryCount < maxRetries) {
+        this.logger.warn(
+          `⚠️ Blockchain operation [${operationName}] failed (attempt ${retryCount + 1}/${maxRetries}): ${errorMessage}. Retrying in ${retryDelay}ms...`,
+        );
+
+        // Force reconnection on next retry
+        this.isInitialized = false;
+
+        // Wait before retrying
+        await new Promise((resolve) =>
+          setTimeout(resolve, retryDelay * (retryCount + 1)),
+        );
+
+        // Retry the operation
+        return this.executeBlockchainOperation(
+          operation,
+          operationName,
+          orgName,
+          userId,
+          retryCount + 1,
+        );
+      }
+
       this.logger.error(
-        `Blockchain operation [${operationName}] failed:`,
+        `❌ Blockchain operation [${operationName}] failed after ${retryCount + 1} attempts:`,
         error,
       );
+
       return {
         success: false,
-        error: error.message || 'Unknown error occurred',
+        error: errorMessage,
         message: `Operation ${operationName} failed`,
       };
     }
+  }
+
+  /**
+   * Check if an error is retryable
+   */
+  private isRetryableError(errorMessage: string): boolean {
+    const retryableErrors = [
+      'Endorser must be connectable',
+      'connection timeout',
+      'ECONNREFUSED',
+      'ETIMEDOUT',
+      'network error',
+      'peer is not responding',
+      'failed to connect',
+    ];
+
+    return retryableErrors.some((err) =>
+      errorMessage.toLowerCase().includes(err.toLowerCase()),
+    );
   }
 
   // ========== CONTRACT OPERATIONS ==========
@@ -699,7 +892,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<BlockchainContract>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'CreateContract',
           contractData.contractId,
           contractData.landlordId,
@@ -734,7 +927,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<BlockchainContract>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.evaluateTransaction(
+        const result = await this.getContractInstance().evaluateTransaction(
           'GetContract',
           contractId,
         );
@@ -755,7 +948,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<BlockchainContract>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'ActivateContract',
           contractId,
         );
@@ -777,7 +970,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<BlockchainContract>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'TerminateContract',
           contractId,
           reason || '',
@@ -802,7 +995,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<BlockchainContract>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'TenantSignContract',
           contractId,
           fullySignedContractFileHash,
@@ -828,7 +1021,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<BlockchainContract>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'RecordDeposit',
           contractId,
           party,
@@ -854,7 +1047,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<BlockchainContract>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'RecordFirstPayment',
           contractId,
           amount,
@@ -877,7 +1070,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<any[]>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'CreateMonthlyPaymentSchedule',
           contractId,
         );
@@ -901,7 +1094,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<BlockchainContract>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'AddSignature',
           contractId,
           party,
@@ -925,7 +1118,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<ContractHistory[]>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.evaluateTransaction(
+        const result = await this.getContractInstance().evaluateTransaction(
           'GetContractHistory',
           contractId,
         );
@@ -948,7 +1141,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<BlockchainContract[]>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.evaluateTransaction(
+        const result = await this.getContractInstance().evaluateTransaction(
           'QueryContractsByStatus',
           status,
         );
@@ -969,7 +1162,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<BlockchainContract[]>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.evaluateTransaction(
+        const result = await this.getContractInstance().evaluateTransaction(
           'QueryContractsByParty',
           partyId,
         );
@@ -991,7 +1184,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<BlockchainContract[]>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.evaluateTransaction(
+        const result = await this.getContractInstance().evaluateTransaction(
           'QueryContractsByDateRange',
           startDate,
           endDate,
@@ -1028,7 +1221,7 @@ export class BlockchainService implements OnModuleInit {
         const results: any[] = [];
 
         for (const scheduleItem of scheduleData.schedule) {
-          const result = await this.contract.submitTransaction(
+          const result = await this.getContractInstance().submitTransaction(
             'CreatePaymentSchedule',
             contractId,
             scheduleItem.period.toString(),
@@ -1058,7 +1251,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<Payment>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'RecordPayment',
           contractId,
           period,
@@ -1083,7 +1276,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<Payment>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'MarkOverdue',
           contractId,
           period,
@@ -1109,7 +1302,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<Penalty>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'ApplyPenalty',
           contractId,
           period,
@@ -1137,7 +1330,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<Penalty>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'RecordPenalty',
           contractId,
           party,
@@ -1161,7 +1354,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<Payment[]>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.evaluateTransaction(
+        const result = await this.getContractInstance().evaluateTransaction(
           'QueryPaymentsByStatus',
           status,
         );
@@ -1181,7 +1374,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<OverduePayment[]>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.evaluateTransaction(
+        const result = await this.getContractInstance().evaluateTransaction(
           'QueryOverduePayments',
         );
         return JSON.parse(result.toString());
@@ -1204,7 +1397,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<any>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'StoreContractPrivateDetails',
           contractId,
           privateDataJson,
@@ -1226,7 +1419,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<any>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.evaluateTransaction(
+        const result = await this.getContractInstance().evaluateTransaction(
           'GetContractPrivateDetails',
           contractId,
         );
@@ -1292,7 +1485,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<Penalty[]>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.evaluateTransaction(
+        const result = await this.getContractInstance().evaluateTransaction(
           'QueryPenaltiesByContract',
           contractId,
         );
@@ -1322,7 +1515,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<BlockchainContract>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'RecordContractExtension',
           contractId,
           newEndDate,
@@ -1348,7 +1541,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<Payment[]>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.submitTransaction(
+        const result = await this.getContractInstance().submitTransaction(
           'CreateExtensionPaymentSchedule',
           contractId,
           extensionNumber,
@@ -1370,7 +1563,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<any>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.evaluateTransaction(
+        const result = await this.getContractInstance().evaluateTransaction(
           'QueryContractExtensions',
           contractId,
         );
@@ -1391,7 +1584,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<any>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.evaluateTransaction(
+        const result = await this.getContractInstance().evaluateTransaction(
           'GetActiveExtension',
           contractId,
         );
@@ -1411,7 +1604,7 @@ export class BlockchainService implements OnModuleInit {
   ): Promise<BlockchainResponse<BlockchainContract[]>> {
     return this.executeBlockchainOperation(
       async () => {
-        const result = await this.contract.evaluateTransaction(
+        const result = await this.getContractInstance().evaluateTransaction(
           'QueryContractsWithExtensions',
         );
         return JSON.parse(result.toString());
