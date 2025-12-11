@@ -147,6 +147,13 @@ export class InvoiceCronService {
               continue;
             }
 
+            if (contract.endDate && new Date(contract.endDate) < todayUtc) {
+              this.logger.debug(
+                `⏭️ Skipping invoice creation for contract ${contract.contractCode} - Contract expired on ${formatVN(new Date(contract.endDate), 'yyyy-MM-dd')}`,
+              );
+              continue;
+            }
+
             // Check if invoice already exists for this period
             const existingInvoices = await this.invoiceService.findByContract(
               contract.id,
