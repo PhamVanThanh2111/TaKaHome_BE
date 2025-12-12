@@ -25,10 +25,13 @@ export class AutomatedPenaltyCron {
    * to avoid duplicate penalty applications.
    */
   //Demo
-  @Cron('0 9 * * *', {
-    name: 'process-overdue-payments',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
+  @Cron(
+    '0 9 * * *',
+    // , {
+    // name: 'process-overdue-payments',
+    // timeZone: 'Asia/Ho_Chi_Minh',
+    // }
+  )
   // @Cron('*/7 * * * *', {
   //   name: 'process-overdue-payments',
   //   timeZone: 'Asia/Ho_Chi_Minh',
@@ -93,11 +96,14 @@ export class AutomatedPenaltyCron {
   /**
    * Run every day at 08:00 AM to check for monthly payment overdue
    */
-  @Cron('0 8 * * *', {
-    // 8:00 AM every day
-    name: 'process-monthly-overdue-payments',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
+  @Cron(
+    '0 8 * * *',
+    //   {
+    //   // 8:00 AM every day
+    //   name: 'process-monthly-overdue-payments',
+    //   timeZone: 'Asia/Ho_Chi_Minh',
+    // }
+  )
   async processMonthlyOverduePayments(): Promise<void> {
     this.logger.log(
       '🔍 Starting monthly overdue payment processing every day at 08:00 AM',
@@ -123,10 +129,13 @@ export class AutomatedPenaltyCron {
    * Run every day at 09:00 AM to check for overdue utility bills
    * Process PENDING invoices past their due date and apply 3% daily penalty
    */
-  @Cron('0 9 * * *', {
-    name: 'process-overdue-utility-bills',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
+  @Cron(
+    '0 9 * * *',
+    //   , {
+    //   name: 'process-overdue-utility-bills',
+    //   timeZone: 'Asia/Ho_Chi_Minh',
+    // }
+  )
   async processOverdueUtilityBills(): Promise<void> {
     this.logger.log(
       '🔍 Starting overdue utility bill processing every day at 09:00 AM',
@@ -274,10 +283,13 @@ export class AutomatedPenaltyCron {
    * Run twice daily (9:00 AM & 6:00 PM) to check for low escrow balances
    * Sends warning notifications when tenant balance < 3x daily penalty
    */
-  @Cron('0 9,18 * * *', {
-    name: 'check-low-escrow-balance',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  })
+  @Cron(
+    '0 9,18 * * *',
+    //   , {
+    //   name: 'check-low-escrow-balance',
+    //   timeZone: 'Asia/Ho_Chi_Minh',
+    // }
+  )
   async checkLowEscrowBalance(): Promise<void> {
     this.logger.log('🔍 Starting low escrow balance check...');
 
