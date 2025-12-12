@@ -25,13 +25,10 @@ export class AutomatedPenaltyCron {
    * to avoid duplicate penalty applications.
    */
   //Demo
-  @Cron(
-    '0 9 * * *',
-    // , {
-    // name: 'process-overdue-payments',
-    // timeZone: 'Asia/Ho_Chi_Minh',
-    // }
-  )
+  @Cron('0 9 * * *', {
+    name: 'process-overdue-payments',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
   // @Cron('*/7 * * * *', {
   //   name: 'process-overdue-payments',
   //   timeZone: 'Asia/Ho_Chi_Minh',
@@ -94,19 +91,19 @@ export class AutomatedPenaltyCron {
   }
 
   /**
-   * Run every day at 08:00 AM to check for monthly payment overdue
+   * Run every day at 10:30 PM to check for monthly payment overdue
    */
-  @Cron(
-    '0 8 * * *',
-    //   {
-    //   // 8:00 AM every day
-    //   name: 'process-monthly-overdue-payments',
-    //   timeZone: 'Asia/Ho_Chi_Minh',
-    // }
-  )
+  @Cron('30 22 * * *', {
+    name: 'process-monthly-overdue-payments',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
+  // @Cron('*/2 * * * *', {
+  //   name: 'process-monthly-overdue-payments-demo',
+  //   timeZone: 'Asia/Ho_Chi_Minh',
+  // }) // every 2 minutes for demo
   async processMonthlyOverduePayments(): Promise<void> {
     this.logger.log(
-      '🔍 Starting monthly overdue payment processing every day at 08:00 AM',
+      '🔍 Starting monthly overdue payment processing every day at 10:30 PM',
     );
 
     try {
@@ -129,13 +126,10 @@ export class AutomatedPenaltyCron {
    * Run every day at 09:00 AM to check for overdue utility bills
    * Process PENDING invoices past their due date and apply 3% daily penalty
    */
-  @Cron(
-    '0 9 * * *',
-    //   , {
-    //   name: 'process-overdue-utility-bills',
-    //   timeZone: 'Asia/Ho_Chi_Minh',
-    // }
-  )
+  @Cron('0 9 * * *', {
+    name: 'process-overdue-utility-bills',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
   async processOverdueUtilityBills(): Promise<void> {
     this.logger.log(
       '🔍 Starting overdue utility bill processing every day at 09:00 AM',

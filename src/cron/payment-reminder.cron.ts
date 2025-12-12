@@ -39,13 +39,10 @@ export class PaymentReminderCron {
    */
   // @Cron(CronExpression.EVERY_HOUR)
   //Demo
-  @Cron(
-    '0 7 * * *',
-    //   , {
-    //   name: 'process-overdue-payments',
-    //   timeZone: 'Asia/Ho_Chi_Minh',
-    // }
-  )
+  @Cron('0 7 * * *', {
+    name: 'send-payment-reminders-first-month',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
   async sendPaymentRemindersFirstMonth(): Promise<void> {
     try {
       this.logger.log('🔔 Checking for payment reminders to send...');
