@@ -31,14 +31,10 @@ export class ContractManagementCron {
    */
   //Demo
   // @Cron('*/10 * * * *') // every 10 minutes
-  @Cron(
-    '0 5 * * *',
-    // {
-    //   // 5:00 AM every day
-    //   name: 'process-overdue-payments',
-    //   timeZone: 'Asia/Ho_Chi_Minh',
-    // }
-  )
+  @Cron('0 5 * * *', {
+    name: 'check-contract-expiry',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
   async checkContractExpiry(): Promise<void> {
     try {
       this.logger.log('📋 Checking contracts for expiry reminders...');
@@ -77,11 +73,10 @@ export class ContractManagementCron {
    */
   //Demo
   // @Cron('*/2 * * * *') // every 15 minutes for demo
-  @Cron(
-    '0 4 * * *', // 4:00 AM every day
-    //  name: 'process-overdue-payments',
-    // timeZone: 'Asia/Ho_Chi_Minh',
-  )
+  @Cron('0 4 * * *', {
+    name: 'auto-terminate-expired-contracts',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  })
   async autoTerminateExpiredContracts(): Promise<void> {
     try {
       this.logger.log('🔍 Checking for expired contracts to terminate...');

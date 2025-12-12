@@ -708,6 +708,15 @@ export class AutomatedPenaltyService {
           if (!contract) {
             continue;
           }
+
+          // Skip processing if contract is not active
+          if (contract.status !== ContractStatusEnum.ACTIVE) {
+            this.logger.log(
+              `⏩ Skipping monthly payment for non-active contract ${contract.contractCode} (status: ${contract.status})`,
+            );
+            continue;
+          }
+
           // Calculate days overdue
           const dueDate = new Date(payment.dueDate!);
           const now = vnNow();
