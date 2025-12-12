@@ -91,9 +91,9 @@ export class AutomatedPenaltyCron {
   }
 
   /**
-   * Run every day at 11:30 PM Vietnam time to check for monthly payment overdue
+   * Run every day at 8:00 AM Vietnam time to check for monthly payment overdue
    */
-  @Cron('23 23 * * *', {
+  @Cron('0 8 * * *', {
     name: 'process-monthly-overdue-payments',
     timeZone: 'Asia/Ho_Chi_Minh',
   })
@@ -103,7 +103,7 @@ export class AutomatedPenaltyCron {
   // }) // every 2 minutes for demo
   async processMonthlyOverduePayments(): Promise<void> {
     this.logger.log(
-      '🔍 Starting monthly overdue payment processing every day at 11:30 PM Vietnam time',
+      '🔍 Starting monthly overdue payment processing every day at 8:00 AM Vietnam time',
     );
 
     try {
