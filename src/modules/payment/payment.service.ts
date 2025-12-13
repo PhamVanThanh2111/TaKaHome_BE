@@ -2,7 +2,13 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { BadRequestException, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Payment } from './entities/payment.entity';
@@ -83,7 +89,10 @@ export class PaymentService {
       throw new NotFoundException(PAYMENT_ERRORS.INVOICE_NOT_FOUND);
     }
 
-    if (invoice.status !== InvoiceStatusEnum.PENDING) {
+    if (
+      invoice.status !== InvoiceStatusEnum.PENDING &&
+      invoice.status !== InvoiceStatusEnum.OVERDUE
+    ) {
       throw new BadRequestException(PAYMENT_ERRORS.INVOICE_NOT_PENDING);
     }
 
@@ -118,9 +127,7 @@ export class PaymentService {
 
     // Ensure invoice has an associated contract
     if (!invoice.contract || !invoice.contract.id) {
-      throw new BadRequestException(
-        PAYMENT_ERRORS.INVOICE_ALREADY_HAS_PAYMENT,
-      );
+      throw new BadRequestException(PAYMENT_ERRORS.INVOICE_ALREADY_HAS_PAYMENT);
     }
     const contractId = invoice.contract.id;
 
@@ -849,15 +856,15 @@ export class PaymentService {
    */
   private async processWalletTopUpPayment(payment: Payment): Promise<void> {
     try {
-    // Kiểm tra xem payment có userId không
-    if (!payment.userId) {
-      console.error('Missing userId for wallet top-up payment', {
-        paymentId: payment.id,
-      });
-      throw new BadRequestException(
-        PAYMENT_ERRORS.MISSING_USER_INFO_WALLET_TOPUP,
-      );
-    }      // Verify user exists
+      // Kiểm tra xem payment có userId không
+      if (!payment.userId) {
+        console.error('Missing userId for wallet top-up payment', {
+          paymentId: payment.id,
+        });
+        throw new BadRequestException(
+          PAYMENT_ERRORS.MISSING_USER_INFO_WALLET_TOPUP,
+        );
+      } // Verify user exists
       const user = await this.userService.findOne(payment.userId);
       if (!user) {
         console.error('User not found for wallet top-up payment', {
@@ -1041,12 +1048,18 @@ export class PaymentService {
         return;
       }
 
-      // Find matching invoice for this contract
+      // Find matching invoice for this contract (allow both PENDING and OVERDUE)
       const invoices = await this.invoiceRepository.find({
-        where: {
-          contract: { id: contract.id },
-          status: InvoiceStatusEnum.PENDING,
-        },
+        where: [
+          {
+            contract: { id: contract.id },
+            status: InvoiceStatusEnum.PENDING,
+          },
+          {
+            contract: { id: contract.id },
+            status: InvoiceStatusEnum.OVERDUE,
+          },
+        ],
         relations: ['items'],
         order: { createdAt: 'ASC' }, // Link to oldest unpaid invoice first
       });
@@ -1205,9 +1218,7 @@ export class PaymentService {
     }
 
     if (!dto.contractId) {
-      throw new BadRequestException(
-        PAYMENT_ERRORS.CONTRACT_ID_REQUIRED,
-      );
+      throw new BadRequestException(PAYMENT_ERRORS.CONTRACT_ID_REQUIRED);
     }
 
     // Lấy contract với extension relations
@@ -1226,17 +1237,13 @@ export class PaymentService {
     );
 
     if (!activeExtension) {
-      throw new BadRequestException(
-        PAYMENT_ERRORS.NO_ACTIVE_EXTENSION,
-      );
+      throw new BadRequestException(PAYMENT_ERRORS.NO_ACTIVE_EXTENSION);
     }
 
     // Validate user permission
     if (dto.purpose === PaymentPurpose.TENANT_EXTENSION_ESCROW_DEPOSIT) {
       if (contract.tenant.id !== userId) {
-        throw new BadRequestException(
-          PAYMENT_ERRORS.ONLY_TENANT_CAN_PAY,
-        );
+        throw new BadRequestException(PAYMENT_ERRORS.ONLY_TENANT_CAN_PAY);
       }
       if (activeExtension.tenantEscrowDepositFundedAt) {
         throw new BadRequestException(
@@ -1245,9 +1252,7 @@ export class PaymentService {
       }
     } else {
       if (contract.landlord.id !== userId) {
-        throw new BadRequestException(
-          PAYMENT_ERRORS.ONLY_LANDLORD_CAN_PAY,
-        );
+        throw new BadRequestException(PAYMENT_ERRORS.ONLY_LANDLORD_CAN_PAY);
       }
       if (activeExtension.landlordEscrowDepositFundedAt) {
         throw new BadRequestException(
