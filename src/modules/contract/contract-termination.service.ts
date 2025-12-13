@@ -369,30 +369,44 @@ export class ContractTerminationService {
 
       // Step 2: Refund remaining tenant balance (after unpaid invoice deduction)
       if (calculation.refundToTenant > 0) {
-        await this.escrowService.refund(
-          escrow.id,
-          calculation.refundToTenant,
-          'TENANT',
-          `Contract termination refund - ${contract.contractCode}`,
-        );
+        try {
+          await this.escrowService.refund(
+            escrow.id,
+            calculation.refundToTenant,
+            'TENANT',
+            `Contract termination refund - ${contract.contractCode}`,
+          );
 
-        this.logger.log(
-          `💰 Refunded ${calculation.refundToTenant.toLocaleString('vi-VN')} VND to tenant ${contract.tenant.id} via escrow`,
-        );
+          this.logger.log(
+            `💰 Refunded ${calculation.refundToTenant.toLocaleString('vi-VN')} VND to tenant ${contract.tenant.id} via escrow`,
+          );
+        } catch (error) {
+          this.logger.warn(
+            `⚠️ Could not refund full amount to tenant (requested: ${calculation.refundToTenant.toLocaleString('vi-VN')} VND). Balance may have been depleted by penalties. Error: ${error.message}`,
+          );
+          // Don't throw - continue with termination even if refund fails
+        }
       }
 
       // Step 3: Refund landlord balance (now includes the transferred unpaid amount)
       if (calculation.refundToLandlord > 0) {
-        await this.escrowService.refund(
-          escrow.id,
-          calculation.refundToLandlord,
-          'LANDLORD',
-          `Contract termination settlement - ${contract.contractCode}`,
-        );
+        try {
+          await this.escrowService.refund(
+            escrow.id,
+            calculation.refundToLandlord,
+            'LANDLORD',
+            `Contract termination settlement - ${contract.contractCode}`,
+          );
 
-        this.logger.log(
-          `💰 Settled ${calculation.refundToLandlord.toLocaleString('vi-VN')} VND to landlord ${contract.landlord.id} via escrow`,
-        );
+          this.logger.log(
+            `💰 Settled ${calculation.refundToLandlord.toLocaleString('vi-VN')} VND to landlord ${contract.landlord.id} via escrow`,
+          );
+        } catch (error) {
+          this.logger.warn(
+            `⚠️ Could not refund full amount to landlord (requested: ${calculation.refundToLandlord.toLocaleString('vi-VN')} VND). Balance may have been depleted. Error: ${error.message}`,
+          );
+          // Don't throw - continue with termination even if refund fails
+        }
       }
     } catch (error) {
       this.logger.error(
