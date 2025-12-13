@@ -261,8 +261,8 @@ export class ContractTerminationService {
       // 4. Process refunds (with unpaid invoices deducted)
       await this.processRefunds(contract, calculation);
 
-      // 5. Hide property/room visibility
-      await this.hidePropertyOrRoom(contract);
+      // 5. Show property/room visibility (make available for rent again)
+      await this.showPropertyOrRoom(contract);
 
       // 6. Update blockchain
       await this.updateBlockchain(
@@ -420,44 +420,47 @@ export class ContractTerminationService {
   /**
    * Hide property or room visibility based on property type
    */
-  private async hidePropertyOrRoom(contract: Contract): Promise<void> {
+  /**
+   * Show property/room visibility to make it available for rent again
+   */
+  private async showPropertyOrRoom(contract: Contract): Promise<void> {
     try {
       if (!contract.property) {
         this.logger.warn(`No property found for contract ${contract.id}`);
         return;
       }
 
-      // If property type is APARTMENT, hide the property
+      // If property type is APARTMENT, show the property
       if (contract.property.type === PropertyTypeEnum.APARTMENT) {
         await this.propertyRepository.update(
           { id: contract.property.id },
-          { isVisible: false },
+          { isVisible: true },
         );
 
         this.logger.log(
-          `🏠 Hidden apartment property ${contract.property.id} (${contract.property.title})`,
+          `🏠 Showed apartment property ${contract.property.id} (${contract.property.title}) - available for rent again`,
         );
       }
-      // If property type is BOARDING, hide the room
+      // If property type is BOARDING, show the room
       else if (
         contract.property.type === PropertyTypeEnum.BOARDING &&
         contract.room
       ) {
         await this.roomRepository.update(
           { id: contract.room.id },
-          { isVisible: false },
+          { isVisible: true },
         );
 
         this.logger.log(
-          `🏠 Hidden boarding room ${contract.room.id} (${contract.room.name}) in property ${contract.property.title}`,
+          `🏠 Showed boarding room ${contract.room.id} (${contract.room.name}) in property ${contract.property.title} - available for rent again`,
         );
       }
     } catch (error) {
       this.logger.error(
-        `❌ Failed to hide property/room for contract ${contract.id}:`,
+        `❌ Failed to show property/room for contract ${contract.id}:`,
         error,
       );
-      // Don't throw error - continue with termination even if hiding fails
+      // Don't throw error - continue with termination even if showing fails
     }
   }
 
