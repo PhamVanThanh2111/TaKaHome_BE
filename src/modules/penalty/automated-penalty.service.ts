@@ -1809,6 +1809,17 @@ Có nguy cơ hợp đồng bị hủy nếu tenant thanh toán trễ và không 
 
       for (const invoice of overdueInvoices) {
         try {
+          // Skip if contract is not active
+          if (
+            invoice.contract &&
+            invoice.contract.status !== ContractStatusEnum.ACTIVE
+          ) {
+            this.logger.log(
+              `⏩ Skipping utility bill for non-active contract ${invoice.contract.contractCode} (status: ${invoice.contract.status})`,
+            );
+            continue;
+          }
+
           // Calculate days overdue
           const dueDate = new Date(invoice.dueDate);
           const daysPastDue = Math.floor(
