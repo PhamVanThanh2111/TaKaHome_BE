@@ -1,6 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -158,12 +162,10 @@ export class InvoiceService {
     const serviceTypes = dto.services.map((s) => s.serviceType);
     const uniqueServiceTypes = new Set(serviceTypes);
     if (serviceTypes.length !== uniqueServiceTypes.size) {
-      throw new BadRequestException(
-        INVOICE_ERRORS.DUPLICATE_SERVICE_TYPE,
-      );
+      throw new BadRequestException(INVOICE_ERRORS.DUPLICATE_SERVICE_TYPE);
     }
 
-    // Lấy thông tin hợp đồng để kiểm tra startDate và endDate 
+    // Lấy thông tin hợp đồng để kiểm tra startDate và endDate
     const contractForValidation = await this.contractRepository.findOne({
       where: { id: dto.contractId },
     });
@@ -207,9 +209,7 @@ export class InvoiceService {
         service.serviceType === ServiceTypeEnum.ELECTRICITY &&
         !service.KwhNo
       ) {
-        throw new BadRequestException(
-          INVOICE_ERRORS.KWH_NO_REQUIRED,
-        );
+        throw new BadRequestException(INVOICE_ERRORS.KWH_NO_REQUIRED);
       }
       if (service.serviceType === ServiceTypeEnum.WATER && !service.M3No) {
         throw new BadRequestException(INVOICE_ERRORS.M3_NO_REQUIRED);
@@ -219,9 +219,7 @@ export class InvoiceService {
         service.serviceType !== ServiceTypeEnum.WATER &&
         !service.amount
       ) {
-        throw new BadRequestException(
-          INVOICE_ERRORS.PAYMENT_DETAILS_MISSING,
-        );
+        throw new BadRequestException(INVOICE_ERRORS.PAYMENT_DETAILS_MISSING);
       }
     }
 
@@ -256,9 +254,7 @@ export class InvoiceService {
       );
 
       if (hasExistingServiceType) {
-        throw new BadRequestException(
-          INVOICE_ERRORS.DUPLICATE_SERVICE_TYPE,
-        );
+        throw new BadRequestException(INVOICE_ERRORS.DUPLICATE_SERVICE_TYPE);
       }
     }
 
@@ -277,9 +273,7 @@ export class InvoiceService {
         // Hóa đơn tiền điện
         const electricityPrice = contract.property.electricityPricePerKwh;
         if (!electricityPrice) {
-          throw new BadRequestException(
-            INVOICE_ERRORS.PAYMENT_DETAILS_MISSING,
-          );
+          throw new BadRequestException(INVOICE_ERRORS.PAYMENT_DETAILS_MISSING);
         }
         itemAmount = service.KwhNo * Number(electricityPrice);
         itemDescription =
@@ -292,9 +286,7 @@ export class InvoiceService {
         // Hóa đơn tiền nước
         const waterPrice = contract.property.waterPricePerM3;
         if (!waterPrice) {
-          throw new BadRequestException(
-            INVOICE_ERRORS.PAYMENT_DETAILS_MISSING,
-          );
+          throw new BadRequestException(INVOICE_ERRORS.PAYMENT_DETAILS_MISSING);
         }
         itemAmount = service.M3No * Number(waterPrice);
         itemDescription =
@@ -303,9 +295,7 @@ export class InvoiceService {
       } else {
         // Các dịch vụ khác
         if (!service.amount) {
-          throw new BadRequestException(
-            INVOICE_ERRORS.PAYMENT_DETAILS_MISSING,
-          );
+          throw new BadRequestException(INVOICE_ERRORS.PAYMENT_DETAILS_MISSING);
         }
         itemAmount = service.amount;
         itemDescription =
@@ -378,7 +368,10 @@ export class InvoiceService {
   async markPaid(id: string): Promise<ResponseCommon<Invoice>> {
     const invoice = await this.loadInvoice(id);
     if (!invoice) throw new NotFoundException(INVOICE_ERRORS.INVOICE_NOT_FOUND);
-    this.ensureStatus(invoice, [InvoiceStatusEnum.PENDING]);
+    this.ensureStatus(invoice, [
+      InvoiceStatusEnum.PENDING,
+      InvoiceStatusEnum.OVERDUE,
+    ]);
     invoice.status = InvoiceStatusEnum.PAID;
     const saved = await this.invoiceRepository.save(invoice);
     return new ResponseCommon(200, 'SUCCESS', saved);
