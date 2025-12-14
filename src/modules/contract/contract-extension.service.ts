@@ -241,7 +241,7 @@ export class ContractExtensionService {
 
       const recordResult = await this.blockchainService.recordContractExtension(
         contract.contractCode,
-        addHours(extension.createdAt, 82).toISOString(),
+        addHours(extension.createdAt, 72).toISOString(),
         newRentAmount.toString(), // newRentAmount
         (await this.hashExtensionDocument(extension)) || '', // extensionAgreementHash (URL của hợp đồng gia hạn)
         extension.requestNote || 'Contract extension', // extensionNotes
@@ -264,6 +264,39 @@ export class ContractExtensionService {
 
       if (!extensionNumber) {
         throw new Error('Extension number not returned from blockchain');
+      }
+
+      // Chờ một chút để blockchain commit hoàn toàn (tránh race condition)
+      console.log(
+        '[BlockchainExtension] ⏳ Waiting for blockchain to commit extension...',
+      );
+      await new Promise((resolve) => setTimeout(resolve, 2000)); // 2 giây
+
+      // Verify extension đã được commit bằng cách query lại contract
+      console.log(
+        '[BlockchainExtension] 🔍 Verifying extension was committed...',
+      );
+      const verifyResult = await this.blockchainService.getContract(
+        contract.contractCode,
+        blockchainUser,
+      );
+
+      if (!verifyResult.success) {
+        this.logger.warn(
+          `[BlockchainExtension] ⚠️ Could not verify extension commit: ${verifyResult.error}`,
+        );
+      } else {
+        const verifiedExtensionNumber =
+          verifyResult.data?.currentExtensionNumber;
+        console.log(
+          `[BlockchainExtension] ✅ Extension verified: extension number ${verifiedExtensionNumber}`,
+        );
+
+        if (verifiedExtensionNumber !== extensionNumber) {
+          this.logger.warn(
+            `[BlockchainExtension] ⚠️ Extension number mismatch: expected ${extensionNumber}, got ${verifiedExtensionNumber}`,
+          );
+        }
       }
 
       // Bước 2: Tạo payment schedule cho extension
