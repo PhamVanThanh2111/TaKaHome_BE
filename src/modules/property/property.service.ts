@@ -375,6 +375,8 @@ export class PropertyService {
             ward: prop.ward,
             address: prop.address,
             isApproved: prop.isApproved,
+            legalDoc: prop.legalDoc,
+            legalUrl: prop.legalUrl,
             landlord: prop.landlord
               ? {
                   id: prop.landlord.id,

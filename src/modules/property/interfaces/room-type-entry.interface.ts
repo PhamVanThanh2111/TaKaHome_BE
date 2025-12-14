@@ -25,6 +25,8 @@ export interface RoomTypeEntry {
     address: string;
     isApproved?: boolean;
     createdAt?: Date;
+    legalDoc?: string;
+    legalUrl?: string;
     landlord?: {
       id: string;
       name?: string;
