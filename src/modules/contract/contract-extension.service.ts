@@ -163,7 +163,9 @@ export class ContractExtensionService {
 
     // Extension phải đang pending
     if (extension.status !== ExtensionStatus.PENDING) {
-      throw new BadRequestException(CONTRACT_ERRORS.EXTENSION_REQUEST_NOT_PENDING);
+      throw new BadRequestException(
+        CONTRACT_ERRORS.EXTENSION_REQUEST_NOT_PENDING,
+      );
     }
 
     // Cập nhật extension
@@ -239,7 +241,7 @@ export class ContractExtensionService {
 
       const recordResult = await this.blockchainService.recordContractExtension(
         contract.contractCode,
-        addHours(extension.createdAt, 72).toISOString(),
+        addHours(extension.createdAt, 82).toISOString(),
         newRentAmount.toString(), // newRentAmount
         (await this.hashExtensionDocument(extension)) || '', // extensionAgreementHash (URL của hợp đồng gia hạn)
         extension.requestNote || 'Contract extension', // extensionNotes
