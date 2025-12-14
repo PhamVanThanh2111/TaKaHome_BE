@@ -1220,6 +1220,8 @@ export class PropertyService {
             address: prop.address,
             isApproved: prop.isApproved,
             createdAt: prop.createdAt,
+            legalDoc: prop.legalDoc,
+            legalUrl: prop.legalUrl,
             landlord: prop.landlord
               ? {
                   id: prop.landlord.id,
