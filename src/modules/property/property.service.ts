@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ResponseCommon } from 'src/common/dto/response.dto';
@@ -21,7 +26,10 @@ import { RoomType } from './entities/room-type.entity';
 import { Room } from './entities/room.entity';
 import { PropertyOrRoomTypeWithUrl } from './interfaces/property-with-url.interface';
 import { RoomTypeEntry } from './interfaces/room-type-entry.interface';
-import { PROPERTY_ERRORS, USER_ERRORS } from 'src/common/constants/error-messages.constant';
+import {
+  PROPERTY_ERRORS,
+  USER_ERRORS,
+} from 'src/common/constants/error-messages.constant';
 
 @Injectable()
 export class PropertyService {
@@ -135,7 +143,8 @@ export class PropertyService {
       const roomType = await this.roomTypeRepository.findOne({
         where: { id: entityId },
       });
-      if (!roomType) throw new NotFoundException(PROPERTY_ERRORS.ROOM_TYPE_NOT_FOUND);
+      if (!roomType)
+        throw new NotFoundException(PROPERTY_ERRORS.ROOM_TYPE_NOT_FOUND);
       if (heroUrl) roomType.heroImage = heroUrl;
       if (galleryUrls.length > 0)
         roomType.images = [...(roomType.images || []), ...galleryUrls];
@@ -147,7 +156,8 @@ export class PropertyService {
     const property = await this.propertyRepository.findOne({
       where: { id: entityId },
     });
-    if (!property) throw new NotFoundException(PROPERTY_ERRORS.PROPERTY_NOT_FOUND);
+    if (!property)
+      throw new NotFoundException(PROPERTY_ERRORS.PROPERTY_NOT_FOUND);
     if (heroUrl) property.heroImage = heroUrl;
     if (galleryUrls.length > 0)
       property.images = [...(property.images || []), ...galleryUrls];
@@ -401,7 +411,13 @@ export class PropertyService {
   async filter(
     filterDto: Partial<FilterPropertyDto>,
   ): Promise<ResponseCommon<any>> {
-    const { page = 1, limit = 10, sortBy, sortOrder = 'asc', ...filters } = filterDto;
+    const {
+      page = 1,
+      limit = 10,
+      sortBy,
+      sortOrder = 'asc',
+      ...filters
+    } = filterDto;
 
     let nonBoardingProps: Property[] = [];
     let boardingProps: Property[] = [];
@@ -414,8 +430,8 @@ export class PropertyService {
         .leftJoinAndSelect('property.rooms', 'rooms')
         .leftJoinAndSelect('rooms.roomType', 'roomType')
         .leftJoinAndSelect('property.landlord', 'landlord')
-        .where('property.type = :boardingType', { 
-          boardingType: PropertyTypeEnum.BOARDING 
+        .where('property.type = :boardingType', {
+          boardingType: PropertyTypeEnum.BOARDING,
         });
 
       // Apply filters for boarding properties (RoomType level)
@@ -429,8 +445,8 @@ export class PropertyService {
       const nonBoardingQB = this.propertyRepository
         .createQueryBuilder('property')
         .leftJoinAndSelect('property.landlord', 'landlord')
-        .where('property.type != :boardingType', { 
-          boardingType: PropertyTypeEnum.BOARDING 
+        .where('property.type != :boardingType', {
+          boardingType: PropertyTypeEnum.BOARDING,
         });
 
       // Apply filters for non-boarding properties
@@ -441,14 +457,24 @@ export class PropertyService {
 
     // Determine which data to use based on type
     let dataToProcess: Array<Property | RoomTypeEntry>;
-    
+
     if (filters.type === PropertyTypeEnum.BOARDING) {
-      // For BOARDING
-      const roomTypeEntries = this.transformBoardingToRoomTypes(boardingProps, filters);
+      // For BOARDING only
+      const roomTypeEntries = this.transformBoardingToRoomTypes(
+        boardingProps,
+        filters,
+      );
       dataToProcess = roomTypeEntries;
-    } else {
-      // For HOUSING/APARTMENT 
+    } else if (filters.type) {
+      // For specific HOUSING/APARTMENT type
       dataToProcess = nonBoardingProps;
+    } else {
+      // No type filter - merge both boarding and non-boarding
+      const roomTypeEntries = this.transformBoardingToRoomTypes(
+        boardingProps,
+        filters,
+      );
+      dataToProcess = [...nonBoardingProps, ...roomTypeEntries];
     }
 
     // Apply sorting
@@ -556,7 +582,9 @@ export class PropertyService {
 
       // Check if property is BOARDING type
       if (property.type !== PropertyTypeEnum.BOARDING) {
-        throw new BadRequestException(PROPERTY_ERRORS.PROPERTY_NOT_OWNED_BY_USER);
+        throw new BadRequestException(
+          PROPERTY_ERRORS.PROPERTY_NOT_OWNED_BY_USER,
+        );
       }
 
       // Ownership check (landlord must be the caller)
@@ -614,7 +642,9 @@ export class PropertyService {
         });
 
         if (!existingRoomType) {
-          throw new NotFoundException(PROPERTY_ERRORS.TARGET_ROOM_TYPE_NOT_FOUND);
+          throw new NotFoundException(
+            PROPERTY_ERRORS.TARGET_ROOM_TYPE_NOT_FOUND,
+          );
         }
 
         // Determine if targetRoomType is associated with the same property by
@@ -699,7 +729,9 @@ export class PropertyService {
 
       // Bước 2: Kiểm tra xem property có phải loại APARTMENT không
       if (property.type !== PropertyTypeEnum.APARTMENT) {
-        throw new BadRequestException(PROPERTY_ERRORS.PROPERTY_NOT_OWNED_BY_USER);
+        throw new BadRequestException(
+          PROPERTY_ERRORS.PROPERTY_NOT_OWNED_BY_USER,
+        );
       }
 
       // Bước 2.5: Kiểm tra xem property đang hiển thị (isVisible = true) không
@@ -909,8 +941,8 @@ export class PropertyService {
     const nonBoardingQB = this.propertyRepository
       .createQueryBuilder('property')
       .leftJoinAndSelect('property.landlord', 'landlord')
-      .where('property.type != :boardingType', { 
-        boardingType: PropertyTypeEnum.BOARDING 
+      .where('property.type != :boardingType', {
+        boardingType: PropertyTypeEnum.BOARDING,
       })
       .andWhere('property.isApproved = :isApproved', { isApproved: true })
       .andWhere('property.isVisible = :isVisible', { isVisible: true });
@@ -924,8 +956,8 @@ export class PropertyService {
       .leftJoinAndSelect('property.rooms', 'rooms')
       .leftJoinAndSelect('rooms.roomType', 'roomType')
       .leftJoinAndSelect('property.landlord', 'landlord')
-      .where('property.type = :boardingType', { 
-        boardingType: PropertyTypeEnum.BOARDING 
+      .where('property.type = :boardingType', {
+        boardingType: PropertyTypeEnum.BOARDING,
       })
       .andWhere('property.isApproved = :isApproved', { isApproved: true });
 
@@ -939,7 +971,10 @@ export class PropertyService {
     ]);
 
     // Transform boarding properties to RoomTypeEntry format
-    const roomTypeEntries = this.transformBoardingToRoomTypes(boardingProps, filters);
+    const roomTypeEntries = this.transformBoardingToRoomTypes(
+      boardingProps,
+      filters,
+    );
 
     // Combine results
     let combined: Array<Property | RoomTypeEntry> = [
@@ -997,7 +1032,9 @@ export class PropertyService {
     filters: Partial<FilterPropertyDto | FilterPropertyWithUrlDto>,
   ): void {
     if (filters.fromPrice !== undefined) {
-      qb.andWhere('property.price >= :fromPrice', { fromPrice: filters.fromPrice });
+      qb.andWhere('property.price >= :fromPrice', {
+        fromPrice: filters.fromPrice,
+      });
     }
     if (filters.toPrice !== undefined) {
       qb.andWhere('property.price <= :toPrice', { toPrice: filters.toPrice });
@@ -1009,16 +1046,24 @@ export class PropertyService {
       qb.andWhere('property.area <= :toArea', { toArea: filters.toArea });
     }
     if (filters.bedrooms !== undefined) {
-      qb.andWhere('property.bedrooms = :bedrooms', { bedrooms: filters.bedrooms });
+      qb.andWhere('property.bedrooms = :bedrooms', {
+        bedrooms: filters.bedrooms,
+      });
     }
     if (filters.bathrooms !== undefined) {
-      qb.andWhere('property.bathrooms = :bathrooms', { bathrooms: filters.bathrooms });
+      qb.andWhere('property.bathrooms = :bathrooms', {
+        bathrooms: filters.bathrooms,
+      });
     }
     if (filters.furnishing) {
-      qb.andWhere('property.furnishing = :furnishing', { furnishing: filters.furnishing });
+      qb.andWhere('property.furnishing = :furnishing', {
+        furnishing: filters.furnishing,
+      });
     }
     if (filters.province) {
-      qb.andWhere('property.province = :province', { province: filters.province });
+      qb.andWhere('property.province = :province', {
+        province: filters.province,
+      });
     }
     if (filters.ward) {
       qb.andWhere('property.ward = :ward', { ward: filters.ward });
@@ -1027,7 +1072,9 @@ export class PropertyService {
       qb.andWhere('property.type = :type', { type: filters.type });
     }
     if ('isApproved' in filters && typeof filters.isApproved === 'boolean') {
-      qb.andWhere('property.isApproved = :isApproved', { isApproved: filters.isApproved });
+      qb.andWhere('property.isApproved = :isApproved', {
+        isApproved: filters.isApproved,
+      });
     }
     if (filters.q) {
       qb.andWhere(
@@ -1045,7 +1092,9 @@ export class PropertyService {
     filters: Partial<FilterPropertyDto | FilterPropertyWithUrlDto>,
   ): void {
     if (filters.fromPrice !== undefined) {
-      qb.andWhere('roomType.price >= :fromPrice', { fromPrice: filters.fromPrice });
+      qb.andWhere('roomType.price >= :fromPrice', {
+        fromPrice: filters.fromPrice,
+      });
     }
     if (filters.toPrice !== undefined) {
       qb.andWhere('roomType.price <= :toPrice', { toPrice: filters.toPrice });
@@ -1057,22 +1106,32 @@ export class PropertyService {
       qb.andWhere('roomType.area <= :toArea', { toArea: filters.toArea });
     }
     if (filters.bedrooms !== undefined) {
-      qb.andWhere('roomType.bedrooms = :bedrooms', { bedrooms: filters.bedrooms });
+      qb.andWhere('roomType.bedrooms = :bedrooms', {
+        bedrooms: filters.bedrooms,
+      });
     }
     if (filters.bathrooms !== undefined) {
-      qb.andWhere('roomType.bathrooms = :bathrooms', { bathrooms: filters.bathrooms });
+      qb.andWhere('roomType.bathrooms = :bathrooms', {
+        bathrooms: filters.bathrooms,
+      });
     }
     if (filters.furnishing) {
-      qb.andWhere('roomType.furnishing = :furnishing', { furnishing: filters.furnishing });
+      qb.andWhere('roomType.furnishing = :furnishing', {
+        furnishing: filters.furnishing,
+      });
     }
     if (filters.province) {
-      qb.andWhere('property.province = :province', { province: filters.province });
+      qb.andWhere('property.province = :province', {
+        province: filters.province,
+      });
     }
     if (filters.ward) {
       qb.andWhere('property.ward = :ward', { ward: filters.ward });
     }
     if ('isApproved' in filters && typeof filters.isApproved === 'boolean') {
-      qb.andWhere('property.isApproved = :isApproved', { isApproved: filters.isApproved });
+      qb.andWhere('property.isApproved = :isApproved', {
+        isApproved: filters.isApproved,
+      });
     }
     if (filters.q) {
       qb.andWhere(
@@ -1114,13 +1173,23 @@ export class PropertyService {
         const price = Number(roomType.price) || 0;
         const area = Number(roomType.area) || 0;
 
-        if (filters.fromPrice !== undefined && price < filters.fromPrice) continue;
+        if (filters.fromPrice !== undefined && price < filters.fromPrice)
+          continue;
         if (filters.toPrice !== undefined && price > filters.toPrice) continue;
         if (filters.fromArea !== undefined && area < filters.fromArea) continue;
         if (filters.toArea !== undefined && area > filters.toArea) continue;
-        if (filters.bedrooms !== undefined && roomType.bedrooms !== filters.bedrooms) continue;
-        if (filters.bathrooms !== undefined && roomType.bathrooms !== filters.bathrooms) continue;
-        if (filters.furnishing && roomType.furnishing !== filters.furnishing) continue;
+        if (
+          filters.bedrooms !== undefined &&
+          roomType.bedrooms !== filters.bedrooms
+        )
+          continue;
+        if (
+          filters.bathrooms !== undefined &&
+          roomType.bathrooms !== filters.bathrooms
+        )
+          continue;
+        if (filters.furnishing && roomType.furnishing !== filters.furnishing)
+          continue;
 
         const entry: RoomTypeEntry = {
           id: roomType.id,
@@ -1190,36 +1259,44 @@ export class PropertyService {
       // Get values based on sortBy field
       if (sortBy === 'price') {
         valueA =
-          (a as Property).type && (a as Property).type !== PropertyTypeEnum.BOARDING
-            ? (a as Property).price ?? 0
-            : (a as RoomTypeEntry).price ?? 0;
+          (a as Property).type &&
+          (a as Property).type !== PropertyTypeEnum.BOARDING
+            ? ((a as Property).price ?? 0)
+            : ((a as RoomTypeEntry).price ?? 0);
         valueB =
-          (b as Property).type && (b as Property).type !== PropertyTypeEnum.BOARDING
-            ? (b as Property).price ?? 0
-            : (b as RoomTypeEntry).price ?? 0;
+          (b as Property).type &&
+          (b as Property).type !== PropertyTypeEnum.BOARDING
+            ? ((b as Property).price ?? 0)
+            : ((b as RoomTypeEntry).price ?? 0);
       } else if (sortBy === 'area') {
         valueA =
-          (a as Property).type && (a as Property).type !== PropertyTypeEnum.BOARDING
-            ? (a as Property).area ?? 0
-            : (a as RoomTypeEntry).area ?? 0;
+          (a as Property).type &&
+          (a as Property).type !== PropertyTypeEnum.BOARDING
+            ? ((a as Property).area ?? 0)
+            : ((a as RoomTypeEntry).area ?? 0);
         valueB =
-          (b as Property).type && (b as Property).type !== PropertyTypeEnum.BOARDING
-            ? (b as Property).area ?? 0
-            : (b as RoomTypeEntry).area ?? 0;
+          (b as Property).type &&
+          (b as Property).type !== PropertyTypeEnum.BOARDING
+            ? ((b as Property).area ?? 0)
+            : ((b as RoomTypeEntry).area ?? 0);
       } else if (sortBy === 'createdAt') {
         valueA =
-          (a as Property).type && (a as Property).type !== PropertyTypeEnum.BOARDING
+          (a as Property).type &&
+          (a as Property).type !== PropertyTypeEnum.BOARDING
             ? (a as Property).createdAt
             : (a as RoomTypeEntry).property?.createdAt;
         valueB =
-          (b as Property).type && (b as Property).type !== PropertyTypeEnum.BOARDING
+          (b as Property).type &&
+          (b as Property).type !== PropertyTypeEnum.BOARDING
             ? (b as Property).createdAt
             : (b as RoomTypeEntry).property?.createdAt;
       }
 
       // Convert to comparable values
-      const compareA = valueA instanceof Date ? valueA.getTime() : (valueA ?? 0);
-      const compareB = valueB instanceof Date ? valueB.getTime() : (valueB ?? 0);
+      const compareA =
+        valueA instanceof Date ? valueA.getTime() : (valueA ?? 0);
+      const compareB =
+        valueB instanceof Date ? valueB.getTime() : (valueB ?? 0);
 
       // Apply sort order
       const order = sortOrder === 'desc' ? -1 : 1;
