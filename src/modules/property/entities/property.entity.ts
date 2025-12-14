@@ -79,11 +79,11 @@ export class Property {
   @Column({ nullable: true })
   mapLocation?: string;
 
-  @Column({ default: true })
-  isVisible: boolean;
-
   @Column({ default: false })
   isApproved: boolean;
+
+  @Column({ default: false })
+  isVisible: boolean;
 
   @Column({ nullable: true })
   heroImage?: string;
