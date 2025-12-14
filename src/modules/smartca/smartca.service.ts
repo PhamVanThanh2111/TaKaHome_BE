@@ -186,8 +186,8 @@ export class SmartCAService {
         pdfBuffer,
         signatureIndex = 0,
         userIdOverride,
-        intervalMs = 500,
-        timeoutMs = 30000,
+        intervalMs = 100,
+        timeoutMs = 6000,
         reason = 'Digitally signed',
         location = 'Vietnam',
         contactInfo = '',
@@ -601,8 +601,8 @@ export class SmartCAService {
     // 9) Poll tới khi có signature_value (GIỮ NGUYÊN)
     const poll = await this.pollSmartCASignResult({
       transactionId,
-      intervalMs: options.intervalMs ?? 500,
-      timeoutMs: options.timeoutMs ?? 30000,
+      intervalMs: options.intervalMs ?? 100,
+      timeoutMs: options.timeoutMs ?? 6000,
     });
 
     // Check for polling errors first
@@ -1300,8 +1300,8 @@ export class SmartCAService {
     intervalMs?: number;
     timeoutMs?: number;
   }) {
-    const intervalMs = opts.intervalMs ?? 500;
-    const timeoutMs = opts.timeoutMs ?? 30000;
+    const intervalMs = opts.intervalMs ?? 100;
+    const timeoutMs = opts.timeoutMs ?? 6000;
     const startedAt = Date.now();
 
     while (true) {
