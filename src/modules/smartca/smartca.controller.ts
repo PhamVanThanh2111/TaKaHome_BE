@@ -169,8 +169,8 @@ export class SmartCAController {
       properties: {
         pdf: { type: 'string', format: 'binary' },
         signatureIndex: { type: 'integer', default: 0 },
-        intervalMs: { type: 'integer', default: 100 },
-        timeoutMs: { type: 'integer', default: 6000 },
+        intervalMs: { type: 'integer', default: 1000 },
+        timeoutMs: { type: 'integer', default: 60000 },
         userIdOverride: { type: 'string' },
         contractId: {
           type: 'string',
@@ -203,10 +203,10 @@ export class SmartCAController {
       : 0;
     const intervalMs = Number.isFinite(Number(intervalMsRaw))
       ? Number(intervalMsRaw)
-      : 100;
+      : 1000;
     const timeoutMs = Number.isFinite(Number(timeoutMsRaw))
       ? Number(timeoutMsRaw)
-      : 6000;
+      : 60000;
 
     try {
       const finalOption = (signingOption || 'VNPT').toUpperCase();
@@ -563,8 +563,8 @@ export class SmartCAController {
           type: 'string',
           description: 'Contract ID for docId generation',
         },
-        intervalMs: { type: 'integer', default: 100 },
-        timeoutMs: { type: 'integer', default: 6000 },
+        intervalMs: { type: 'integer', default: 1000 },
+        timeoutMs: { type: 'integer', default: 60000 },
         reason: { type: 'string', default: 'Digitally signed' },
         location: { type: 'string', default: 'Vietnam' },
         contactInfo: { type: 'string' },
@@ -612,8 +612,8 @@ export class SmartCAController {
         signatureIndex: body.signatureIndex ? Number(body.signatureIndex) : 0,
         userIdOverride: body.userIdOverride?.trim() || undefined,
         contractId: body.contractId?.trim() || undefined,
-        intervalMs: body.intervalMs ? Number(body.intervalMs) : 100,
-        timeoutMs: body.timeoutMs ? Number(body.timeoutMs) : 6000,
+        intervalMs: body.intervalMs ? Number(body.intervalMs) : 1000,
+        timeoutMs: body.timeoutMs ? Number(body.timeoutMs) : 60000,
         reason: body.reason?.trim() || 'Digitally signed',
         location: body.location?.trim() || 'Vietnam',
         contactInfo: body.contactInfo?.trim() || '',
