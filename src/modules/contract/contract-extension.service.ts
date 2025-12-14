@@ -629,8 +629,8 @@ export class ContractExtensionService {
             ? userId
             : landlord?.CCCD,
         contractId: extension.contract.id,
-        intervalMs: 500,
-        timeoutMs: 30000,
+        intervalMs: 100,
+        timeoutMs: 6000,
         reason: 'Contract Extension Landlord Signature',
         location: 'Vietnam',
         contactInfo: '',
@@ -756,8 +756,8 @@ export class ContractExtensionService {
             ? userId
             : tenant?.CCCD,
         contractId: extension.contract.id,
-        intervalMs: 500,
-        timeoutMs: 30000,
+        intervalMs: 100,
+        timeoutMs: 6000,
         reason: 'Contract Extension Tenant Signature',
         location: 'Vietnam',
         contactInfo: '',
