@@ -48,6 +48,10 @@ export class UserService {
     if (!user) {
       throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
     }
+    if (user.account) {
+      user.account.password = '';
+      user.account.resetPasswordToken = '';
+    }
     return new ResponseCommon(200, 'SUCCESS', user);
   }
 
@@ -125,6 +129,11 @@ export class UserService {
         where: { id: userId },
         relations: ['account'],
       });
+
+      if (updatedUser && updatedUser.account) {
+        updatedUser.account.password = '';
+        updatedUser.account.resetPasswordToken = '';
+      }
 
       return new ResponseCommon(200, 'Avatar uploaded successfully', {
         user: updatedUser,
