@@ -458,10 +458,7 @@ export class ContractTerminationRequestService {
 
     // Kiểm tra số dư hiện tại phải bằng với số tiền cọc ban đầu (chưa bị trừ)
     if (currentBalance < initialDeposit) {
-      const errorMessage =
-        `${CONTRACT_ERRORS.TERMINATION_DEPOSIT_INSUFFICIENT}: ` +
-        `Số dư hiện tại ${Number(currentBalance).toLocaleString('vi-VN')} VND, ` +
-        `yêu cầu ${Number(initialDeposit).toLocaleString('vi-VN')} VND`;
+      const errorMessage = CONTRACT_ERRORS.TERMINATION_DEPOSIT_INSUFFICIENT;
       throw new BadRequestException(errorMessage);
     }
 
