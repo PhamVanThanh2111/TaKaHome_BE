@@ -19,6 +19,9 @@ import { RespondTerminationRequestDto } from './dto/respond-termination-request.
 import { ResponseCommon } from 'src/common/dto/response.dto';
 import { ContractStatusEnum } from '../common/enums/contract-status.enum';
 import { CONTRACT_ERRORS } from 'src/common/constants/error-messages.constant';
+import { EscrowService } from '../escrow/escrow.service';
+import { BlockchainService } from '../blockchain/blockchain.service';
+import { Escrow } from '../escrow/entities/escrow.entity';
 
 @Injectable()
 export class ContractTerminationRequestService {
@@ -29,6 +32,10 @@ export class ContractTerminationRequestService {
     private terminationRequestRepository: Repository<ContractTerminationRequest>,
     @InjectRepository(Contract)
     private contractRepository: Repository<Contract>,
+    @InjectRepository(Escrow)
+    private escrowRepository: Repository<Escrow>,
+    private escrowService: EscrowService,
+    private blockchainService: BlockchainService,
   ) {}
 
   /**
@@ -85,7 +92,10 @@ export class ContractTerminationRequestService {
     // 5. Validate requestedEndMonth format và logic
     this.validateRequestedEndMonth(dto.requestedEndMonth, contract.endDate);
 
-    // 6. Tạo yêu cầu hủy hợp đồng
+    // 6. Kiểm tra số dư tiền cọc của người đề xuất
+    await this.validateRequesterDepositBalance(contract.id, isTenant);
+
+    // 7. Tạo yêu cầu hủy hợp đồng
     const terminationRequest = this.terminationRequestRepository.create({
       contractId: dto.contractId,
       requestedById: userId,
@@ -97,9 +107,8 @@ export class ContractTerminationRequestService {
       status: TerminationRequestStatus.PENDING,
     });
 
-    const saved = await this.terminationRequestRepository.save(
-      terminationRequest,
-    );
+    const saved =
+      await this.terminationRequestRepository.save(terminationRequest);
 
     this.logger.log(
       `Yêu cầu hủy hợp đồng được tạo: ${saved.id} cho hợp đồng ${dto.contractId}`,
@@ -187,7 +196,9 @@ export class ContractTerminationRequestService {
     });
 
     if (!request) {
-      throw new NotFoundException(CONTRACT_ERRORS.TERMINATION_REQUEST_NOT_FOUND);
+      throw new NotFoundException(
+        CONTRACT_ERRORS.TERMINATION_REQUEST_NOT_FOUND,
+      );
     }
 
     // 2. Kiểm tra trạng thái
@@ -229,8 +240,12 @@ export class ContractTerminationRequestService {
 
     const updated = await this.terminationRequestRepository.save(request);
 
-    // 5. Nếu được approve, cập nhật endDate của hợp đồng
+    // 5. Nếu được approve, xử lý penalty và cập nhật endDate của hợp đồng
     if (dto.status === TerminationRequestStatus.APPROVED) {
+      // 5.1. Trừ 30% tiền cọc của bên đề xuất
+      await this.applyEarlyTerminationPenalty(request);
+
+      // 5.2. Cập nhật endDate của contract
       // Chuyển đổi requestedEndMonth (format: 'YYYY-MM') thành endDate
       // Giữ nguyên ngày (day) từ endDate hiện tại, chỉ thay đổi tháng/năm
       // Nếu ngày không tồn tại trong tháng mới (ví dụ: 31/01 -> 28/02), lấy ngày cuối cùng của tháng đó
@@ -244,15 +259,17 @@ export class ContractTerminationRequestService {
 
       // Tính số ngày trong tháng được yêu cầu
       // Tạo date cho ngày đầu tiên của tháng tiếp theo, rồi trừ 1 ngày để lấy ngày cuối cùng
-      const lastDayOfRequestedMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      const lastDayOfRequestedMonth = new Date(
+        Date.UTC(year, month, 0),
+      ).getUTCDate();
 
       // Nếu ngày hiện tại vượt quá số ngày của tháng mới, lấy ngày cuối cùng của tháng đó
       const finalDay = Math.min(dayOfMonth, lastDayOfRequestedMonth);
 
       // Tạo Date object với ngày đã điều chỉnh
-      const newEndDate = new Date(Date.UTC(year, month - 1, finalDay, 0, 0, 0, 0));
-
-      // Cập nhật endDate của contract
+      const newEndDate = new Date(
+        Date.UTC(year, month - 1, finalDay, 0, 0, 0, 0),
+      );
       request.contract.endDate = newEndDate;
       await this.contractRepository.save(request.contract);
 
@@ -283,7 +300,9 @@ export class ContractTerminationRequestService {
     });
 
     if (!request) {
-      throw new NotFoundException(CONTRACT_ERRORS.TERMINATION_REQUEST_NOT_FOUND);
+      throw new NotFoundException(
+        CONTRACT_ERRORS.TERMINATION_REQUEST_NOT_FOUND,
+      );
     }
 
     if (request.requestedById !== userId) {
@@ -301,11 +320,7 @@ export class ContractTerminationRequestService {
     request.status = TerminationRequestStatus.CANCELLED;
     const updated = await this.terminationRequestRepository.save(request);
 
-    return new ResponseCommon(
-      200,
-      'Đã hủy yêu cầu hủy hợp đồng',
-      updated,
-    );
+    return new ResponseCommon(200, 'Đã hủy yêu cầu hủy hợp đồng', updated);
   }
 
   /**
@@ -324,10 +339,7 @@ export class ContractTerminationRequestService {
       throw new NotFoundException(CONTRACT_ERRORS.CONTRACT_NOT_FOUND);
     }
 
-    if (
-      contract.tenant.id !== userId &&
-      contract.landlord.id !== userId
-    ) {
+    if (contract.tenant.id !== userId && contract.landlord.id !== userId) {
       throw new ForbiddenException(CONTRACT_ERRORS.CONTRACT_ACCESS_FORBIDDEN);
     }
 
@@ -386,13 +398,10 @@ export class ContractTerminationRequestService {
       throw new NotFoundException(CONTRACT_ERRORS.CONTRACT_NOT_FOUND);
     }
 
-    if (
-      contract.tenant.id !== userId &&
-      contract.landlord.id !== userId
-    ) {
+    if (contract.tenant.id !== userId && contract.landlord.id !== userId) {
       throw new ForbiddenException(CONTRACT_ERRORS.CONTRACT_ACCESS_FORBIDDEN);
     }
-    
+
     const request = await this.terminationRequestRepository.findOne({
       where: {
         contractId,
@@ -403,8 +412,207 @@ export class ContractTerminationRequestService {
 
     return new ResponseCommon(
       200,
-      request ? 'Tìm thấy yêu cầu hủy hợp đồng' : 'Không có yêu cầu nào đang chờ xử lý',
+      request
+        ? 'Tìm thấy yêu cầu hủy hợp đồng'
+        : 'Không có yêu cầu nào đang chờ xử lý',
       request,
     );
+  }
+
+  /**
+   * Kiểm tra số dư tiền cọc của người đề xuất hủy hợp đồng
+   * Người đề xuất phải có đủ số dư cọc ban đầu (chưa bị trừ) để có thể tạo yêu cầu hủy
+   */
+  private async validateRequesterDepositBalance(
+    contractId: string,
+    isTenant: boolean,
+  ): Promise<number> {
+    // Lấy thông tin escrow account
+    const escrowAccount = await this.escrowRepository.findOne({
+      where: { contractId },
+      relations: ['contract'],
+    });
+
+    if (!escrowAccount) {
+      throw new BadRequestException(
+        CONTRACT_ERRORS.TERMINATION_ESCROW_NOT_FOUND,
+      );
+    }
+
+    // Lấy số dư tiền cọc hiện tại của bên đề xuất
+    const currentBalance = isTenant
+      ? BigInt(escrowAccount.currentBalanceTenant || '0')
+      : BigInt(escrowAccount.currentBalanceLandlord || '0');
+
+    if (currentBalance === BigInt(0)) {
+      throw new BadRequestException(
+        CONTRACT_ERRORS.TERMINATION_DEPOSIT_BALANCE_ZERO,
+      );
+    }
+
+    // Lấy số tiền cọc ban đầu đã nộp từ escrow transactions
+    const initialDeposit = await this.getInitialDepositAmount(
+      escrowAccount.id,
+      isTenant,
+    );
+
+    // Kiểm tra số dư hiện tại phải bằng với số tiền cọc ban đầu (chưa bị trừ)
+    if (currentBalance < initialDeposit) {
+      const errorMessage = CONTRACT_ERRORS.TERMINATION_DEPOSIT_INSUFFICIENT;
+      throw new BadRequestException(errorMessage);
+    }
+
+    // Tính 30% tiền cọc ban đầu
+    const penaltyAmount = (initialDeposit * BigInt(30)) / BigInt(100);
+
+    this.logger.log(
+      `✅ Người đề xuất có đủ số dư tiền cọc: ${Number(currentBalance).toLocaleString('vi-VN')} VND ` +
+        `(bằng với số tiền cọc ban đầu ${Number(initialDeposit).toLocaleString('vi-VN')} VND), ` +
+        `sẽ bị trừ ${Number(penaltyAmount).toLocaleString('vi-VN')} VND (30%)`,
+    );
+
+    return Number(penaltyAmount);
+  }
+
+  /**
+   * Lấy số tiền cọc ban đầu đã nộp từ escrow transactions
+   */
+  private async getInitialDepositAmount(
+    escrowAccountId: string,
+    isTenant: boolean,
+  ): Promise<bigint> {
+    const escrowAccount = await this.escrowRepository.findOne({
+      where: { id: escrowAccountId },
+      relations: ['transactions'],
+    });
+
+    if (!escrowAccount || !escrowAccount.transactions) {
+      return BigInt(0);
+    }
+
+    // Tìm transaction DEPOSIT đầu tiên của party
+    const depositTransaction = escrowAccount.transactions.find(
+      (txn) =>
+        txn.type === 'DEPOSIT' &&
+        txn.direction === 'CREDIT' &&
+        txn.status === 'COMPLETED',
+    );
+
+    if (!depositTransaction) {
+      // Nếu không tìm thấy transaction, lấy số dư hiện tại
+      return isTenant
+        ? BigInt(escrowAccount.currentBalanceTenant || '0')
+        : BigInt(escrowAccount.currentBalanceLandlord || '0');
+    }
+
+    return BigInt(depositTransaction.amount || '0');
+  }
+
+  /**
+   * Áp dụng phạt 30% tiền cọc cho bên đề xuất hủy hợp đồng khi được approve
+   */
+  private async applyEarlyTerminationPenalty(
+    request: ContractTerminationRequest,
+  ): Promise<void> {
+    try {
+      const contract = request.contract;
+      const isTenantRequester =
+        request.requestedByRole === TerminationRequestedBy.TENANT;
+
+      // Lấy escrow account
+      const escrowAccount = await this.escrowRepository.findOne({
+        where: { contractId: contract.id },
+        relations: ['contract', 'contract.tenant', 'contract.landlord'],
+      });
+
+      if (!escrowAccount) {
+        throw new Error(CONTRACT_ERRORS.TERMINATION_ESCROW_ACCOUNT_NOT_FOUND);
+      }
+
+      // Lấy số dư hiện tại của bên đề xuất
+      const requesterBalance = isTenantRequester
+        ? BigInt(escrowAccount.currentBalanceTenant || '0')
+        : BigInt(escrowAccount.currentBalanceLandlord || '0');
+
+      // Lấy số tiền cọc ban đầu để tính penalty
+      const initialDeposit = await this.getInitialDepositAmount(
+        escrowAccount.id,
+        isTenantRequester,
+      );
+
+      // Tính toán số tiền phạt (30% tiền cọc ban đầu)
+      const penaltyAmountBigInt = (initialDeposit * BigInt(30)) / BigInt(100);
+      const penaltyAmount = Number(penaltyAmountBigInt);
+
+      // Trừ tiền cọc từ escrow
+      const party = isTenantRequester ? 'TENANT' : 'LANDLORD';
+      await this.escrowService.deduct(
+        escrowAccount.id,
+        penaltyAmount,
+        party,
+        `Phạt hủy hợp đồng trước hạn: 30% tiền cọc (${penaltyAmount.toLocaleString('vi-VN')} VND)`,
+      );
+
+      this.logger.log(
+        `💰 Đã trừ ${penaltyAmount.toLocaleString('vi-VN')} VND (30% tiền cọc) từ ${party} cho yêu cầu hủy hợp đồng ${request.id}`,
+      );
+
+      // Record penalty lên blockchain
+      await this.recordPenaltyOnBlockchain(
+        contract,
+        isTenantRequester,
+        penaltyAmount,
+        request.id,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Lỗi khi áp dụng phạt hủy hợp đồng trước hạn:`,
+        error,
+      );
+      throw new BadRequestException(
+        `${CONTRACT_ERRORS.TERMINATION_PENALTY_APPLICATION_FAILED}: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Record penalty lên blockchain
+   */
+  private async recordPenaltyOnBlockchain(
+    contract: Contract,
+    isTenantRequester: boolean,
+    penaltyAmount: number,
+    requestId: string,
+  ): Promise<void> {
+    try {
+      if (!contract.contractCode) {
+        this.logger.warn(
+          `⚠️ Contract ${contract.id} không có contractCode, bỏ qua việc record penalty lên blockchain`,
+        );
+        return;
+      }
+
+      const party = isTenantRequester ? 'tenant' : 'landlord';
+      const fabricUser = {
+        userId: 'system',
+        orgName: 'OrgProp',
+        mspId: 'orgMSP',
+      };
+
+      await this.blockchainService.recordPenalty(
+        contract.contractCode,
+        party,
+        penaltyAmount.toString(),
+        `Phạt hủy hợp đồng trước hạn - Yêu cầu: ${requestId}`,
+        fabricUser,
+      );
+
+      this.logger.log(
+        `✅ Đã record penalty ${penaltyAmount.toLocaleString('vi-VN')} VND lên blockchain cho ${party} - Contract: ${contract.contractCode}`,
+      );
+    } catch (error) {
+      this.logger.error(`❌ Lỗi khi record penalty lên blockchain:`, error);
+      // Không throw error để không ảnh hưởng đến luồng chính
+    }
   }
 }
