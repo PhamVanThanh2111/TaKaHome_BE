@@ -30,6 +30,13 @@ export class UserService {
 
   async findAll(): Promise<ResponseCommon> {
     const users = await this.userRepository.find({ relations: ['account'] });
+    // bởi vì lấy thêm quan hệ account nên sẽ trả về cả thông tin account, trong account có chứa trường password, thông tin nhạy cảm nên cần loại bỏ trường password trước khi trả về
+    users.forEach((user) => {
+      if (user.account) {
+        user.account.password = '';
+        user.account.resetPasswordToken = '';
+      }
+    });
     return new ResponseCommon(200, 'SUCCESS', users);
   }
 
@@ -40,6 +47,10 @@ export class UserService {
     });
     if (!user) {
       throw new NotFoundException(USER_ERRORS.USER_NOT_FOUND);
+    }
+    if (user.account) {
+      user.account.password = '';
+      user.account.resetPasswordToken = '';
     }
     return new ResponseCommon(200, 'SUCCESS', user);
   }
@@ -118,6 +129,11 @@ export class UserService {
         where: { id: userId },
         relations: ['account'],
       });
+
+      if (updatedUser && updatedUser.account) {
+        updatedUser.account.password = '';
+        updatedUser.account.resetPasswordToken = '';
+      }
 
       return new ResponseCommon(200, 'Avatar uploaded successfully', {
         user: updatedUser,
