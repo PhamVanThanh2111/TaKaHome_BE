@@ -454,14 +454,23 @@ export class ContractService {
         `Failed to generate presigned URL for contract ${contractId}:`,
         error,
       );
-      throw new BadRequestException(CONTRACT_ERRORS.PRESIGNED_URL_GENERATION_FAILED);
+      throw new BadRequestException(
+        CONTRACT_ERRORS.PRESIGNED_URL_GENERATION_FAILED,
+      );
     }
   }
 
   async findRawById(id: string): Promise<Contract | null> {
     return this.contractRepository.findOne({
       where: { id },
-      relations: ['tenant', 'landlord', 'property', 'extensions'],
+      relations: [
+        'tenant',
+        'landlord',
+        'property',
+        'room',
+        'room.roomType',
+        'extensions',
+      ],
     });
   }
 
