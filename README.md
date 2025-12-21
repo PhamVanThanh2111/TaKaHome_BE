@@ -1,4 +1,6 @@
 <a href="https://github.com/Kha03/taka-home" target="_blank">Link FE</a>
+<a href="https://github.com/Kha03/fabric-renthome" target="_blank">Config blockchain network</a>
+
 <p align="center">
   <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
 </p>
